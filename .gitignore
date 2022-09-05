@@ -1,0 +1,8 @@
+.vscode/**
+*.d
+*.o
+obj/**
+tubus
+tubus.exe
+config.json
+build/**
