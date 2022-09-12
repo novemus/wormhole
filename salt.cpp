@@ -1,4 +1,5 @@
 #include <map>
+#include <set>
 #include <list>
 #include <iostream>
 #include <thread>
@@ -234,37 +235,44 @@ public:
     }
 };
 
+const uint8_t SALT_SIGN = 0x99;
+
 class salt
 {
     struct packet : public buffer
     {
         enum flag 
         {
-            con = 0x01,
-            sht = 0x02,
-            trn = 0x04,
+            syn = 0x01,
+            fin = 0x02,
+            psh = 0x04,
             ack = 0x08
         };
 
-        packet() : buffer(1432) {}
+        packet() : buffer(10000)
+        {
+            memset(data(), 0, 16);
+            set_byte(0, SALT_SIGN);
+            set_byte(1, 0x10);
+        }
 
-        uint64_t salt() { return get_qword(0); }
-        uint8_t sign() { return get_byte(8); }
-        uint8_t flags() { return get_byte(9); }
-        uint32_t number() { return get_dword(10); }
-        uint16_t check_sum() { return get_word(14); }
+        uint8_t sign() { return get_byte(0); }
+        uint8_t version() { return get_byte(1); }
+        uint32_t pin() { return get_dword(2); }
+        uint16_t flags() { return get_word(6); }
+        uint64_t cursor() { return get_qword(8); }
+        void set_pin(uint32_t v) { return set_dword(2, v); }
+        bool has_flag(flag v) { return flags() & v; }
+        void set_flag(uint16_t v) { set_word(6, flags() | v); }
+        void set_cursor(uint64_t v) { return set_qword(8, v); }
         buffer payload() const { return buffer::push_head(16); }
-
-        static std::shared_ptr<packet> make_keepalive();
-        static std::shared_ptr<packet> make_empty();
     };
 
-    class udp
+    class udp_channel
     {
-        boost::asio::io_service        m_io;
+        boost::asio::io_context        m_io;
         boost::asio::ip::udp::socket   m_socket;
         boost::asio::ip::udp::endpoint m_peer;
-        uint64_t                       m_mask;
 
         template<typename io_call> size_t exec(const io_call& invoke)
         {
@@ -315,38 +323,20 @@ class salt
             return *resolver.resolve(query);
         }
 
-        std::shared_ptr<packet> make_opaque(std::shared_ptr<packet> pack)
-        {
-
-        }
-
-        std::shared_ptr<packet> make_transparent(std::shared_ptr<packet> pack)
-        {
-
-        }
-
     public:
 
-        udp(const endpoint& bind, const endpoint& peer, uint64_t mask)
+        udp_channel(const endpoint& bind, const endpoint& peer)
             : m_socket(m_io)
             , m_peer(resolve_endpoint(peer))
-            , m_mask(mask)
         {
             boost::asio::ip::udp::endpoint local = resolve_endpoint(bind);
 
             m_socket.open(local.protocol());
-
-            static const size_t SOCKET_BUFFER_SIZE = 1048576;
-
             m_socket.non_blocking(true);
-            m_socket.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
-            m_socket.set_option(boost::asio::socket_base::send_buffer_size(SOCKET_BUFFER_SIZE));
-            m_socket.set_option(boost::asio::socket_base::receive_buffer_size(SOCKET_BUFFER_SIZE));
-
             m_socket.bind(local);
         }
 
-        ~udp()
+        ~udp_channel()
         {
             if (m_socket.is_open())
             {
@@ -356,37 +346,28 @@ class salt
             }
         }
 
-        void recv(std::shared_ptr<packet> pack)
+        void receive(std::shared_ptr<packet> pack)
         {
             auto timer = [start = boost::posix_time::microsec_clock::universal_time()]()
             {
                 return boost::posix_time::microsec_clock::universal_time() - start;
             };
 
-            auto in = packet::make_empty();
             while (timer().total_seconds() < 30)
             {
                 boost::asio::ip::udp::endpoint src;
                 size_t size = exec([&](const io_callback& callback)
                 {
-                    m_socket.async_receive_from(boost::asio::buffer(in->data(), in->size()), src, callback);
+                    m_socket.async_receive_from(boost::asio::buffer(pack->data(), pack->size()), src, callback);
                 });
 
                 if (src == m_peer)
                 {
-                    in->move_tail(in->size() - size, true);
-                    in = make_transparent(in);
+                    if (size > pack->size())
+                        throw std::runtime_error("too small buffer");
 
-                    if (in)
-                    {
-                        if (size > pack->size())
-                            throw std::runtime_error("too small buffer");
-
-                        std::memcmp(pack->data(), in->data(), size);
-                        pack->move_tail(pack->size() - size, true);
-
-                        return;
-                    }
+                    pack->move_tail(pack->size() - size, true);
+                    return;
                 }
             }
 
@@ -395,93 +376,262 @@ class salt
 
         void send(std::shared_ptr<packet> pack)
         {
-            auto out = make_opaque(pack);
-
             size_t size = exec([&](const io_callback& callback)
             {
-                m_socket.async_send_to(boost::asio::buffer(out->data(), out->size()), m_peer, callback);
+                m_socket.async_send_to(boost::asio::buffer(pack->data(), pack->size()), m_peer, callback);
             });
 
-            if (size < out->size())
+            if (size < pack->size())
                 throw std::runtime_error("can't send message");
         }
     };
 
-    struct packet_handler
+    struct connect_handler
     {
-        virtual ~packet_handler() {}
-        virtual bool error(const boost::system::error_code& error) = 0;
-        virtual bool take(std::shared_ptr<packet> packet) = 0;
-        virtual bool give(std::shared_ptr<packet> packet) = 0;
-    };
+        enum job
+        {
+            snd_syn,
+            snd_ack_syn,
+            snd_fin,
+            snd_ack_fin
+        };
 
-    struct session_handler : public packet_handler
-    {
-        session_handler()
+        connect_handler(boost::asio::io_context& io)
+            : m_io(io)
+            , m_alive(true)
+            , m_linked(false)
+            , m_lpin(1)  // TODO: random value
         {
         }
-        
-        bool error(const boost::system::error_code& error) override;
-        
-        bool take(std::shared_ptr<packet> packet) override;
-        
-        bool give(std::shared_ptr<packet> packet) override;
+
+        std::shared_ptr<packet> make_packet()
+        {
+            auto pack = std::make_shared<packet>();
+            pack->set_pin(m_lpin);
+            return pack;
+        }
+
+        void reset()
+        {
+            m_alive = true;
+            m_linked = false;
+            m_lpin++;
+        }
+
+        void error(const boost::system::error_code& err)
+        {
+            if (on_connect)
+            {
+                m_io.post(boost::bind(on_connect, err));
+                on_connect = 0;
+            }
+
+            if (on_shutdown)
+            {
+                m_io.post(boost::bind(on_shutdown, err));
+                on_shutdown = 0;
+            }
+
+            m_alive = false;
+            m_linked = false;
+        }
+
+        bool parse(std::shared_ptr<packet> pack)
+        {
+            if (pack->has_flag(packet::syn) && m_rpin == 0 || m_rpin == pack->pin())
+            {
+                m_rpin = pack->pin();
+
+                if (pack->has_flag(packet::ack))
+                {
+                    m_linked = true;
+
+                    if (on_connect)
+                    {
+                        m_io.post(boost::bind(on_connect, boost::system::error_code()));
+                        on_connect = 0;
+                    }
+
+                    m_jobs.erase(job::snd_syn);
+                }
+                else
+                {
+                    m_jobs.insert(job::snd_ack_syn); 
+                }
+
+                return true;
+            }
+            else if (pack->has_flag(packet::fin) && m_rpin == pack->pin())
+            {
+                m_linked = false;
+
+                if (pack->has_flag(packet::ack))
+                {
+                    m_rpin = 0;
+                    m_alive = false;
+
+                    if (on_shutdown)
+                    {
+                        m_io.post(boost::bind(on_shutdown, boost::system::error_code()));
+                        on_shutdown = 0;
+                    }
+
+                    m_jobs.erase(job::snd_fin);
+                }
+                else
+                {
+                    m_jobs.insert(job::snd_ack_fin);
+                }
+
+                return true;
+            }
+
+            return !(m_linked && m_rpin != 0 && m_rpin == pack->pin());
+        }
+
+        bool imbue(std::shared_ptr<packet> pack)
+        {
+            auto iter = m_jobs.begin();
+            if (iter != m_jobs.end())
+            {
+                switch (*iter)
+                {
+                    case job::snd_syn:
+                    {
+                        pack->set_flag(packet::syn);
+                        break;
+                    }
+                    case job::snd_ack_syn:
+                    {
+                        pack->set_flag(packet::syn | packet::ack);
+                        m_jobs.erase(job::snd_ack_syn);
+                        m_linked = true;
+
+                        if (on_connect)
+                        {
+                            m_io.post(boost::bind(on_connect, boost::system::error_code()));
+                            on_connect = 0;
+                        }
+
+                        break;
+                    }
+                    case job::snd_fin:
+                    {
+                        pack->set_flag(packet::fin);
+                        break;
+                    }
+                    case job::snd_ack_fin:
+                    {
+                        pack->set_flag(packet::fin | packet::ack);
+                        m_jobs.erase(job::snd_ack_fin);
+                        m_linked = false;
+                        m_alive = false;
+
+                        if (on_shutdown)
+                        {
+                            m_io.post(boost::bind(on_shutdown, boost::system::error_code()));
+                            on_shutdown = 0;
+                        }
+
+                        break;
+                    }
+                    default:
+                        break;
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        bool charged() const 
+        { 
+            return m_jobs.empty();
+        }
+
+        bool alive() const { return m_alive; }
+
+        bool linked() const { return m_linked; }
 
         void shutdown(const callback& handler)
         {
-            m_shut = handler;
+            if (!m_alive)
+            {
+                m_io.post(boost::bind(handler, boost::asio::error::no_permission));
+                return;
+            }
+            on_shutdown = handler;
+            m_jobs.insert(job::snd_fin);
         }
 
         void connect(const callback& handler)
         {
-            m_conn = handler;
+            if (!m_alive)
+            {
+                m_io.post(boost::bind(handler, boost::asio::error::no_permission));
+                return;
+            }
+
+            on_connect = handler;
+            m_jobs.insert(job::snd_syn);
         }
 
         void accept(const callback& handler)
         {
-            m_conn = handler;
-        }
+            if (!m_alive)
+            {
+                m_io.post(boost::bind(handler, boost::asio::error::no_permission));
+                return;
+            }
 
-        bool alive()
-        {
-
+            on_connect = handler;
         }
 
     private:
 
-        callback m_conn;
-        callback m_shut;
+
+        boost::asio::io_context& m_io;
+        bool                     m_alive;
+        bool                     m_linked;
+        uint32_t                 m_lpin;
+        uint32_t                 m_rpin;
+        std::set<job>            m_jobs;
+        callback                 on_connect;
+        callback                 on_shutdown;
     };
 
-    struct write_handler : public packet_handler
+    struct ostream_handler
     {
-        write_handler() {}
-
-        bool error(const boost::system::error_code& error) override;
-        bool take(std::shared_ptr<packet> packet) override;
-        bool give(std::shared_ptr<packet> packet) override;
-        bool append(std::shared_ptr<buffer>, callback handler) {}
+        ostream_handler(boost::asio::io_context& io) {}
+        void reset() { }
+        void error(const boost::system::error_code& error) {}
+        bool parse(std::shared_ptr<packet> pack) {}
+        bool imbue(std::shared_ptr<packet> pack) {}
+        bool charged() { return true; }
+        void append(std::shared_ptr<buffer>, callback handler) {}
 
     private:
 
-        uint32_t m_number = 0;
+        uint32_t m_cursor = 0;
         time_t m_time = 0;
         std::map<uint32_t, buffer> m_parts;
         std::list<std::pair<std::shared_ptr<buffer>, callback>> m_trans;
     };
 
-    struct read_handler : public packet_handler
+    struct istream_handler
     {
-        read_handler() {}
-        
-        bool error(const boost::system::error_code& error) override;
-        bool take(std::shared_ptr<packet> packet) override;
-        bool give(std::shared_ptr<packet> packet) override;
-        bool append(std::shared_ptr<buffer>, callback handler) {}
+        istream_handler(boost::asio::io_context& io) {}
+        void reset() { }
+        void error(const boost::system::error_code& error) {}
+        bool parse(std::shared_ptr<packet> pack) {}
+        bool imbue(std::shared_ptr<packet> pack) {}
+        bool charged() { return true; }
+        void append(std::shared_ptr<buffer>, callback handler) {}
     
     private:
 
-        uint32_t m_number = 0;
+        uint32_t m_cursor = 0;
         std::map<uint32_t, buffer> m_parts;
         std::list<std::pair<std::shared_ptr<buffer>, callback>> m_trans;
     };
@@ -491,45 +641,50 @@ class salt
 
     }
 
-    void on_connected(const boost::system::error_code& error)
+    void send_packet(std::unique_lock<std::mutex>& lock, std::shared_ptr<packet> pack)
     {
-
+        lock.unlock();
+        try
+        {
+            m_channel.send(pack);
+        }
+        catch (...)
+        {
+            lock.lock();
+            throw;
+        }
+        lock.lock();
     }
 
-    void on_accepted(const boost::system::error_code& error)
+    void receive_packet(std::unique_lock<std::mutex>& lock, std::shared_ptr<packet> pack)
     {
-
-    }
-
-    void on_shutdown(const boost::system::error_code& error)
-    {
-
+        lock.unlock();
+        try
+        {
+            m_channel.receive(pack);
+        }
+        catch (...)
+        {
+            lock.lock();
+            throw;
+        }
+        lock.lock();
     }
 
     void do_read()
     {
         std::unique_lock<std::mutex> lock(m_mutex);
         
-        while (m_session && m_session->alive())
+        while (m_connect.alive())
         {
             try
             {
-                m_condition.wait_for(lock, std::chrono::seconds(5));
-                
-                if (m_session)
+                auto pack = m_connect.make_packet();
+                receive_packet(lock, pack);
+
+                if (m_connect.linked())
                 {
-                    auto pack = std::shared_ptr<packet>();
-                    m_udp->recv(pack);
-
-                    m_session->take(pack);
-
-                    if (m_session->alive())
-                    {
-                        if (m_writer)
-                            m_writer->take(pack);
-                        if (m_reader)
-                            m_reader->take(pack);
-                    }
+                    m_connect.parse(pack) || m_istream.parse(pack) || m_ostream.parse(pack);
                 }
             }
             catch(const boost::system::error_code& ec)
@@ -543,33 +698,34 @@ class salt
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        while (m_session && m_session->alive())
+        while (m_connect.alive())
         {
             try
             {
-                m_condition.wait_for(lock, std::chrono::seconds(5));
-
-                if (m_session)
+                m_wcon.wait_for(lock, std::chrono::seconds(30), [&]()
                 {
-                    auto pack = std::shared_ptr<packet>();
+                    return m_connect.charged() || m_istream.charged() || m_ostream.charged();
+                });
 
-                    if (m_session->give(pack))
-                        m_udp->send(pack);
+                if (m_connect.charged())
+                {
+                    auto pack = m_connect.make_packet();
+                    if (m_connect.imbue(pack))
+                        send_packet(lock, pack);
+                }
 
-                    if (m_session->alive())
-                    {
-                        if (m_writer)
-                        {
-                            if (m_writer->give(pack))
-                                m_udp->send(pack);
-                        }
-
-                        if (m_reader)
-                        {
-                            if (m_reader->give(pack))
-                                m_udp->send(pack);
-                        }
-                    }
+                if (m_connect.linked() && m_istream.charged())
+                {
+                    auto pack = m_connect.make_packet();
+                    if (m_istream.imbue(pack))
+                        send_packet(lock, pack);
+                }
+                
+                if (m_connect.linked() && m_ostream.charged())
+                {
+                    auto pack = m_connect.make_packet();
+                    if (m_ostream.imbue(pack))
+                        send_packet(lock, pack);
                 }
             }
             catch(const boost::system::error_code& ec)
@@ -579,14 +735,60 @@ class salt
         }
     }
 
+    void do_callback()
+    {
+        boost::system::error_code error;
+        do
+        {
+            m_io.run(error);
+
+            if (error)
+                std::cout << error.message() << std::endl;
+        }
+        while (error && error != boost::asio::error::operation_aborted);
+    }
+
 public:
 
-    salt(const endpoint& bind, const endpoint& peer, uint64_t mask)
-        : m_udp(std::make_shared<udp>(bind, peer, mask))
-        , m_session(std::make_shared<session_handler>())
-        , m_writer(std::make_shared<write_handler>())
-        , m_reader(std::make_shared<read_handler>())
+    salt(const endpoint& bind, const endpoint& peer)
+        : m_channel(bind, peer)
+        , m_connect(m_io)
+        , m_istream(m_io)
+        , m_ostream(m_io)
+        , m_rjob(std::async(std::launch::async, &salt::do_read, this))
+        , m_wjob(std::async(std::launch::async, &salt::do_write, this))
+        , m_cjob(std::async(std::launch::async, &salt::do_callback, this))
     {
+    }
+
+    ~salt()
+    {
+        try
+        {
+            m_rjob.wait();
+        }
+        catch (const std::exception& ex)
+        {
+            std::cout << ex.what() << std::endl;
+        }
+
+        try
+        {
+            m_wjob.wait();
+        }
+        catch (const std::exception& ex)
+        {
+            std::cout << ex.what() << std::endl;
+        }
+        
+        try
+        {
+            m_cjob.wait();
+        }
+        catch (const std::exception &ex)
+        {
+            std::cout << ex.what() << std::endl;
+        }
     }
 
     void shutdown(const callback& handler)
@@ -616,12 +818,16 @@ public:
 
 private:
 
-    std::shared_ptr<udp>             m_udp;
-    std::shared_ptr<session_handler> m_session;
-    std::shared_ptr<write_handler>   m_writer;
-    std::shared_ptr<read_handler>    m_reader;
-    std::mutex                       m_mutex;
-    std::condition_variable          m_condition;
+    udp_channel              m_channel;
+    boost::asio::io_context  m_io;
+    connect_handler          m_connect;
+    istream_handler          m_istream;
+    ostream_handler          m_ostream;
+    std::mutex               m_mutex;
+    std::condition_variable  m_wcon;
+    std::future<void>        m_rjob;
+    std::future<void>        m_wjob;
+    std::future<void>        m_cjob;
 };
 
 std::shared_ptr<salt> create_salt_channel(const endpoint& bind, const endpoint& peer, uint64_t mask)
