@@ -218,6 +218,19 @@ public:
         return buffer(m_buffer, m_size, m_beg, ptr);
     }
 
+    buffer get_frame(size_t head, size_t tail) const
+    {
+        uint8_t* beg = m_beg + head;
+        if (beg > m_end)
+            throw std::runtime_error("get_frame: head is out of range");
+
+        uint8_t* end = m_end - tail;
+        if (end < beg)
+            throw std::runtime_error("pop_tail: tail is out of range");
+
+        return buffer(m_buffer, m_size, beg, end);
+    }
+
     void move_head(size_t size, bool top)
     {
         uint8_t* ptr = top ? m_beg - size : m_beg + size;
@@ -236,6 +249,9 @@ public:
 };
 
 const uint8_t SALT_SIGN = 0x99;
+const size_t PACKET_HEADER_SIZE = 16;
+const size_t MAX_PACKET_SIZE = 9992;
+const size_t MAX_PAYLOAD_SIZE = MAX_PACKET_SIZE - PACKET_HEADER_SIZE;
 
 class salt
 {
@@ -249,7 +265,7 @@ class salt
             ack = 0x08
         };
 
-        packet() : buffer(10000)
+        packet() : buffer(MAX_PACKET_SIZE)
         {
             memset(data(), 0, 16);
             set_byte(0, SALT_SIGN);
@@ -262,7 +278,7 @@ class salt
         uint16_t flags() { return get_word(6); }
         uint64_t cursor() { return get_qword(8); }
         void set_pin(uint32_t v) { return set_dword(2, v); }
-        bool has_flag(flag v) { return flags() & v; }
+        bool has_flag(uint16_t v) { return flags() & v; }
         void set_flag(uint16_t v) { set_word(6, flags() | v); }
         void set_cursor(uint64_t v) { return set_qword(8, v); }
         buffer payload() const { return buffer::push_head(16); }
@@ -409,13 +425,6 @@ class salt
             auto pack = std::make_shared<packet>();
             pack->set_pin(m_lpin);
             return pack;
-        }
-
-        void reset()
-        {
-            m_alive = true;
-            m_linked = false;
-            m_lpin++;
         }
 
         void error(const boost::system::error_code& err)
@@ -590,40 +599,140 @@ class salt
 
     private:
 
-
         boost::asio::io_context& m_io;
-        bool                     m_alive;
-        bool                     m_linked;
-        uint32_t                 m_lpin;
-        uint32_t                 m_rpin;
-        std::set<job>            m_jobs;
-        callback                 on_connect;
-        callback                 on_shutdown;
+        bool m_alive;
+        bool m_linked;
+        uint32_t m_lpin;
+        uint32_t m_rpin;
+        std::set<job> m_jobs;
+        callback on_connect;
+        callback on_shutdown;
     };
 
     struct ostream_handler
     {
-        ostream_handler(boost::asio::io_context& io) {}
-        void reset() { }
-        void error(const boost::system::error_code& error) {}
-        bool parse(std::shared_ptr<packet> pack) {}
-        bool imbue(std::shared_ptr<packet> pack) {}
-        bool charged() { return true; }
-        void append(std::shared_ptr<buffer>, callback handler) {}
+        ostream_handler(boost::asio::io_context& io)
+            : m_io(io) 
+        {}
+
+        void error(const boost::system::error_code& ec)
+        {
+            auto hit = m_handles.begin();
+            while (hit != m_handles.end())
+            {
+                m_io.post(boost::bind(hit->second, ec));
+                ++hit;
+            }
+            m_handles.clear();
+        }
+
+        bool parse(std::shared_ptr<packet> pack)
+        {
+            if (!pack->has_flag(packet::psh | packet::ack))
+                return false;
+
+            m_chunks.erase(pack->cursor());
+
+            uint64_t top = std::numeric_limits<uint64_t>::max();
+
+            auto cit = m_chunks.begin();
+            if (cit != m_chunks.end())
+                top = cit->first;
+
+            auto hit = m_handles.begin();
+            while (hit != m_handles.end())
+            {
+                if (hit->first <= top)
+                {
+                    m_io.post(boost::bind(hit->second, boost::system::error_code()));
+                    hit = m_handles.erase(hit);
+                }
+                else
+                    break;
+            }
+            return true;
+        }
+
+        bool imbue(std::shared_ptr<packet> pack)
+        {
+            auto iter = std::find_if(
+                    m_chunks.begin(), m_chunks.end(), [](auto it) { return it->second.ready(); }
+                );
+
+            if (iter == m_chunks.end())
+                return false;
+
+            std::memcpy(pack->data() + PACKET_HEADER_SIZE, iter->second.data.data(), iter->second.data.size());
+
+            pack->set_cursor(iter->first);
+            pack->set_flag(packet::psh);
+
+            size_t tail = pack->size() - PACKET_HEADER_SIZE - iter->second.data.size();
+
+            if (tail > 0)
+                pack->move_tail(tail, true);
+
+            iter->second.retime();
+            
+            return true;
+        }
+
+        bool charged() const
+        {
+            return std::find_if(
+                    m_chunks.begin(), m_chunks.end(), [](auto it) { return it->second.ready(); }
+                ) != m_chunks.end();
+        }
+
+        void append(std::shared_ptr<buffer> buf, callback handler)
+        {
+            for(size_t h = 0; h < buf->size(); h += MAX_PAYLOAD_SIZE)
+            {
+                m_chunks.emplace(
+                    m_cursor++, buf->get_frame(h, std::min(MAX_PAYLOAD_SIZE, buf->size() - h))
+                    );
+            }
+            m_handles.insert(std::make_pair(m_cursor, handler));
+        }
 
     private:
 
+        struct chunk
+        {
+            tubus::network::buffer data;
+            boost::posix_time::ptime time;
+            
+            chunk(const tubus::network::buffer& buf) : data(buf) { }
+
+            bool ready()
+            {
+                static const int64_t ACK_AGE = 50;
+
+                auto now = boost::posix_time::microsec_clock::universal_time();
+                if (time.is_not_a_date_time())
+                {
+                    return true;
+                }
+
+                return (time - now).total_milliseconds() > ACK_AGE;
+            };
+
+            void retime()
+            {
+                time = boost::posix_time::microsec_clock::universal_time();
+            }
+        };
+
+        boost::asio::io_context& m_io;
         uint32_t m_cursor = 0;
-        time_t m_time = 0;
-        std::map<uint32_t, buffer> m_parts;
-        std::list<std::pair<std::shared_ptr<buffer>, callback>> m_trans;
+        std::map<uint32_t, chunk> m_chunks;
+        std::map<uint32_t, callback> m_handles;
     };
 
     struct istream_handler
     {
         istream_handler(boost::asio::io_context& io) {}
-        void reset() { }
-        void error(const boost::system::error_code& error) {}
+        void error(const boost::system::error_code& ec) {}
         bool parse(std::shared_ptr<packet> pack) {}
         bool imbue(std::shared_ptr<packet> pack) {}
         bool charged() { return true; }
@@ -636,9 +745,11 @@ class salt
         std::list<std::pair<std::shared_ptr<buffer>, callback>> m_trans;
     };
 
-    void on_error(const boost::system::error_code& error)
+    void on_error(const boost::system::error_code& ec)
     {
-
+        m_connect.error(ec);
+        m_istream.error(ec);
+        m_ostream.error(ec);
     }
 
     void send_packet(std::unique_lock<std::mutex>& lock, std::shared_ptr<packet> pack)
@@ -646,7 +757,7 @@ class salt
         lock.unlock();
         try
         {
-            m_channel.send(pack);
+            m_udp.send(pack);
         }
         catch (...)
         {
@@ -661,7 +772,7 @@ class salt
         lock.unlock();
         try
         {
-            m_channel.receive(pack);
+            m_udp.receive(pack);
         }
         catch (...)
         {
@@ -704,7 +815,7 @@ class salt
             {
                 m_wcon.wait_for(lock, std::chrono::seconds(30), [&]()
                 {
-                    return m_connect.charged() || m_istream.charged() || m_ostream.charged();
+                    return !m_connect.alive() || m_connect.charged() || m_istream.charged() || m_ostream.charged();
                 });
 
                 if (m_connect.charged())
@@ -751,7 +862,7 @@ class salt
 public:
 
     salt(const endpoint& bind, const endpoint& peer)
-        : m_channel(bind, peer)
+        : m_udp(bind, peer)
         , m_connect(m_io)
         , m_istream(m_io)
         , m_ostream(m_io)
@@ -793,33 +904,39 @@ public:
 
     void shutdown(const callback& handler)
     {
-
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_connect.shutdown(handler);
     }
 
     void connect(const callback& handler)
     {
-
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_connect.connect(handler);
     }
 
     void accept(const callback& handler)
     {
-
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_connect.accept(handler);
     }
 
     void read(std::shared_ptr<buffer> buf, const callback& handler)
     {
-
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_istream.append(buf, handler);
     }
 
     void write(std::shared_ptr<buffer> buf, const callback& handler)
     {
-
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_ostream.append(buf, handler);
+        m_wcon.notify_all();
     }
 
 private:
 
-    udp_channel              m_channel;
     boost::asio::io_context  m_io;
+    udp_channel              m_udp;
     connect_handler          m_connect;
     istream_handler          m_istream;
     ostream_handler          m_ostream;
