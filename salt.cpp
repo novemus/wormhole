@@ -22,7 +22,10 @@ typedef std::function<void(const boost::system::error_code&, size_t)> io_callbac
 
 struct buffer
 {
-    buffer(size_t len) : m_buffer(new uint8_t[len]) , m_beg(m_buffer.get()), m_end(m_buffer.get() + len)
+    buffer(size_t len) 
+        : m_buffer(new uint8_t[len])
+        , m_beg(m_buffer.get())
+        , m_end(m_buffer.get() + len)
     {
         std::memset(m_buffer.get(), 0, len);
     }
@@ -64,6 +67,16 @@ struct buffer
             throw std::runtime_error("slice: out of range");
 
         return buffer(m_buffer, m_beg + off, m_beg + off + len);
+    }
+
+    bool unique() const
+    {
+        return m_buffer.unique();
+    }
+
+    void wipe()
+    {
+        std::memset(data(), 0, size());
     }
 
 private:
@@ -215,7 +228,7 @@ class salt
             ack = 0x08
         };
 
-        packet(bool only_header) : buffer(only_header ? PACKET_HEADER_SIZE : MAX_PACKET_SIZE)
+        packet() : buffer(MAX_PACKET_SIZE)
         {
             data()[0] = SIGN;
             data()[1] = VERSION;
@@ -267,7 +280,7 @@ class salt
         }
 
         buffer payload() const
-        { 
+        {
             return buffer::slice(PACKET_HEADER_SIZE, size() - PACKET_HEADER_SIZE);
         }
     };
@@ -335,6 +348,64 @@ class salt
         }
     };
 
+    struct packet_factory
+    {
+        packet_factory() : m_pin(1)  // TODO: random value
+        {
+        }
+
+        std::shared_ptr<packet> make_packet()
+        {
+            std::shared_ptr<packet> pack;
+
+            auto it = m_cache.begin();
+            while (it != m_cache.end())
+            {
+                if (it->second->unique())
+                {
+                    pack = it->second;
+                    pack->wipe();
+                    pack->set_pin(m_pin);
+
+                    it->first = std::time(0);
+                    break;
+                }
+                ++it;
+            }
+
+            if (!pack)
+            {
+                pack = std::make_shared<packet>();
+                pack->set_pin(m_pin);
+                m_cache.emplace_back(std::time(0), pack);
+            }
+
+            compress_cache();
+
+            return pack;
+        }
+
+    private:
+
+        void compress_cache()
+        {
+            static const time_t TTL = 30;
+            time_t now = std::time(0);
+
+            auto it = m_cache.begin();
+            while (it != m_cache.end())
+            {
+                if (it->second->unique() && it->first + TTL > now)
+                    it = m_cache.erase(it);
+                else
+                    ++it;
+            }
+        }
+
+        uint32_t m_pin;
+        std::list<std::pair<time_t, std::shared_ptr<packet>>> m_cache;
+    };
+
     struct connect_handler
     {
         enum job
@@ -349,15 +420,8 @@ class salt
             : m_io(io)
             , m_alive(true)
             , m_linked(false)
-            , m_lpin(1)  // TODO: random value
+            , m_pin(0)
         {
-        }
-
-        std::shared_ptr<packet> make_packet(bool only_header = false)
-        {
-            auto pack = std::make_shared<packet>(only_header);
-            pack->set_pin(m_lpin);
-            return pack;
         }
 
         void error(const boost::system::error_code& err)
@@ -380,9 +444,9 @@ class salt
 
         bool parse(std::shared_ptr<packet> pack)
         {
-            if (pack->has_flag(packet::syn) && m_rpin == 0 || m_rpin == pack->pin())
+            if (pack->has_flag(packet::syn) && m_pin == 0 || m_pin == pack->pin())
             {
-                m_rpin = pack->pin();
+                m_pin = pack->pin();
 
                 if (pack->has_flag(packet::ack))
                 {
@@ -403,13 +467,13 @@ class salt
 
                 return true;
             }
-            else if (pack->has_flag(packet::fin) && m_rpin == pack->pin())
+            else if (pack->has_flag(packet::fin) && m_pin == pack->pin())
             {
                 m_linked = false;
 
                 if (pack->has_flag(packet::ack))
                 {
-                    m_rpin = 0;
+                    m_pin = 0;
                     m_alive = false;
 
                     if (on_shutdown)
@@ -428,7 +492,7 @@ class salt
                 return true;
             }
 
-            return !(m_linked && m_rpin != 0 && m_rpin == pack->pin());
+            return !(m_linked && m_pin != 0 && m_pin == pack->pin());
         }
 
         bool imbue(std::shared_ptr<packet> pack)
@@ -536,8 +600,7 @@ class salt
         boost::asio::io_context& m_io;
         bool m_alive;
         bool m_linked;
-        uint32_t m_lpin;
-        uint32_t m_rpin;
+        uint32_t m_pin;
         std::set<job> m_jobs;
         callback on_connect;
         callback on_shutdown;
@@ -814,7 +877,7 @@ class salt
         {
             try
             {
-                auto pack = m_connect.make_packet();
+                auto pack = m_packer.make_packet();
                 receive_packet(lock, pack);
 
                 if (m_connect.linked())
@@ -844,21 +907,21 @@ class salt
 
                 if (m_connect.charged())
                 {
-                    auto pack = m_connect.make_packet(true);
+                    auto pack = m_packer.make_packet();
                     if (m_connect.imbue(pack))
                         send_packet(lock, pack);
                 }
 
                 if (m_connect.linked() && m_istream.charged())
                 {
-                    auto pack = m_connect.make_packet(true);
+                    auto pack = m_packer.make_packet();
                     if (m_istream.imbue(pack))
                         send_packet(lock, pack);
                 }
                 
                 if (m_connect.linked() && m_ostream.charged())
                 {
-                    auto pack = m_connect.make_packet();
+                    auto pack = m_packer.make_packet();
                     if (m_ostream.imbue(pack))
                         send_packet(lock, pack);
                 }
@@ -961,6 +1024,7 @@ private:
 
     boost::asio::io_context  m_io;
     udp_channel              m_udp;
+    packet_factory           m_packer;
     connect_handler          m_connect;
     istream_handler          m_istream;
     ostream_handler          m_ostream;
