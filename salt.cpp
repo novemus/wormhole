@@ -14,7 +14,7 @@
 #include <boost/shared_array.hpp>
 
 
-namespace tubus { namespace network {
+namespace salt {
 
 typedef std::pair<std::string, uint16_t> endpoint;
 typedef std::function<void(const boost::system::error_code&)> callback;
@@ -94,7 +94,9 @@ private:
 
 typedef std::shared_ptr<buffer> buffer_ptr;
 
-class udp_channel
+namespace udp {
+
+class channel
 {
     typedef std::function<void(const boost::system::error_code&, size_t)> io_callback;
     typedef std::function<void(const io_callback&)> io_call;
@@ -156,7 +158,7 @@ class udp_channel
 
 public:
 
-    udp_channel(const endpoint& bind, const endpoint& peer)
+    channel(const endpoint& bind, const endpoint& peer)
         : m_socket(m_io)
         , m_peer(resolve_endpoint(peer))
     {
@@ -167,7 +169,7 @@ public:
         m_socket.bind(local);
     }
 
-    ~udp_channel()
+    ~channel()
     {
         if (m_socket.is_open())
         {
@@ -214,13 +216,15 @@ public:
     }
 };
 
+}
+
 const uint8_t SIGN = 0x99;
 const uint8_t VERSION = 1 << 4;
 const size_t PACKET_HEADER_SIZE = 16;
 const size_t MAX_PACKET_SIZE = 9992;
 const size_t MAX_PAYLOAD_SIZE = MAX_PACKET_SIZE - PACKET_HEADER_SIZE;
 
-class salt
+class channel
 {
     struct packet : public buffer
     {
@@ -965,18 +969,18 @@ class salt
 
 public:
 
-    salt(const endpoint& bind, const endpoint& peer)
+    channel(const endpoint& bind, const endpoint& peer)
         : m_udp(bind, peer)
         , m_connect(m_io)
         , m_istream(m_io)
         , m_ostream(m_io)
-        , m_rjob(std::async(std::launch::async, &salt::do_read, this))
-        , m_wjob(std::async(std::launch::async, &salt::do_write, this))
-        , m_cjob(std::async(std::launch::async, &salt::do_callback, this))
+        , m_rjob(std::async(std::launch::async, &channel::do_read, this))
+        , m_wjob(std::async(std::launch::async, &channel::do_write, this))
+        , m_cjob(std::async(std::launch::async, &channel::do_callback, this))
     {
     }
 
-    ~salt()
+    ~channel()
     {
         try
         {
@@ -1040,7 +1044,7 @@ public:
 private:
 
     boost::asio::io_context  m_io;
-    udp_channel              m_udp;
+    udp::channel             m_udp;
     packet_factory           m_packer;
     connect_handler          m_connect;
     istream_handler          m_istream;
@@ -1052,9 +1056,9 @@ private:
     std::future<void>        m_cjob;
 };
 
-std::shared_ptr<salt> create_salt_channel(const endpoint& bind, const endpoint& peer)
+std::shared_ptr<channel> create_channel(const endpoint& bind, const endpoint& peer)
 {
-    return std::make_shared<salt>(bind, peer);
+    return std::make_shared<channel>(bind, peer);
 }
 
-}}
+}
