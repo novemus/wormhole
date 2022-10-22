@@ -18,7 +18,6 @@ namespace tubus { namespace network {
 
 typedef std::pair<std::string, uint16_t> endpoint;
 typedef std::function<void(const boost::system::error_code&)> callback;
-typedef std::function<void(const boost::system::error_code&, size_t)> io_callback;
 
 struct buffer
 {
@@ -93,13 +92,18 @@ private:
     uint8_t* m_end;
 };
 
+typedef std::shared_ptr<buffer> buffer_ptr;
+
 class udp_channel
 {
+    typedef std::function<void(const boost::system::error_code&, size_t)> io_callback;
+    typedef std::function<void(const io_callback&)> io_call;
+
     boost::asio::io_context        m_io;
     boost::asio::ip::udp::socket   m_socket;
     boost::asio::ip::udp::endpoint m_peer;
 
-    size_t exec(const std::function<void(const io_callback&)>& invoke)
+    size_t exec(const io_call& invoke)
     {
         boost::asio::deadline_timer timer(m_io);
         timer.expires_from_now(boost::posix_time::seconds(30));
@@ -173,7 +177,7 @@ public:
         }
     }
 
-    void receive(std::shared_ptr<buffer> pack)
+    void receive(buffer_ptr pack)
     {
         auto timer = [start = boost::posix_time::microsec_clock::universal_time()]()
         {
@@ -198,7 +202,7 @@ public:
         throw boost::system::error_code(boost::asio::error::operation_aborted);
     }
 
-    void send(std::shared_ptr<buffer> pack)
+    void send(buffer_ptr pack)
     {
         size_t size = exec([&](const io_callback& callback)
         {
@@ -285,6 +289,8 @@ class salt
         }
     };
 
+    typedef std::shared_ptr<packet> packet_ptr;
+
     struct cursor
     {
         uint64_t value;
@@ -354,9 +360,9 @@ class salt
         {
         }
 
-        std::shared_ptr<packet> make_packet()
+        packet_ptr make_packet()
         {
-            std::shared_ptr<packet> pack;
+            packet_ptr pack;
 
             auto it = m_cache.begin();
             while (it != m_cache.end())
@@ -403,7 +409,7 @@ class salt
         }
 
         uint32_t m_pin;
-        std::list<std::pair<time_t, std::shared_ptr<packet>>> m_cache;
+        std::list<std::pair<time_t, packet_ptr>> m_cache;
     };
 
     struct connect_handler
@@ -442,7 +448,7 @@ class salt
             m_linked = false;
         }
 
-        bool parse(std::shared_ptr<packet> pack)
+        bool parse(packet_ptr pack)
         {
             if (pack->has_flag(packet::syn) && m_pin == 0 || m_pin == pack->pin())
             {
@@ -495,7 +501,7 @@ class salt
             return !(m_linked && m_pin != 0 && m_pin == pack->pin());
         }
 
-        bool imbue(std::shared_ptr<packet> pack)
+        bool imbue(packet_ptr pack)
         {
             auto iter = m_jobs.begin();
             if (iter != m_jobs.end())
@@ -624,7 +630,7 @@ class salt
             m_handles.clear();
         }
 
-        bool parse(std::shared_ptr<packet> pack)
+        bool parse(packet_ptr pack)
         {
             if (!pack->flags() == packet::psh | packet::ack)
                 return false;
@@ -651,7 +657,7 @@ class salt
             return true;
         }
 
-        bool imbue(std::shared_ptr<packet> pack)
+        bool imbue(packet_ptr pack)
         {
             auto iter = std::find_if(
                     m_chunks.begin(), m_chunks.end(), [](auto it) { return it->second.ready(); }
@@ -678,25 +684,33 @@ class salt
                 ) != m_chunks.end();
         }
 
-        void append(const boost::asio::const_buffer& buf, const io_callback& handle)
+        void append(buffer_ptr buf, const callback& handle)
         {
-            for(size_t shift = 0; shift < buf.size(); shift += MAX_PAYLOAD_SIZE)
+            static const size_t MAX_BUFFERED_PACKETS = 16384;
+
+            if (m_chunks.size() >= MAX_BUFFERED_PACKETS)
+            {
+                m_io.post(boost::bind(handle, boost::asio::error::no_buffer_space));
+                return;
+            }
+
+            for(size_t shift = 0; shift < buf->size(); shift += MAX_PAYLOAD_SIZE)
             {
                 m_chunks.emplace(
-                    m_tail++, chunk(buf.data() + shift, std::min(MAX_PAYLOAD_SIZE, buf.size() - shift))
+                    m_tail++, buf->slice(shift, std::min(MAX_PAYLOAD_SIZE, buf->size() - shift))
                     );
             }
-            m_handles.insert(std::make_pair(m_tail, boost::bind(handle, boost::asio::placeholders::error, buf.size())));
+            m_handles.insert(std::make_pair(m_tail, handle));
         }
 
     private:
 
         struct chunk
         {
-            boost::asio::const_buffer data;
+            buffer data;
             boost::posix_time::ptime time;
             
-            chunk(const void* ptr, size_t size) : data(ptr, size) { }
+            chunk(const buffer& buf) : data(buf) { }
 
             bool ready()
             {
@@ -720,7 +734,7 @@ class salt
         boost::asio::io_context& m_io;
         cursor m_tail;
         std::map<cursor, chunk> m_chunks;
-        std::map<cursor, io_callback> m_handles;
+        std::map<cursor, callback> m_handles;
     };
 
     struct istream_handler
@@ -735,15 +749,15 @@ class salt
             auto it = m_handles.begin();
             while (it != m_handles.end())
             {
-                m_io.post(boost::bind(it->second, ec, 0));
+                m_io.post(boost::bind(it->second, ec));
                 ++it;
             }
             m_handles.clear();
         }
 
-        bool parse(std::shared_ptr<packet> pack)
+        bool parse(packet_ptr pack)
         {
-            static const size_t MAX_BUFFERED_PACKETS = 1024;
+            static const size_t MAX_BUFFERED_PACKETS = 16384;
 
             if (pack->flags() != packet::psh || m_parts.size() >= MAX_BUFFERED_PACKETS)
                 return false;
@@ -760,7 +774,7 @@ class salt
             }
         }
 
-        bool imbue(std::shared_ptr<packet> pack)
+        bool imbue(packet_ptr pack)
         {
             auto it = m_acks.begin();
             if (it != m_acks.end())
@@ -778,7 +792,7 @@ class salt
             return !m_acks.empty();
         }
 
-        void append(const boost::asio::mutable_buffer& buf, const io_callback& handle)
+        void append(buffer_ptr buf, const callback& handle)
         {
             m_handles.push_back(std::make_pair(buf, handle));
             notify();
@@ -796,8 +810,8 @@ class salt
                 auto it = m_parts.begin();
                 while (it != m_parts.end() && it->first == m_tail + 1)
                 {
-                    size_t size = std::min(handle.first.size() - shift, it->second.size());
-                    std::memcpy(handle.first.data() + shift, it->second.data(), size);
+                    size_t size = std::min(handle.first->size() - shift, it->second.size());
+                    std::memcpy(handle.first->data() + shift, it->second.data(), size);
 
                     shift += size;
 
@@ -812,16 +826,17 @@ class salt
                         break;
                     }
 
-                    if (handle.first.size() == shift)
+                    if (handle.first->size() == shift)
                         break;
                 }
 
                 if (shift == 0)
                     break;
 
+                handle.first->shrink(shift);
                 m_handles.pop_front();
 
-                m_io.post(boost::bind(handle.second, boost::system::error_code(), shift));
+                m_io.post(boost::bind(handle.second, boost::system::error_code()));
             }
         }
 
@@ -829,8 +844,10 @@ class salt
         cursor m_tail;
         std::set<cursor> m_acks;
         std::map<cursor, buffer> m_parts;
-        std::list<std::pair<boost::asio::mutable_buffer, io_callback>> m_handles;
+        std::list<std::pair<buffer_ptr, callback>> m_handles;
     };
+
+    typedef std::unique_lock<std::mutex> unique_lock;
 
     void on_error(const boost::system::error_code& ec)
     {
@@ -839,7 +856,7 @@ class salt
         m_ostream.error(ec);
     }
 
-    void send_packet(std::unique_lock<std::mutex>& lock, std::shared_ptr<packet> pack)
+    void send_packet(unique_lock& lock, buffer_ptr pack)
     {
         lock.unlock();
         try
@@ -854,7 +871,7 @@ class salt
         lock.lock();
     }
 
-    void receive_packet(std::unique_lock<std::mutex>& lock, std::shared_ptr<packet> pack)
+    void receive_packet(unique_lock& lock, buffer_ptr pack)
     {
         lock.unlock();
         try
@@ -871,7 +888,7 @@ class salt
 
     void do_read()
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        unique_lock lock(m_mutex);
         
         while (m_connect.alive())
         {
@@ -894,7 +911,7 @@ class salt
 
     void do_write()
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        unique_lock lock(m_mutex);
 
         while (m_connect.alive())
         {
@@ -991,31 +1008,31 @@ public:
 
     void shutdown(const callback& handle)
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        unique_lock lock(m_mutex);
         m_connect.shutdown(handle);
     }
 
     void connect(const callback& handle)
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        unique_lock lock(m_mutex);
         m_connect.connect(handle);
     }
 
     void accept(const callback& handle)
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        unique_lock lock(m_mutex);
         m_connect.accept(handle);
     }
 
-    void read(const boost::asio::mutable_buffer& buf, const io_callback& handle)
+    void read(buffer_ptr buf, const callback& handle)
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        unique_lock lock(m_mutex);
         m_istream.append(buf, handle);
     }
 
-    void write(const boost::asio::const_buffer& buf, const io_callback& handle)
+    void write(buffer_ptr buf, const callback& handle)
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        unique_lock lock(m_mutex);
         m_ostream.append(buf, handle);
         m_wcon.notify_all();
     }
