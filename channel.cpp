@@ -1,3 +1,5 @@
+#include "salt.h"
+#include "transport.h"
 #include <map>
 #include <set>
 #include <list>
@@ -12,217 +14,23 @@
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
-#include <boost/shared_array.hpp>
 
 
 namespace salt {
 
-template<class byte_t> struct buffer
+template<class protocol> class channel_impl : public channel
 {
-    buffer(size_t len) 
-        : m_buffer(new uint8_t[len])
-        , m_beg(0)
-        , m_end(len)
+    struct packet : public shared_buffer<uint8_t>
     {
-        std::memset(m_buffer.get(), 0, len);
-    }
-
-    buffer(byte_t* data, size_t len) 
-        : m_buffer(data, [](uint8_t*){})
-        , m_beg(0)
-        , m_end(len)
-    {
-    }
-
-    byte_t* data() const
-    {
-        return m_buffer.get() + m_beg;
-    }
-    
-    size_t size() const
-    {
-        return m_end - m_beg;
-    }
-
-    void shrink(size_t len)
-    {
-        if (len > size())
-            throw std::runtime_error("shrink: out of range");
-
-        m_end = m_beg + len;
-    }
-
-    void prune(size_t len)
-    {
-        if (len > size())
-            throw std::runtime_error("prune: out of range");
-
-        m_beg += len;
-    }
-
-    buffer slice(size_t off, size_t len) const
-    {
-        if (off > size() || off + len > size())
-            throw std::runtime_error("slice: out of range");
-
-        return buffer(m_buffer, m_beg + off, m_beg + off + len);
-    }
-
-    bool unique() const
-    {
-        return m_buffer.unique();
-    }
-
-private:
-
-    buffer(boost::shared_array<byte_t> buffer, size_t beg, size_t end)
-        : m_buffer(buffer)
-        , m_beg(beg)
-        , m_end(end)
-    {
-    }
-
-    boost::shared_array<byte_t> m_buffer;
-    size_t m_beg;
-    size_t m_end;
-};
-
-typedef buffer<uint8_t> mutable_buffer;
-typedef buffer<const uint8_t> const_buffer;
-
-typedef std::function<void(const boost::system::error_code&)> callback;
-typedef std::function<void(const boost::system::error_code&, size_t)> io_callback;
-
-namespace udp {
-
-class channel
-{
-    typedef std::function<void(const boost::system::error_code&, size_t)> io_callback;
-    typedef std::function<void(const io_callback&)> io_call;
-
-    boost::asio::io_context        m_io;
-    boost::asio::ip::udp::socket   m_socket;
-    boost::asio::ip::udp::endpoint m_peer;
-
-    size_t exec(const io_call& invoke)
-    {
-        boost::asio::deadline_timer timer(m_io);
-        timer.expires_from_now(boost::posix_time::seconds(30));
-        timer.async_wait([&](const boost::system::error_code& error)
+        struct traits
         {
-            if (error)
-            {
-                if (error == boost::asio::error::operation_aborted)
-                    return;
-
-                try
-                {
-                    m_socket.cancel();
-                }
-                catch (const std::exception &ex)
-                {
-                    std::cout << ex.what();
-                }
-            }
-        });
-
-        boost::system::error_code code = boost::asio::error::would_block;
-        size_t length = 0;
-
-        invoke([&code, &length](const boost::system::error_code& c, size_t l) {
-            code = c;
-            length = l;
-        });
-
-        do {
-            m_io.run_one();
-        } while (code == boost::asio::error::would_block);
-
-        timer.cancel();
-
-        if (code)
-            throw boost::system::system_error(code);
-
-        return length;
-    }
-
-public:
-
-    channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer)
-        : m_socket(m_io)
-        , m_peer(peer)
-    {
-        m_socket.open(bind.protocol());
-        m_socket.non_blocking(true);
-        m_socket.bind(bind);
-    }
-
-    ~channel()
-    {
-        if (m_socket.is_open())
-        {
-            boost::system::error_code ec;
-            m_socket.shutdown(boost::asio::ip::udp::socket::shutdown_both, ec);
-            m_socket.close(ec);
-        }
-    }
-
-    boost::asio::ip::udp::endpoint local_endpoint() const
-    {
-        return m_socket.local_endpoint();
-    }
-
-    boost::asio::ip::udp::endpoint remote_endpoint() const
-    {
-        return m_peer;
-    }
-
-    template<class mutable_byte> size_t receive(const buffer<mutable_byte>& pack)
-    {
-        auto timer = [start = boost::posix_time::microsec_clock::universal_time()]()
-        {
-            return boost::posix_time::microsec_clock::universal_time() - start;
+            static constexpr uint8_t sign = 0x99;
+            static constexpr uint8_t version = 1 << 4;
+            static constexpr size_t header_size = 16;
+            static constexpr size_t max_packet_size = 9992;
+            static constexpr size_t max_payload_size = max_packet_size - header_size;
         };
 
-        while (timer().total_seconds() < 30)
-        {
-            boost::asio::ip::udp::endpoint src;
-            size_t size = exec([&](const io_callback& callback)
-            {
-                m_socket.async_receive_from(boost::asio::buffer(pack.data(), pack.size()), src, callback);
-            });
-
-            if (src == m_peer)
-                return size;
-        }
-
-        throw boost::system::error_code(boost::asio::error::operation_aborted);
-    }
-
-    template<class const_byte> size_t send(const buffer<const_byte>& pack)
-    {
-        size_t size = exec([&](const io_callback& callback)
-        {
-            m_socket.async_send_to(boost::asio::buffer(pack.data(), pack.size()), m_peer, callback);
-        });
-
-        if (size < pack.size())
-            throw std::runtime_error("can't send message");
-    }
-};
-
-}
-
-const uint8_t SIGN = 0x99;
-const uint8_t VERSION = 1 << 4;
-const size_t PACKET_HEADER_SIZE = 16;
-const size_t MAX_PACKET_SIZE = 9992;
-const size_t MAX_PAYLOAD_SIZE = MAX_PACKET_SIZE - PACKET_HEADER_SIZE;
-
-class channel
-{
-    struct packet : public buffer<uint8_t>
-    {
         enum flag 
         {
             syn = 0x01,
@@ -231,10 +39,10 @@ class channel
             ack = 0x08
         };
 
-        packet() : buffer(MAX_PACKET_SIZE)
+        packet() : shared_buffer(traits::max_packet_size)
         {
-            data()[0] = SIGN;
-            data()[1] = VERSION;
+            data()[0] = traits::sign;
+            data()[1] = traits::version;
         }
 
         uint8_t sign() const
@@ -282,9 +90,9 @@ class channel
             return flags() & v;
         }
 
-        buffer payload() const
+        shared_buffer payload() const
         {
-            return buffer::slice(PACKET_HEADER_SIZE, size() - PACKET_HEADER_SIZE);
+            return slice(traits::header_size, size() - traits::header_size);
         }
     };
 
@@ -544,7 +352,7 @@ class channel
                         break;
                 }
 
-                pack.shrink(PACKET_HEADER_SIZE);
+                pack.shrink(packet::traits::header_size);
                 return true;
             }
 
@@ -657,11 +465,11 @@ class channel
             if (iter == m_chunks.end())
                 return false;
 
-            std::memcpy(pack.data() + PACKET_HEADER_SIZE, iter->second.data.data(), iter->second.data.size());
+            std::memcpy(pack.data() + packet::traits::header_size, iter->second.data.data(), iter->second.data.size());
 
             pack.set_cursor(iter->first.value);
             pack.set_flags(packet::psh);
-            pack.shrink(PACKET_HEADER_SIZE + iter->second.data.size());
+            pack.shrink(packet::traits::header_size + iter->second.data.size());
 
             iter->second.retime();
             
@@ -685,10 +493,10 @@ class channel
                 return;
             }
 
-            for(size_t shift = 0; shift < buf.size(); shift += MAX_PAYLOAD_SIZE)
+            for(size_t shift = 0; shift < buf.size(); shift += packet::traits::max_payload_size)
             {
                 m_chunks.emplace(
-                    m_tail++, buf.slice(shift, std::min(MAX_PAYLOAD_SIZE, buf.size() - shift))
+                    m_tail++, buf.slice(shift, std::min(packet::traits::max_payload_size, buf.size() - shift))
                     );
             }
             m_handles.insert(std::make_pair(m_tail, boost::bind(handle, boost::asio::placeholders::error, buf.size())));
@@ -772,7 +580,7 @@ class channel
             {
                 pack.set_cursor(it->value);
                 pack.set_flags(packet::psh | packet::ack);
-                pack.shrink(PACKET_HEADER_SIZE);
+                pack.shrink(packet::traits::header_size);
                 return true;
             }
             return false;
@@ -983,18 +791,18 @@ class channel
 
 public:
 
-    channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer)
-        : m_udp(bind, peer)
+    channel_impl(const protocol::endpoint& bind, const protocol::endpoint& peer)
+        : m_channel(bind, peer)
         , m_connect(m_io)
         , m_istream(m_io)
         , m_ostream(m_io)
-        , m_rjob(boost::bind(&channel::do_read, this))
-        , m_wjob(boost::bind(&channel::do_write, this))
-        , m_cjob(boost::bind(&channel::do_callback, this))
+        , m_rjob(boost::bind(&channel_impl::do_read, this))
+        , m_wjob(boost::bind(&channel_impl::do_write, this))
+        , m_cjob(boost::bind(&channel_impl::do_callback, this))
     {
     }
 
-    ~channel()
+    ~channel_impl()
     {
         terminate();
 
@@ -1029,17 +837,7 @@ public:
         }
     }
 
-    boost::asio::ip::udp::endpoint local_endpoint() const
-    {
-        return m_udp.local_endpoint();
-    }
-
-    boost::asio::ip::udp::endpoint remote_endpoint() const
-    {
-        return m_udp.remote_endpoint();
-    }
-
-    void shutdown(const callback& handle)
+    void shutdown(const callback& handle) noexcept(true) override
     {
         unique_lock lock(m_mutex);
 
@@ -1056,7 +854,7 @@ public:
         m_connect.shutdown(handle);
     }
 
-    void connect(const callback& handle)
+    void connect(const callback& handle) noexcept(true) override
     {
         unique_lock lock(m_mutex);
 
@@ -1073,7 +871,7 @@ public:
         m_connect.connect(handle);
     }
 
-    void accept(const callback& handle)
+    void accept(const callback& handle) noexcept(true) override
     {
         unique_lock lock(m_mutex);
 
@@ -1090,7 +888,7 @@ public:
         m_connect.accept(handle);
     }
 
-    void read(const mutable_buffer& buf, const io_callback& handle)
+    void read(const mutable_buffer& buf, const io_callback& handle) noexcept(true) override
     {
         unique_lock lock(m_mutex);
 
@@ -1106,7 +904,7 @@ public:
         m_istream.append(buf, handle);
     }
 
-    void write(const const_buffer& buf, const io_callback& handle)
+    void write(const const_buffer& buf, const io_callback& handle) noexcept(true) override
     {
         unique_lock lock(m_mutex);
                 
@@ -1126,7 +924,7 @@ public:
 private:
 
     boost::asio::io_context  m_io;
-    udp::channel             m_udp;
+    transport<protocol>      m_channel;
     packet_factory           m_packer;
     connect_handler          m_connect;
     istream_handler          m_istream;
@@ -1138,9 +936,14 @@ private:
     std::thread              m_cjob;
 };
 
-std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer)
+std::shared_ptr<channel> create_udp_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer)
 {
-    return std::make_shared<channel>(bind, peer);
+    return std::make_shared<channel_impl<boost::asio::ip::udp>>(bind, peer);
+}
+
+std::shared_ptr<channel> create_local_channel(const boost::asio::local::datagram_protocol::endpoint& bind, const boost::asio::local::datagram_protocol::endpoint& peer)
+{
+    return std::make_shared<channel_impl<boost::asio::local::datagram_protocol>>(bind, peer);
 }
 
 }
