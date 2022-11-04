@@ -1,24 +1,21 @@
 #include "salt.h"
 #include "transport.h"
+#include "reactor.h"
 #include <map>
 #include <set>
 #include <list>
 #include <iostream>
-#include <thread>
-#include <functional>
 #include <mutex>
-#include <condition_variable>
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
-#include <boost/asio/buffer.hpp>
-#include <boost/asio/ip/udp.hpp>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
 
 namespace salt {
 
-template<class protocol> class channel_impl : public channel
+template<class protocol> 
+class channel_impl : public channel, public std::enable_shared_from_this<channel_impl<protocol>>
 {
     struct packet : public shared_buffer<uint8_t>
     {
@@ -645,79 +642,80 @@ template<class protocol> class channel_impl : public channel
         std::list<std::pair<mutable_buffer, io_callback>> m_handles;
     };
 
+    typedef std::weak_ptr<channel_impl> weak_ptr;
     typedef std::unique_lock<std::mutex> unique_lock;
 
     void on_error(const boost::system::error_code& ec)
     {
+        unique_lock lock(m_mutex);
+
         m_connect.error(ec);
         m_istream.error(ec);
         m_ostream.error(ec);
     }
 
-    void send_packet(unique_lock& lock, packet& pack)
+    void on_read(const packet& pack)
     {
-        lock.unlock();
-        try
-        {
-            m_udp.send(pack);
-        }
-        catch (...)
-        {
-            lock.lock();
-            throw;
-        }
-        lock.lock();
-    }
+        unique_lock lock(m_mutex);
 
-    void receive_packet(unique_lock& lock, packet& pack)
-    {
-        lock.unlock();
-        try
+        m_read_delay.cancel();
+
+        if (m_connect.is_alive())
         {
-            pack.shrink(
-                m_udp.receive(pack)
-                );
+            if (pack.size() >= packet::traits::header_size)
+            {
+                if (m_connect.parse(pack))
+                {
+                    if (m_connect.is_remote_fin(pack))
+                    {
+                        m_istream.error(boost::asio::error::operation_aborted);
+                        m_ostream.error(boost::asio::error::operation_aborted);
+                    }
+                }
+                else if (m_connect.is_linked())
+                {
+                    m_istream.parse(pack) || m_ostream.parse(pack);
+                }
+            }
         }
-        catch (...)
-        {
-            lock.lock();
-            throw;
-        }
-        lock.lock();
     }
 
     void do_read()
     {
         unique_lock lock(m_mutex);
-        
-        while (m_connect.is_alive())
-        {
-            try
-            {
-                auto pack = m_packer.make_packet();
-                
-                receive_packet(lock, pack);
 
-                if (m_connect.is_alive())
+        if (m_connect.is_alive())
+        {
+            weak_ptr weak(shared_from_this());
+
+            m_read_delay.expires_from_now(boost::posix_time::seconds(30));
+            m_read_delay.async_wait([weak](const boost::system::error_code& error)
+            {
+                if (error == boost::asio::error::operation_aborted)
+                    return;
+
+                if (auto ptr = weak.lock())
                 {
-                    if (m_connect.parse(pack))
+                    ptr->on_error(error ? error : boost::asio::error::timed_out);
+                }
+            };
+
+            auto pack = m_packer.make_packet();
+            m_channel.async_receive(pack, [weak, pack](const boost::system::error_code& error, size_t bytes)
+            {
+                pack.prune(bytes);
+
+                if (auto ptr = weak.lock())
+                {
+                    if (error)
+                        ptr->on_error(error);
+                    else
                     {
-                        if (m_connect.is_remote_fin(pack))
-                        {
-                            m_istream.error(boost::asio::error::operation_aborted);
-                            m_ostream.error(boost::asio::error::operation_aborted);
-                        }
-                    }
-                    else if (m_connect.is_linked())
-                    {
-                        m_istream.parse(pack) || m_ostream.parse(pack);
+                        ptr->on_read(pack);
+                        ptr->do_read();
                     }
                 }
-            }
-            catch(const boost::system::system_error& err)
-            {
-                on_error(err.code());
-            }
+            });
         }
     }
 
@@ -725,59 +723,86 @@ template<class protocol> class channel_impl : public channel
     {
         unique_lock lock(m_mutex);
 
-        while (m_connect.is_alive())
+        if (m_connect.is_alive())
         {
-            try
-            {
-                m_wcon.wait_for(lock, std::chrono::seconds(15), [&]()
-                {
-                    return !m_connect.is_alive() || m_connect.is_charged() 
-                           || m_istream.is_charged() || m_ostream.is_charged();
-                });
+            weak_ptr weak(shared_from_this());
 
-                if (m_connect.is_alive())
+            if (m_connect.is_charged() || m_istream.is_charged() || m_ostream.is_charged())
+            {
+                auto pack = m_packer.make_packet();
+                
+                if (m_connect.imbue(pack))
                 {
-                    auto pack = m_packer.make_packet();
-                    
-                    if (m_connect.imbue(pack))
+                    if (m_connect.is_local_fin(pack))
                     {
-                        if (m_connect.is_local_fin(pack))
+                        m_istream.error(boost::asio::error::operation_aborted);
+                        m_ostream.error(boost::asio::error::operation_aborted);
+                    }
+                }
+                else if (m_connect.is_linked())
+                {
+                    m_istream.imbue(pack) || m_ostream.imbue(pack);
+                }
+
+                m_channel.async_send(pack, [weak](const boost::system::error_code& error, size_t bytes)
+                {
+                    if (auto ptr = weak.lock())
+                    {
+                        if (error)
+                            ptr->on_error(error);
+                        else
                         {
-                            m_istream.error(boost::asio::error::operation_aborted);
-                            m_ostream.error(boost::asio::error::operation_aborted);
+                            if (bytes < pack.size())
+                                ptr->on_error(boost::asio::error::message_size);
+                            else
+                                ptr->do_write();
                         }
                     }
-                    else if (m_connect.is_linked())
-                    {
-                        m_istream.imbue(pack) || m_ostream.imbue(pack);
-                    }
-
-                    send_packet(lock, pack);
-                }
+                });
             }
-            catch(const boost::system::system_error& err)
+            else
             {
-                on_error(err.code());
+                m_write_delay.expires_from_now(boost::posix_time::milliseconds(50));
+                m_write_delay.async_wait([weak](const boost::system::error_code& error)
+                {
+                    if (auto ptr = weak.lock())
+                    {
+                        if (error != boost::asio::error::operation_aborted)
+                            ptr->on_error(error);
+                        else
+                            ptr->do_write();
+                    }
+                };
             }
         }
     }
 
-    void do_callback()
+    void start()
     {
-        try
+        m_channel.open();
+
+        weak_ptr weak(shared_from_this());
+
+        m_reactor->get_io().post([weak]()
         {
-            m_io.run();
-        }
-        catch (const boost::system::system_error& err)
+            if (auto ptr = weak.lock())
+            {
+                ptr->do_read();
+            } 
+        });
+
+        m_reactor->get_io().post([weak]()
         {
-            std::cout << err.what();
-            throw;
-        }
+            if (auto ptr = weak.lock())
+            {
+                ptr->do_write();
+            } 
+        });
     }
 
-    void terminate()
+    void stop()
     {
-        unique_lock lock(m_mutex);
+        m_channel.close();
 
         if (m_connect.is_alive())
         {
@@ -786,55 +811,27 @@ template<class protocol> class channel_impl : public channel
             m_ostream.error(boost::asio::error::operation_aborted);
         }
 
-        m_io.stop();
+        boost::system::error_code ec;
+        m_write_delay.cancel(ec);
+        m_read_delay.cancel(ec);
     }
 
 public:
 
-    channel_impl(const protocol::endpoint& bind, const protocol::endpoint& peer)
-        : m_channel(bind, peer)
-        , m_connect(m_io)
-        , m_istream(m_io)
-        , m_ostream(m_io)
-        , m_rjob(boost::bind(&channel_impl::do_read, this))
-        , m_wjob(boost::bind(&channel_impl::do_write, this))
-        , m_cjob(boost::bind(&channel_impl::do_callback, this))
+    channel_impl(reactor_ptr reactor, const protocol::endpoint& bind, const protocol::endpoint& peer)
+        : m_reactor(reactor)
+        , m_channel(reactor, bind, peer)
+        , m_write_delay(reactor->get_io())
+        , m_read_delay(reactor->get_io())
+        , m_connect(reactor->get_io())
+        , m_istream(reactor->get_io())
+        , m_ostream(reactor->get_io())
     {
     }
 
     ~channel_impl()
     {
-        terminate();
-
-        try
-        {
-            if (m_rjob.joinable())
-                m_rjob.join();
-        }
-        catch (const std::exception& ex)
-        {
-            std::cout << ex.what() << std::endl;
-        }
-
-        try
-        {
-            if (m_wjob.joinable())
-                m_wjob.join();
-        }
-        catch (const std::exception& ex)
-        {
-            std::cout << ex.what() << std::endl;
-        }
-        
-        try
-        {
-            if (m_cjob.joinable() && std::this_thread::get_id() != m_cjob.get_id())
-                m_cjob.join();
-        }
-        catch (const std::exception &ex)
-        {
-            std::cout << ex.what() << std::endl;
-        }
+        stop();
     }
 
     void shutdown(const callback& handle) noexcept(true) override
@@ -847,7 +844,7 @@ public:
                 boost::asio::error::already_started : m_connect.is_alive() ? 
                     boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            m_io.post(boost::bind(handle, error));
+            m_reactor->get_io().post(boost::bind(handle, error));
             return;
         }
 
@@ -860,15 +857,17 @@ public:
 
         if (!m_connect.is_alive() || m_connect.is_linked() || m_connect.is_connecting())
         {
-            boost::system::error_code error = m_connect.is_connecting() ? 
+            boost::system::error_code ec = m_connect.is_connecting() ? 
                 boost::asio::error::already_started : m_connect.is_linked() ? 
                     boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-            m_io.post(boost::bind(handle, error));
+            m_reactor->get_io().post(boost::bind(handle, ec));
             return;
         }
 
         m_connect.connect(handle);
+        
+        start();
     }
 
     void accept(const callback& handle) noexcept(true) override
@@ -877,15 +876,17 @@ public:
 
         if (!m_connect.is_alive() || m_connect.is_linked() || m_connect.is_connecting())
         {
-            boost::system::error_code error = m_connect.is_connecting() ? 
+            boost::system::error_code ec = m_connect.is_connecting() ? 
                 boost::asio::error::already_started : m_connect.is_linked() ? 
                     boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-            m_io.post(boost::bind(handle, error));
+            m_reactor->get_io().post(boost::bind(handle, ec));
             return;
         }
 
         m_connect.accept(handle);
+
+        start();
     }
 
     void read(const mutable_buffer& buf, const io_callback& handle) noexcept(true) override
@@ -894,10 +895,10 @@ public:
 
         if (!m_connect.is_alive() || !m_connect.is_linked())
         {
-            boost::system::error_code error = m_connect.is_alive() ? 
+            boost::system::error_code ec = m_connect.is_alive() ? 
                 boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            m_io.post(boost::bind(handle, error, 0));
+            m_reactor->get_io().post(boost::bind(handle, ec, 0));
             return;
         }
 
@@ -910,40 +911,47 @@ public:
                 
         if (!m_connect.is_alive() || !m_connect.is_linked())
         {
-            boost::system::error_code error = m_connect.is_alive() ? 
+            boost::system::error_code ec = m_connect.is_alive() ? 
                 boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            m_io.post(boost::bind(handle, error, 0));
+            m_reactor->get_io().post(boost::bind(handle, ec, 0));
             return;
         }
 
-        m_ostream.append(buf, handle);
-        m_wcon.notify_all();
+        boost::system::error_code ec;
+        m_write_delay.cancel(ec);
+
+        if (ec)
+        {
+            m_reactor->get_io().post(boost::bind(handle, ec, 0));
+        }
+        else
+        {
+            m_ostream.append(buf, handle);
+        }
     }
 
 private:
 
-    boost::asio::io_context  m_io;
-    transport<protocol>      m_channel;
-    packet_factory           m_packer;
-    connect_handler          m_connect;
-    istream_handler          m_istream;
-    ostream_handler          m_ostream;
-    std::mutex               m_mutex;
-    std::condition_variable  m_wcon;
-    std::thread              m_rjob;
-    std::thread              m_wjob;
-    std::thread              m_cjob;
+    reactor_ptr m_reactor;
+    transport<protocol> m_channel;
+    boost::asio::deadline_timer m_write_delay;
+    boost::asio::deadline_timer m_read_delay;
+    connect_handler m_connect;
+    istream_handler m_istream;
+    ostream_handler m_ostream;
+    packet_factory m_packer;
+    std::mutex m_mutex;
 };
 
-std::shared_ptr<channel> create_udp_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer)
+channel_ptr create_udp_channel(reactor_ptr reactor, const udp_endpoint& bind, const udp_endpoint& peer)
 {
-    return std::make_shared<channel_impl<boost::asio::ip::udp>>(bind, peer);
+    return std::make_shared<channel_impl<udp_endpoint::protocol_type>>(reactor, bind, peer);
 }
 
-std::shared_ptr<channel> create_local_channel(const boost::asio::local::datagram_protocol::endpoint& bind, const boost::asio::local::datagram_protocol::endpoint& peer)
+channel_ptr create_local_channel(reactor_ptr reactor, const local_endpoint& bind, const local_endpoint& peer)
 {
-    return std::make_shared<channel_impl<boost::asio::local::datagram_protocol>>(bind, peer);
+    return std::make_shared<channel_impl<local_endpoint::protocol_type>>(reactor, bind, peer);
 }
 
 }

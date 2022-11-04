@@ -1,73 +1,31 @@
 #pragma once
 
 #include "buffer.h"
-#include <list>
+#include "reactor.h"
+#include <memory>
 #include <iostream>
 #include <functional>
 #include <boost/asio.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/ip/udp.hpp>
-#include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
 namespace salt {
 
 template<class protocol> class transport
 {
-    typedef std::function<void(const boost::system::error_code&, size_t)> io_callback;
-    typedef std::function<void(const io_callback&)> io_call;
-
-    boost::asio::io_context m_io;
-    protocol::socket m_socket;
+    reactor_ptr m_reactor;
+    protocol::endpoint m_bind;
     protocol::endpoint m_peer;
-
-    size_t exec(const io_call& invoke)
-    {
-        boost::asio::deadline_timer timer(m_io);
-        timer.expires_from_now(boost::posix_time::seconds(30));
-        timer.async_wait([&](const boost::system::error_code& error)
-        {
-            if (error)
-            {
-                if (error == boost::asio::error::operation_aborted)
-                    return;
-
-                try
-                {
-                    m_socket.cancel();
-                }
-                catch (const std::exception &ex)
-                {
-                    std::cout << ex.what();
-                }
-            }
-        });
-
-        boost::system::error_code code = boost::asio::error::would_block;
-        size_t length = 0;
-
-        invoke([&code, &length](const boost::system::error_code& c, size_t l) {
-            code = c;
-            length = l;
-        });
-
-        do {
-            m_io.run_one();
-        } while (code == boost::asio::error::would_block);
-
-        timer.cancel();
-
-        if (code)
-            throw boost::system::system_error(code);
-
-        return length;
-    }
+    protocol::socket m_socket;
 
 public:
 
-    transport(const protocol::socket& bind, const protocol::socket& peer)
-        : m_socket(m_io)
+    transport(reactor_ptr reactor, const protocol::socket& bind, const protocol::socket& peer)
+        : m_reactor(reactor)
+        , m_bind(bind)
         , m_peer(peer)
+        , m_socket(reactor->get_io())
     {
         m_socket.open(bind.protocol());
         m_socket.non_blocking(true);
@@ -83,37 +41,41 @@ public:
         }
     }
 
-    size_t receive(const mutable_buffer& buf) noexcept(false)
+    void open() noexcept(false)
     {
-        auto timer = [start = boost::posix_time::microsec_clock::universal_time()]()
-        {
-            return boost::posix_time::microsec_clock::universal_time() - start;
-        };
-
-        while (timer().total_seconds() < 30)
-        {
-            typename protocol::endpoint src;
-            size_t size = exec([&](const io_callback& callback)
-            {
-                m_socket.async_receive_from(boost::asio::buffer(buf.data(), buf.size()), src, callback);
-            });
-
-            if (src == m_peer)
-                return size;
-        }
-
-        throw boost::system::error_code(boost::asio::error::operation_aborted);
+        m_socket.open(m_bind.protocol());
+        m_socket.non_blocking(true);
+        m_socket.bind(m_bind);
     }
 
-    size_t send(const const_buffer& buf) noexcept(false)
+    void close() noexcept(false)
     {
-        size_t size = exec([&](const io_callback& callback)
-        {
-            m_socket.async_send_to(boost::asio::buffer(buf.data(), buf.size()), m_peer, callback);
-        });
+        m_socket.close();
+    }
 
-        if (size < buf.size())
-            throw std::runtime_error("can't send message");
+    typedef std::function<void(const boost::system::error_code&, size_t)> io_callback;
+    
+    void async_receive(const mutable_buffer& buf, const io_callback& callback) noexcept(true)
+    {
+        auto from = std::make_shared<protocol::endpoint>();
+        auto checker = [this, from](const boost::system::error_code& error, size_t bytes)
+        {
+            if (error || *from == m_peer)
+            {
+                callback(error, bytes);
+            }
+            else
+            {
+                m_socket.async_receive_from(boost::asio::buffer(buf.data(), buf.size()), *from, checker);
+            }
+        };
+
+        m_socket.async_receive_from(boost::asio::buffer(buf.data(), buf.size()), *from, checker);
+    }
+
+    void async_send(const const_buffer& buf, const io_callback& callback) noexcept(true)
+    {
+        m_socket.async_send_to(boost::asio::buffer(buf.data(), buf.size()), m_peer, callback);
     }
 };
 

@@ -1,9 +1,8 @@
 #pragma once
 
-#include <memory>
+#include <cstring>
 #include <type_traits>
 #include <boost/shared_array.hpp>
-#include <boost/asio/ip/udp.hpp>
 
 namespace salt {
 
