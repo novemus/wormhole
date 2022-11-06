@@ -4,10 +4,11 @@
 #include <map>
 #include <set>
 #include <list>
+#include <atomic>
 #include <iostream>
 #include <mutex>
 #include <boost/asio.hpp>
-#include <boost/bind.hpp>
+#include <boost/bind/bind.hpp>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
@@ -23,8 +24,8 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
         {
             static constexpr uint8_t sign = 0x99;
             static constexpr uint8_t version = 1 << 4;
-            static constexpr size_t header_size = 16;
             static constexpr size_t max_packet_size = 9992;
+            static constexpr size_t header_size = 16;
             static constexpr size_t max_payload_size = max_packet_size - header_size;
         };
 
@@ -167,12 +168,12 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
             auto it = m_cache.begin();
             while (it != m_cache.end())
             {
-                if (it->second.unique())
+                if (it->first.unique())
                 {
-                    packet pack = it->second;
+                    packet pack = it->first;
                     std::memset(pack.data(), 0, pack.size());
 
-                    it->first = std::time(0);
+                    it->second = std::time(0);
 
                     compress_cache();
 
@@ -181,9 +182,9 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
                 ++it;
             }
 
-            m_cache.emplace_back(std::time(0), packet());
+            m_cache.emplace_back(packet(), std::time(0));
 
-            return m_cache.back().second;
+            return m_cache.back().first;
         }
 
     private:
@@ -196,19 +197,25 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
             auto it = m_cache.begin();
             while (it != m_cache.end())
             {
-                if (it->second.unique() && it->first + TTL > now)
+                if (it->first.unique() && it->second + TTL > now)
                     it = m_cache.erase(it);
                 else
                     ++it;
             }
         }
 
-        uint32_t m_pin;
-        std::list<std::pair<time_t, packet>> m_cache;
+        std::list<std::pair<packet, time_t>> m_cache;
     };
 
     struct connect_handler
     {
+        static uint32_t make_pin()
+        {
+            static std::atomic<uint32_t> s_pin = 0;
+            uint32_t pin = ++s_pin;
+            return pin > 0 ? pin : make_pin();
+        };
+
         enum job
         {
             snd_syn,
@@ -221,7 +228,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
             : m_io(io)
             , m_alive(true)
             , m_linked(false)
-            , m_loc_pin(1) // TODO: random
+            , m_loc_pin(make_pin())
             , m_rem_pin(0)
         {
         }
@@ -246,7 +253,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
 
         bool parse(const packet& pack)
         {
-            if (pack.has_flag(packet::syn) && m_rem_pin == 0 || m_rem_pin == pack.pin())
+            if (pack.has_flag(packet::syn) && (m_rem_pin == 0 || m_rem_pin == pack.pin()))
             {
                 m_rem_pin = pack.pin();
 
@@ -401,8 +408,8 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
         boost::asio::io_context& m_io;
         bool m_alive;
         bool m_linked;
-        uint32_t m_rem_pin;
         uint32_t m_loc_pin;
+        uint32_t m_rem_pin;
         std::set<job> m_jobs;
         callback on_connect;
         callback on_shutdown;
@@ -420,7 +427,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
             auto hit = m_handles.begin();
             while (hit != m_handles.end())
             {
-                m_io.post(boost::bind(hit->second, ec, 0));
+                m_io.post(boost::bind(hit->second.first, ec, 0));
                 ++hit;
             }
             m_handles.clear();
@@ -428,7 +435,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
 
         bool parse(const packet& pack)
         {
-            if (!pack.flags() == packet::psh | packet::ack)
+            if (pack.flags() != (packet::psh | packet::ack))
                 return false;
 
             m_chunks.erase(pack.cursor());
@@ -444,7 +451,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
             {
                 if (hit->first <= top)
                 {
-                    m_io.post(boost::bind(hit->second, boost::system::error_code()));
+                    m_io.post(boost::bind(hit->second.first, boost::system::error_code(), hit->second.second));
                     hit = m_handles.erase(hit);
                 }
                 else
@@ -456,7 +463,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
         bool imbue(packet& pack)
         {
             auto iter = std::find_if(
-                    m_chunks.begin(), m_chunks.end(), [](auto it) { return it->second.ready(); }
+                    m_chunks.begin(), m_chunks.end(), [](const std::pair<cursor, chunk>& p) { return p.second.ready(); }
                 );
 
             if (iter == m_chunks.end())
@@ -476,7 +483,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
         bool is_charged() const
         {
             return std::find_if(
-                    m_chunks.begin(), m_chunks.end(), [](auto it) { return it->second.ready(); }
+                    m_chunks.begin(), m_chunks.end(), [](const std::pair<cursor, chunk>& p) { return p.second.ready(); }
                 ) != m_chunks.end();
         }
 
@@ -496,7 +503,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
                     m_tail++, buf.slice(shift, std::min(packet::traits::max_payload_size, buf.size() - shift))
                     );
             }
-            m_handles.insert(std::make_pair(m_tail, boost::bind(handle, boost::asio::placeholders::error, buf.size())));
+            m_handles.insert(std::make_pair(m_tail, std::make_pair(handle, buf.size())));
         }
 
     private:
@@ -508,7 +515,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
             
             chunk(const const_buffer& buf) : data(buf) { }
 
-            bool ready()
+            bool ready() const
             {
                 static const int64_t ACK_AGE = 50;
 
@@ -530,7 +537,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
         boost::asio::io_context& m_io;
         cursor m_tail;
         std::map<cursor, chunk> m_chunks;
-        std::map<cursor, io_callback> m_handles;
+        std::map<cursor, std::pair<io_callback, size_t>> m_handles;
     };
 
     struct istream_handler
@@ -566,8 +573,10 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
                     std::make_pair(pack.cursor(), pack.payload())
                     );
 
-                transmit();
+                transmit_data();
             }
+
+            return true;
         }
 
         bool imbue(packet& pack)
@@ -591,12 +600,12 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
         void append(const mutable_buffer& buf, const io_callback& handle)
         {
             m_handles.push_back(std::make_pair(buf, handle));
-            transmit();
+            transmit_data();
         }
     
     private:
 
-        void transmit()
+        void transmit_data()
         {
             while (!m_handles.empty())
             {
@@ -642,6 +651,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
         std::list<std::pair<mutable_buffer, io_callback>> m_handles;
     };
 
+    typedef std::shared_ptr<transport<protocol>> transport_ptr;
     typedef std::weak_ptr<channel_impl> weak_ptr;
     typedef std::unique_lock<std::mutex> unique_lock;
 
@@ -686,7 +696,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
 
         if (m_connect.is_alive())
         {
-            weak_ptr weak(shared_from_this());
+            weak_ptr weak(this->shared_from_this());
 
             m_read_delay.expires_from_now(boost::posix_time::seconds(30));
             m_read_delay.async_wait([weak](const boost::system::error_code& error)
@@ -698,12 +708,13 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
                 {
                     ptr->on_error(error ? error : boost::asio::error::timed_out);
                 }
-            };
+            });
 
             auto pack = m_packer.make_packet();
             m_channel.async_receive(pack, [weak, pack](const boost::system::error_code& error, size_t bytes)
             {
-                pack.prune(bytes);
+                auto copy = pack;
+                copy.prune(bytes);
 
                 if (auto ptr = weak.lock())
                 {
@@ -711,7 +722,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
                         ptr->on_error(error);
                     else
                     {
-                        ptr->on_read(pack);
+                        ptr->on_read(copy);
                         ptr->do_read();
                     }
                 }
@@ -725,7 +736,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
 
         if (m_connect.is_alive())
         {
-            weak_ptr weak(shared_from_this());
+            weak_ptr weak(this->shared_from_this());
 
             if (m_connect.is_charged() || m_istream.is_charged() || m_ostream.is_charged())
             {
@@ -744,7 +755,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
                     m_istream.imbue(pack) || m_ostream.imbue(pack);
                 }
 
-                m_channel.async_send(pack, [weak](const boost::system::error_code& error, size_t bytes)
+                m_channel.async_send(pack, [weak, pack](const boost::system::error_code& error, size_t bytes)
                 {
                     if (auto ptr = weak.lock())
                     {
@@ -772,7 +783,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
                         else
                             ptr->do_write();
                     }
-                };
+                });
             }
         }
     }
@@ -781,7 +792,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
     {
         m_channel.open();
 
-        weak_ptr weak(shared_from_this());
+        weak_ptr weak(this->shared_from_this());
 
         m_reactor->get_io().post([weak]()
         {
@@ -818,7 +829,7 @@ class channel_impl : public channel, public std::enable_shared_from_this<channel
 
 public:
 
-    channel_impl(reactor_ptr reactor, const protocol::endpoint& bind, const protocol::endpoint& peer)
+    channel_impl(std::shared_ptr<reactor> reactor, const typename protocol::endpoint& bind, const typename protocol::endpoint& peer)
         : m_reactor(reactor)
         , m_channel(reactor, bind, peer)
         , m_write_delay(reactor->get_io())
@@ -933,7 +944,7 @@ public:
 
 private:
 
-    reactor_ptr m_reactor;
+    std::shared_ptr<reactor> m_reactor;
     transport<protocol> m_channel;
     boost::asio::deadline_timer m_write_delay;
     boost::asio::deadline_timer m_read_delay;
@@ -944,14 +955,14 @@ private:
     std::mutex m_mutex;
 };
 
-channel_ptr create_udp_channel(reactor_ptr reactor, const udp_endpoint& bind, const udp_endpoint& peer)
+std::shared_ptr<channel> create_channel(std::shared_ptr<reactor> reactor, const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer)
 {
-    return std::make_shared<channel_impl<udp_endpoint::protocol_type>>(reactor, bind, peer);
+    return std::make_shared<channel_impl<boost::asio::ip::udp>>(reactor, bind, peer);
 }
 
-channel_ptr create_local_channel(reactor_ptr reactor, const local_endpoint& bind, const local_endpoint& peer)
+std::shared_ptr<channel> create_channel(std::shared_ptr<reactor> reactor, const boost::asio::local::datagram_protocol::endpoint& bind, const boost::asio::local::datagram_protocol::endpoint& peer)
 {
-    return std::make_shared<channel_impl<local_endpoint::protocol_type>>(reactor, bind, peer);
+    return std::make_shared<channel_impl<boost::asio::local::datagram_protocol>>(reactor, bind, peer);
 }
 
 }

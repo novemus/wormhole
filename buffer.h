@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstring>
+#include <stdexcept>
 #include <type_traits>
 #include <boost/shared_array.hpp>
 
@@ -29,6 +30,14 @@ public:
         std::memset(m_buffer.get(), 0, len);
     }
 
+    template<class other_t>
+    shared_buffer(const shared_buffer<other_t>& other) 
+        : m_buffer(other.m_buffer)
+        , m_beg(other.m_beg)
+        , m_end(other.m_end)
+    {
+    }
+
     value_t* data() const
     {
         return m_buffer.get() + m_beg;
@@ -55,12 +64,12 @@ public:
         m_beg += len;
     }
 
-    buffer slice(size_t off, size_t len) const
+    shared_buffer slice(size_t off, size_t len) const
     {
         if (off > size() || off + len > size())
             throw std::runtime_error("slice: out of range");
 
-        return buffer(m_buffer, m_beg + off, m_beg + off + len);
+        return shared_buffer(m_buffer, m_beg + off, m_beg + off + len);
     }
 
     bool unique() const
@@ -68,10 +77,10 @@ public:
         return m_buffer.unique();
     }
 
-    operator shared_buffer<const value_t>&() const
+    operator shared_buffer<const value_t>&()
     {
         if (!std::is_const<value_t>::value)
-            return reinterpret_cast<const shared_buffer<const value_t>&>(*this);
+            return reinterpret_cast<shared_buffer<const value_t>&>(*this);
         return *this;
     }
 };
