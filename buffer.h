@@ -1,5 +1,6 @@
 #pragma once
 
+#include <list>
 #include <cstring>
 #include <stdexcept>
 #include <type_traits>
@@ -7,38 +8,17 @@
 
 namespace salt {
 
-template<class value_t> class shared_buffer
+struct const_buffer
 {
-    boost::shared_array<value_t> m_buffer;
-    size_t m_beg;
-    size_t m_end;
-
-    shared_buffer(boost::shared_array<value_t> buffer, size_t beg, size_t end)
-        : m_buffer(buffer)
-        , m_beg(beg)
-        , m_end(end)
-    {
-    }
-
-public:
-
-    shared_buffer(size_t len) 
-        : m_buffer(new value_t[len])
+    const_buffer(size_t len)
+        : m_buffer(new uint8_t[len])
         , m_beg(0)
         , m_end(len)
     {
         std::memset(m_buffer.get(), 0, len);
     }
 
-    template<class other_t>
-    shared_buffer(const shared_buffer<other_t>& other) 
-        : m_buffer(other.m_buffer)
-        , m_beg(other.m_beg)
-        , m_end(other.m_end)
-    {
-    }
-
-    value_t* data() const
+    const uint8_t* data() const
     {
         return m_buffer.get() + m_beg;
     }
@@ -64,12 +44,12 @@ public:
         m_beg += len;
     }
 
-    shared_buffer slice(size_t off, size_t len) const
+    const_buffer slice(size_t off, size_t len) const
     {
         if (off > size() || off + len > size())
             throw std::runtime_error("slice: out of range");
 
-        return shared_buffer(m_buffer, m_beg + off, m_beg + off + len);
+        return const_buffer(m_buffer, m_beg + off, m_beg + off + len);
     }
 
     bool unique() const
@@ -77,15 +57,44 @@ public:
         return m_buffer.unique();
     }
 
-    operator shared_buffer<const value_t>&()
+protected:
+
+    const_buffer(boost::shared_array<uint8_t> buffer, size_t beg, size_t end)
+        : m_buffer(buffer)
+        , m_beg(beg)
+        , m_end(end)
     {
-        if (!std::is_const<value_t>::value)
-            return reinterpret_cast<shared_buffer<const value_t>&>(*this);
-        return *this;
     }
+
+    boost::shared_array<uint8_t> m_buffer;
+    size_t m_beg;
+    size_t m_end;
 };
 
-typedef shared_buffer<uint8_t> mutable_buffer;
-typedef shared_buffer<const uint8_t> const_buffer;
+struct mutable_buffer : public const_buffer
+{
+    mutable_buffer(size_t len) : const_buffer(len)
+    {
+    }
+
+    uint8_t* data()
+    {
+        return m_buffer.get() + m_beg;
+    }
+
+    mutable_buffer slice(size_t off, size_t len) const
+    {
+        if (off > size() || off + len > size())
+            throw std::runtime_error("slice: out of range");
+
+        return mutable_buffer(m_buffer, m_beg + off, m_beg + off + len);
+    }
+
+protected:
+
+    mutable_buffer(boost::shared_array<uint8_t> buffer, size_t beg, size_t end) : const_buffer(buffer, beg, end)
+    {
+    }
+};
 
 }

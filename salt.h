@@ -6,7 +6,6 @@
 #include <functional>
 #include <boost/system/error_code.hpp>
 #include <boost/asio/ip/udp.hpp>
-#include <boost/asio/local/datagram_protocol.hpp>
 
 namespace salt {
 
@@ -24,6 +23,5 @@ struct channel
 };
 
 std::shared_ptr<channel> create_channel(std::shared_ptr<reactor> reactor, const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer);
-std::shared_ptr<channel> create_channel(std::shared_ptr<reactor> reactor, const boost::asio::local::datagram_protocol::endpoint& bind, const boost::asio::local::datagram_protocol::endpoint& peer);
 
 }
