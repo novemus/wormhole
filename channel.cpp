@@ -6,6 +6,7 @@
 #include <list>
 #include <atomic>
 #include <iostream>
+#include <random>
 #include <mutex>
 #include <boost/asio.hpp>
 #include <boost/bind/bind.hpp>
@@ -15,19 +16,10 @@
 
 namespace salt {
 
-class channel_impl : public channel, public pipe
+class opened_channel : public channel, public pipe
 {
-    struct packet : public mutable_buffer
+    struct packet
     {
-        struct traits
-        {
-            static constexpr uint8_t sign = 0x99;
-            static constexpr uint8_t version = 1 << 4;
-            static constexpr size_t max_packet_size = 9992;
-            static constexpr size_t header_size = 16;
-            static constexpr size_t max_payload_size = max_packet_size - header_size;
-        };
-
         enum flag 
         {
             syn = 0x01,
@@ -36,60 +28,44 @@ class channel_impl : public channel, public pipe
             ack = 0x08
         };
 
-        packet() : mutable_buffer(traits::max_packet_size)
+        static constexpr uint8_t packet_sign = 0x99;
+        static constexpr uint8_t packet_version = 1 << 4;
+        static constexpr size_t header_size = 16;
+        static constexpr size_t max_packet_size = 9984;
+        static constexpr size_t max_payload_size = max_packet_size - header_size;
+
+        packet(const mutable_buffer& buffer) : m_buffer(buffer)
         {
-            data()[0] = traits::sign;
-            data()[1] = traits::version;
         }
 
         uint8_t sign() const
-        { 
-            return const_buffer::data()[0];
+        {
+            return m_buffer.const_buffer::data()[0];
         }
 
         uint8_t version() const
         {
-            return const_buffer::data()[1];
+            return m_buffer.const_buffer::data()[1];
         }
 
         uint32_t pin() const
         {
-            return ntohl(*(uint32_t *)(const_buffer::data() + 2));
+            return ntohl(*(uint32_t *)(m_buffer.const_buffer::data() + 2));
         }
 
         uint16_t flags() const
         {
-            return ntohs(*(uint16_t *)(const_buffer::data() + 6));
+            return ntohs(*(uint16_t *)(m_buffer.const_buffer::data() + 6));
         }
 
         uint64_t cursor() const
         {
-            return le64toh(*(uint64_t *)(const_buffer::data() + 8));
+            return le64toh(*(uint64_t *)(m_buffer.const_buffer::data() + 8));
         }
 
-        void set_sign(uint8_t s)
+        mutable_buffer payload() const
         {
-            data()[0] = s;
-        }
-
-        void set_version(uint8_t v)
-        {
-            data()[1] = v;
-        }
-
-        void set_pin(uint32_t v)
-        {
-            *(uint32_t *)(data() + 2) = htonl(v);
-        }
-
-        void set_flags(uint16_t v)
-        {
-            *(uint16_t *)(data() + 6) = htons(v);
-        }
-
-        void set_cursor(uint64_t v)
-        {
-            *(uint64_t *)(data() + 8) = htole64(v);
+            return m_buffer.slice(packet::header_size, m_buffer.size() - packet::header_size);
         }
 
         bool has_flag(uint16_t v) const
@@ -97,21 +73,55 @@ class channel_impl : public channel, public pipe
             return flags() & v;
         }
 
+        size_t size() const
+        {
+            return m_buffer.size();
+        }
+
         bool valid() const
         {
-            return sign() == traits::sign && size() >= traits::header_size;
+            return sign() == packet::packet_sign && version() == packet::packet_version && size() >= packet::header_size;
         }
 
-        void set_payload(const const_buffer& data)
+        void set_sign(uint8_t s)
         {
-            std::memcpy(mutable_buffer::data() + packet::traits::header_size, data.data(), data.size());
-            shrink(packet::traits::header_size + data.size());
+            m_buffer.data()[0] = s;
         }
 
-        const_buffer payload() const
+        void set_version(uint8_t v)
         {
-            return const_buffer::slice(traits::header_size, size() - traits::header_size);
+            m_buffer.data()[1] = v;
         }
+
+        void set_pin(uint32_t v)
+        {
+            *(uint32_t *)(m_buffer.data() + 2) = htonl(v);
+        }
+
+        void set_flags(uint16_t v)
+        {
+            *(uint16_t *)(m_buffer.data() + 6) = htons(v);
+        }
+
+        void set_cursor(uint64_t v)
+        {
+            *(uint64_t *)(m_buffer.data() + 8) = htole64(v);
+        }
+
+        void set_payload(const const_buffer& payload)
+        {
+            std::memcpy(m_buffer.data() + packet::header_size, payload.data(), payload.size());
+            m_buffer.shrink(payload.size() + packet::header_size);
+        }
+
+        void shrink(size_t size)
+        {
+            m_buffer.shrink(size);
+        }
+
+    private:
+
+        mutable_buffer m_buffer;
     };
 
     struct cursor
@@ -179,10 +189,10 @@ class channel_impl : public channel, public pipe
 
     struct connect_handler
     {
-        static uint32_t make_pin()
+        static uint16_t make_pin()
         {
-            static std::atomic<uint32_t> s_pin;
-            uint32_t pin = ++s_pin;
+            static std::atomic<uint16_t> s_pin;
+            uint16_t pin = ++s_pin;
             return pin > 0 ? pin : make_pin();
         };
 
@@ -284,8 +294,8 @@ class channel_impl : public channel, public pipe
 
         bool imbue(packet& pack)
         {
-            pack.set_sign(packet::traits::sign);
-            pack.set_version(packet::traits::version);
+            pack.set_sign(packet::packet_sign);
+            pack.set_version(packet::packet_version);
             pack.set_flags(0);
             pack.set_pin(m_loc_pin);
             pack.set_cursor(0);
@@ -338,14 +348,14 @@ class channel_impl : public channel, public pipe
                         break;
                 }
 
-                pack.shrink(packet::traits::header_size);
+                pack.shrink(packet::header_size);
                 m_last_out = std::time(0);
                 return true;
             }
 
             if (m_last_out + 20 > std::time(0))
             {
-                pack.shrink(packet::traits::header_size);
+                pack.shrink(packet::header_size);
                 m_last_out = std::time(0);
 
                 return true;
@@ -481,10 +491,10 @@ class channel_impl : public channel, public pipe
                 return;
             }
 
-            for(size_t shift = 0; shift < buf.size(); shift += packet::traits::max_payload_size)
+            for(size_t shift = 0; shift < buf.size(); shift += packet::max_payload_size)
             {
                 m_chunks.emplace(
-                    m_tail++, buf.slice(shift, std::min(packet::traits::max_payload_size, buf.size() - shift))
+                    m_tail++, buf.slice(shift, std::min(packet::max_payload_size, buf.size() - shift))
                     );
             }
             m_handles.insert(std::make_pair(m_tail, std::make_pair(handle, buf.size())));
@@ -570,7 +580,7 @@ class channel_impl : public channel, public pipe
             {
                 pack.set_cursor(it->value);
                 pack.set_flags(packet::psh | packet::ack);
-                pack.shrink(packet::traits::header_size);
+                pack.shrink(packet::header_size);
                 return true;
             }
             return false;
@@ -630,6 +640,8 @@ class channel_impl : public channel, public pipe
         std::list<std::pair<mutable_buffer, io_callback>> m_handles;
     };
 
+protected:
+
     void error(const boost::system::error_code& ec) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
@@ -645,7 +657,7 @@ class channel_impl : public channel, public pipe
 
         if (m_connect.is_alive())
         {
-            const packet& pack = reinterpret_cast<const packet&>(buffer);
+            packet pack(buffer);
 
             if (m_connect.parse(pack))
             {
@@ -677,7 +689,7 @@ class channel_impl : public channel, public pipe
                 return false;
             }
 
-            packet& pack = reinterpret_cast<packet&>(buffer);
+            packet pack(buffer);
 
             if (m_connect.imbue(pack))
             {
@@ -702,7 +714,7 @@ class channel_impl : public channel, public pipe
 
 public:
 
-    channel_impl(std::shared_ptr<reactor> reactor)
+    opened_channel(std::shared_ptr<reactor> reactor)
         : m_reactor(reactor)
         , m_connect(reactor->get_io())
         , m_istream(reactor->get_io())
@@ -710,7 +722,7 @@ public:
     {
     }
 
-    ~channel_impl()
+    ~opened_channel()
     {
     }
 
@@ -806,9 +818,120 @@ private:
     std::mutex m_mutex;
 };
 
+class opaque_channel : public opened_channel
+{
+    struct packet
+    {
+        static constexpr size_t header_size = 8;
+
+        packet(const mutable_buffer& buffer) : m_buffer(buffer)
+        {
+        }
+
+        void make_opened(uint64_t mask)
+        {
+            uint64_t salt = get_head() ^ mask;
+
+            set_head(salt);
+            apply_mask(salt + mask);
+        }
+
+        void make_opaque(uint64_t mask)
+        {
+            std::random_device dev;
+            std::mt19937_64 gen(dev());
+            uint64_t salt = static_cast<uint64_t>(gen());
+
+            set_head(salt ^ mask);
+            apply_mask(salt + mask);
+        }
+
+        const uint8_t* data() const
+        {
+            return m_buffer.const_buffer::data();
+        }
+
+        size_t size() const
+        {
+            return m_buffer.size();
+        }
+
+        mutable_buffer payload() const
+        {
+            return m_buffer.slice(sizeof(uint64_t), m_buffer.size() - sizeof(uint64_t));
+        }
+    
+    private:
+
+        uint64_t get_head() const
+        {
+            return le64toh(*(uint64_t *)m_buffer.const_buffer::data());
+        }
+
+        void set_head(uint64_t s)
+        {
+            *(uint64_t*)m_buffer.data() = htole64(s);
+        }
+
+        void apply_mask(uint64_t mask)
+        {
+            size_t offset = sizeof(uint64_t);
+            while (offset < m_buffer.size())
+            {
+                uint8_t* v = (uint8_t*)(m_buffer.data() + offset);
+                for (size_t i = 0; i < std::min(sizeof(uint64_t), m_buffer.size() - sizeof(uint64_t)); ++i)
+                {
+                    v[i] = uint8_t(mask >> (i * 8));
+                }
+                offset += sizeof(uint64_t);
+            }
+        }
+
+        mutable_buffer m_buffer;
+        uint64_t m_mask;
+    };
+
+protected:
+
+    void push(const mutable_buffer& buffer) noexcept(true) override
+    {
+        packet pack(buffer);
+
+        pack.make_opened(m_mask);
+        opened_channel::push(pack.payload());
+    }
+
+    bool pull(mutable_buffer& buffer) noexcept(true) override
+    {
+        packet pack(buffer);
+
+        mutable_buffer data = pack.payload();
+        if (opened_channel::pull(data))
+        {
+            pack.make_opaque(m_mask);
+            buffer.shrink(packet::header_size + data.size());
+            return true;
+        }
+        
+        return false;
+    }
+
+public:
+
+    opaque_channel(std::shared_ptr<reactor> reactor, uint64_t mask)
+        : opened_channel(reactor)
+        , m_mask(mask)
+    {
+    }
+
+private:
+
+    uint64_t m_mask;
+};
+
 std::shared_ptr<channel> create_channel(std::shared_ptr<reactor> reactor, const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer)
 {
-    return std::make_shared<channel_impl>(reactor);
+    return std::make_shared<opened_channel>(reactor);
 }
 
 }

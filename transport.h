@@ -121,13 +121,13 @@ class connector
 
             if (sleep)
             {
-                m_timer.expires_from_now(boost::posix_time::milliseconds(10));
-                m_timer.async_wait([this](const boost::system::error_code& error)
+                m_timer.expires_from_now(boost::posix_time::milliseconds(5000));
+                m_timer.async_wait([this](const boost::system::error_code&)
                 {
-                    if (error == boost::asio::error::operation_aborted)
-                        return;
+                    std::unique_lock<std::mutex> lock(m_mutex);
 
-                    m_io.post(boost::bind(&connector::do_send, this));
+                    if (m_socket.is_open())
+                        m_io.post(boost::bind(&connector::do_send, this));
                 });
             }
             else
@@ -234,6 +234,14 @@ public:
         auto res = m_pool.emplace(peer, pipe);
         if (!res.second)
             throw boost::system::system_error(boost::asio::error::already_connected);
+    }
+
+    void evoke()
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        boost::system::error_code ec;
+        m_timer.cancel(ec);
     }
 };
 
