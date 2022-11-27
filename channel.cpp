@@ -133,7 +133,11 @@ class opened_channel : public channel, public pipe
         bool operator<(const cursor& other) const
         {
             static const uint64_t pivot = std::numeric_limits<uint64_t>::max() / 2;
-            return value + pivot < other.value + pivot;
+            
+            if (other.value > pivot && value < pivot && other.value - value > pivot)
+                return false;
+
+            return value < other.value;
         }
 
         bool operator<=(const cursor& other) const
@@ -144,7 +148,11 @@ class opened_channel : public channel, public pipe
         bool operator>(const cursor& other) const
         {
             static const uint64_t pivot = std::numeric_limits<uint64_t>::max() / 2;
-            return value + pivot > other.value + pivot;
+            
+            if (other.value > pivot && value < pivot && other.value - value > pivot)
+                return true;
+
+            return value > other.value;
         }
 
         bool operator==(const cursor& other) const
