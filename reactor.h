@@ -49,7 +49,7 @@ class reactor
 
 public:
 
-    reactor(size_t threads) : m_context(std::make_shared<context>())
+    reactor(size_t threads = std::thread::hardware_concurrency()) : m_context(std::make_shared<context>())
     {
         m_context->activate(threads);
     }
@@ -66,10 +66,5 @@ public:
         return m_context->io;
     }
 };
-
-std::shared_ptr<reactor> create_asio_reactor(size_t threads = std::thread::hardware_concurrency())
-{
-    return std::make_shared<reactor>(threads);
-}
 
 }

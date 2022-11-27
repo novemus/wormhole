@@ -1,6 +1,5 @@
 #include "salt.h"
 #include "transport.h"
-#include "reactor.h"
 #include <map>
 #include <set>
 #include <list>
