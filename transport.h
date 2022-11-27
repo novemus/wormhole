@@ -7,6 +7,7 @@
 #include <iostream>
 #include <functional>
 #include <boost/asio.hpp>
+#include <boost/bind/bind.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/deadline_timer.hpp>
@@ -22,9 +23,7 @@ struct pipe
     virtual void error(const boost::system::error_code& err) noexcept(true) = 0;
 };
 
-typedef std::shared_ptr<pipe> pipe_ptr;
-
-class connector
+class udp_binding
 {
     struct buffer_factory
     {
@@ -121,18 +120,18 @@ class connector
 
             if (sleep)
             {
-                m_timer.expires_from_now(boost::posix_time::milliseconds(5000));
+                m_timer.expires_from_now(boost::posix_time::milliseconds(100));
                 m_timer.async_wait([this](const boost::system::error_code&)
                 {
                     std::unique_lock<std::mutex> lock(m_mutex);
 
                     if (m_socket.is_open())
-                        m_io.post(boost::bind(&connector::do_send, this));
+                        m_io.post(boost::bind(&udp_binding::do_send, this));
                 });
             }
             else
             {
-                m_io.post(boost::bind(&connector::do_send, this));
+                m_io.post(boost::bind(&udp_binding::do_send, this));
             }
         }
     }
@@ -182,14 +181,14 @@ class connector
                     }
                 }
 
-                m_io.post(boost::bind(&connector::do_recv, this));
+                m_io.post(boost::bind(&udp_binding::do_recv, this));
             });
         }
     }
 
 public:
 
-    connector(const boost::asio::ip::udp::endpoint& bind)
+    udp_binding(const boost::asio::ip::udp::endpoint& bind)
         : m_socket(m_io)
         , m_timer(m_io)
     {
@@ -212,11 +211,11 @@ public:
         boost::asio::post(m_worker, task);
         boost::asio::post(m_worker, task);
 
-        m_io.post(boost::bind(&connector::do_send, this));
-        m_io.post(boost::bind(&connector::do_recv, this));
+        m_io.post(boost::bind(&udp_binding::do_send, this));
+        m_io.post(boost::bind(&udp_binding::do_recv, this));
     }
 
-    ~connector()
+    ~udp_binding()
     {
         boost::system::error_code ec;
 
@@ -227,13 +226,13 @@ public:
         m_worker.join();
     }
 
-    void connect(const boost::asio::ip::udp::endpoint& peer, pipe_ptr pipe)
+    void connect(const boost::asio::ip::udp::endpoint& peer, std::shared_ptr<pipe> pipe)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
         auto res = m_pool.emplace(peer, pipe);
         if (!res.second)
-            throw boost::system::system_error(boost::asio::error::already_connected);
+            throw boost::system::system_error(boost::asio::error::address_in_use);
     }
 
     void evoke()

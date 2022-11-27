@@ -67,9 +67,7 @@ public:
     }
 };
 
-typedef std::shared_ptr<reactor> reactor_ptr;
-
-reactor_ptr create_asio_reactor(size_t threads = std::thread::hardware_concurrency())
+std::shared_ptr<reactor> create_asio_reactor(size_t threads = std::thread::hardware_concurrency())
 {
     return std::make_shared<reactor>(threads);
 }

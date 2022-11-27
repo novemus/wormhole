@@ -208,7 +208,7 @@ class opened_channel : public channel, public pipe
             : m_io(io)
             , m_alive(true)
             , m_linked(false)
-            , m_loc_pin(make_pin())
+            , m_loc_pin(0)
             , m_rem_pin(0)
             , m_last_in(0)
             , m_last_out(0)
@@ -235,7 +235,7 @@ class opened_channel : public channel, public pipe
 
         bool parse(const packet& pack)
         {
-            if (!pack.valid())
+            if (!pack.valid() || m_loc_pin == 0)
                 return true;
 
             if (m_rem_pin == 0 || m_rem_pin == pack.pin())
@@ -374,6 +374,8 @@ class opened_channel : public channel, public pipe
             return m_rem_pin != 0 && pack.pin() == m_rem_pin && pack.flags() == packet::fin;
         }
 
+        bool is_ready() const { return m_alive && m_loc_pin != 0; }
+        
         bool is_alive() const { return m_alive; }
 
         bool is_linked() const { return m_linked; }
@@ -395,12 +397,14 @@ class opened_channel : public channel, public pipe
 
         void connect(const callback& handle)
         {
+            m_loc_pin = make_pin();
             on_connect = handle;
             m_jobs.insert(job::snd_syn);
         }
 
         void accept(const callback& handle)
         {
+            m_loc_pin = make_pin();
             on_connect = handle;
         }
 
@@ -511,7 +515,7 @@ class opened_channel : public channel, public pipe
 
             bool ready() const
             {
-                static const int64_t ACK_AGE = 50;
+                static const int64_t ACK_AGE = 100;
 
                 auto now = boost::posix_time::microsec_clock::universal_time();
                 if (time.is_not_a_date_time())
@@ -655,7 +659,7 @@ protected:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_connect.is_alive())
+        if (m_connect.is_ready())
         {
             packet pack(buffer);
 
@@ -678,7 +682,7 @@ protected:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_connect.is_alive())
+        if (m_connect.is_ready())
         {
             if (m_connect.is_keepalive_lost())
             {
@@ -714,8 +718,9 @@ protected:
 
 public:
 
-    opened_channel(std::shared_ptr<reactor> reactor)
+    opened_channel(std::shared_ptr<reactor> reactor, std::shared_ptr<udp_binding> transport)
         : m_reactor(reactor)
+        , m_transport(transport)
         , m_connect(reactor->get_io())
         , m_istream(reactor->get_io())
         , m_ostream(reactor->get_io())
@@ -741,6 +746,7 @@ public:
         }
 
         m_connect.shutdown(handle);
+        m_transport->evoke();
     }
 
     void connect(const callback& handle) noexcept(true) override
@@ -758,6 +764,7 @@ public:
         }
 
         m_connect.connect(handle);
+        m_transport->evoke();
     }
 
     void accept(const callback& handle) noexcept(true) override
@@ -807,11 +814,13 @@ public:
         }
 
         m_ostream.append(buf, handle);
+        m_transport->evoke();
     }
 
 private:
 
     std::shared_ptr<reactor> m_reactor;
+    std::shared_ptr<udp_binding> m_transport;
     connect_handler m_connect;
     istream_handler m_istream;
     ostream_handler m_ostream;
@@ -918,8 +927,8 @@ protected:
 
 public:
 
-    opaque_channel(std::shared_ptr<reactor> reactor, uint64_t mask)
-        : opened_channel(reactor)
+    opaque_channel(std::shared_ptr<reactor> reactor, std::shared_ptr<udp_binding> transport, uint64_t mask)
+        : opened_channel(reactor, transport)
         , m_mask(mask)
     {
     }
@@ -929,9 +938,37 @@ private:
     uint64_t m_mask;
 };
 
-std::shared_ptr<channel> create_channel(std::shared_ptr<reactor> reactor, const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer)
+std::shared_ptr<channel> create_channel(std::shared_ptr<reactor> reactor, const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t mask)
 {
-    return std::make_shared<opened_channel>(reactor);
+    static std::mutex s_mutex;
+    static std::map<boost::asio::ip::udp::endpoint, std::weak_ptr<udp_binding>> s_bindings;
+
+    std::unique_lock<std::mutex> lock(s_mutex);
+    std::shared_ptr<udp_binding> transport;
+
+    auto iter = s_bindings.find(bind);
+    if (iter != s_bindings.end())
+    {
+        transport = iter->second.lock();
+        if (!transport)
+        {
+            s_bindings.erase(iter);
+        }
+    }
+
+    if (!transport)
+    {
+        transport = std::make_shared<udp_binding>(bind);
+        s_bindings.emplace(bind, transport);
+    }
+
+    auto channel = mask == 0 
+        ? std::make_shared<opened_channel>(reactor, transport)
+        : std::make_shared<opaque_channel>(reactor, transport, mask);
+
+    transport->connect(peer, channel);
+
+    return channel;
 }
 
 }
