@@ -1,12 +1,13 @@
 #pragma once
 
 #include <list>
+#include <ctime>
 #include <cstring>
 #include <stdexcept>
 #include <type_traits>
 #include <boost/shared_array.hpp>
 
-namespace salt {
+namespace tubus {
 
 struct const_buffer
 {
@@ -16,6 +17,14 @@ struct const_buffer
         , m_end(len)
     {
         std::memset(m_buffer.get(), 0, len);
+    }
+
+    const_buffer(const std::string& data)
+        : m_buffer(new uint8_t[data.size()])
+        , m_beg(0)
+        , m_end(data.size())
+    {
+        std::memcpy(m_buffer.get(), data.data(), data.size());
     }
 
     const uint8_t* data() const
@@ -97,4 +106,54 @@ protected:
     }
 };
 
+struct buffer_factory
+{
+    buffer_factory(size_t buff_size) : m_buff_size(buff_size)
+    {
+    }
+
+    mutable_buffer make_buffer()
+    {
+        auto it = m_cache.begin();
+        while (it != m_cache.end())
+        {
+            if (it->first.unique())
+            {
+                mutable_buffer buff = it->first;
+                std::memset(buff.data(), 0, buff.size());
+
+                it->second = std::time(0);
+
+                compress_cache();
+
+                return buff;
+            }
+            ++it;
+        }
+
+        m_cache.emplace_back(mutable_buffer(m_buff_size), std::time(0));
+
+        return m_cache.back().first;
+    }
+
+private:
+
+    void compress_cache()
+    {
+        static const time_t TTL = 30;
+        time_t now = std::time(0);
+
+        auto it = m_cache.begin();
+        while (it != m_cache.end())
+        {
+            if (it->first.unique() && it->second + TTL > now)
+                it = m_cache.erase(it);
+            else
+                ++it;
+        }
+    }
+
+    size_t m_buff_size;
+    std::list<std::pair<mutable_buffer, time_t>> m_cache;
+};
 }

@@ -1,37 +1,37 @@
 #define BOOST_TEST_MODULE tubus_tests
 
-#include "salt.h"
+#include "tubus.h"
 #include <boost/test/included/unit_test.hpp>
 
 BOOST_AUTO_TEST_CASE(buffer)
 {
     const char* text = "hello, tubus";
 
-    salt::mutable_buffer mb(std::strlen(text));
+    tubus::mutable_buffer mb(std::strlen(text));
 
     std::memcpy(mb.data(), text, mb.size());
 
     BOOST_CHECK(mb.unique());
     BOOST_CHECK_EQUAL(mb.size(), std::strlen(text));
-    BOOST_CHECK(std::memcmp(mb.data(), text, mb.size()) == 0);
+    BOOST_CHECK_EQUAL(std::memcmp(mb.data(), text, mb.size()), 0);
 
     {
-        salt::const_buffer cb = mb.slice(7, 5);
+        tubus::const_buffer cb = mb.slice(7, 5);
 
         BOOST_CHECK(!mb.unique());
         BOOST_CHECK(!cb.unique());
         BOOST_CHECK_EQUAL(cb.size(), 5);
-        BOOST_CHECK(std::memcmp(cb.data(), "tubus", cb.size()) == 0);
+        BOOST_CHECK_EQUAL(std::memcmp(cb.data(), "tubus", cb.size()), 0);
 
         std::memcpy(mb.data(), "tubus, hello", mb.size());
 
-        BOOST_CHECK(std::memcmp(cb.data(), "hello", cb.size()) == 0);
+        BOOST_CHECK_EQUAL(std::memcmp(cb.data(), "hello", cb.size()), 0);
     }
 
     mb.shrink(5);
     
     BOOST_CHECK_EQUAL(mb.size(), 5);
-    BOOST_CHECK(std::memcmp(mb.data(), "tubus", mb.size()) == 0);
+    BOOST_CHECK_EQUAL(std::memcmp(mb.data(), "tubus", mb.size()), 0);
 
     mb.prune(1);
 
@@ -45,3 +45,11 @@ BOOST_AUTO_TEST_CASE(buffer)
     BOOST_CHECK_EQUAL(mb.size(), 0);
     BOOST_CHECK(mb.unique());
 }
+
+BOOST_AUTO_TEST_CASE(channel)
+{
+    boost::asio::ip::udp::endpoint s(boost::asio::ip::address::from_string("127.0.0.1"), 3000);
+    boost::asio::ip::udp::endpoint c1(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
+    boost::asio::ip::udp::endpoint c2(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
+    boost::asio::ip::udp::endpoint c3(boost::asio::ip::address::from_string("127.0.0.1"), 3003);
+};

@@ -1,5 +1,6 @@
-#include "salt.h"
-#include "transport.h"
+#include "tubus.h"
+#include "udp.h"
+#include "reactor.h"
 #include <map>
 #include <set>
 #include <list>
@@ -13,23 +14,24 @@
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
 
-namespace salt {
+namespace tubus {
 
-class opened_channel : public channel, public pipe
+class controller : public channel, public udp::receiver, public std::enable_shared_from_this<controller>
 {
     struct packet
     {
         enum flag 
         {
             syn = 0x01,
-            fin = 0x02,
-            psh = 0x04,
-            ack = 0x08
+            png = 0x02,
+            fin = 0x04,
+            psh = 0x08,
+            ack = 0x10
         };
 
         static constexpr uint8_t packet_sign = 0x99;
         static constexpr uint8_t packet_version = 1 << 4;
-        static constexpr size_t header_size = 16;
+        static constexpr size_t header_size = 24;
         static constexpr size_t max_packet_size = 9984;
         static constexpr size_t max_payload_size = max_packet_size - header_size;
 
@@ -37,29 +39,34 @@ class opened_channel : public channel, public pipe
         {
         }
 
+        uint64_t salt() const
+        {
+            return le64toh(*(uint64_t *)m_buffer.const_buffer::data());
+        }
+
         uint8_t sign() const
         {
-            return m_buffer.const_buffer::data()[0];
+            return m_buffer.const_buffer::data()[8];
         }
 
         uint8_t version() const
         {
-            return m_buffer.const_buffer::data()[1];
+            return m_buffer.const_buffer::data()[9];
         }
 
         uint32_t pin() const
         {
-            return ntohl(*(uint32_t *)(m_buffer.const_buffer::data() + 2));
+            return ntohl(*(uint32_t *)(m_buffer.const_buffer::data() + 10));
         }
 
         uint16_t flags() const
         {
-            return ntohs(*(uint16_t *)(m_buffer.const_buffer::data() + 6));
+            return ntohs(*(uint16_t *)(m_buffer.const_buffer::data() + 14));
         }
 
         uint64_t cursor() const
         {
-            return le64toh(*(uint64_t *)(m_buffer.const_buffer::data() + 8));
+            return le64toh(*(uint64_t *)(m_buffer.const_buffer::data() + 16));
         }
 
         mutable_buffer payload() const
@@ -79,32 +86,37 @@ class opened_channel : public channel, public pipe
 
         bool valid() const
         {
-            return sign() == packet::packet_sign && version() == packet::packet_version && size() >= packet::header_size;
+            return size() >= packet::header_size && sign() == packet::packet_sign && version() == packet::packet_version;
+        }
+
+        void set_salt(uint64_t s)
+        {
+            *(uint64_t*)m_buffer.data() = htole64(s);
         }
 
         void set_sign(uint8_t s)
         {
-            m_buffer.data()[0] = s;
+            m_buffer.data()[8] = s;
         }
 
         void set_version(uint8_t v)
         {
-            m_buffer.data()[1] = v;
+            m_buffer.data()[9] = v;
         }
 
         void set_pin(uint32_t v)
         {
-            *(uint32_t *)(m_buffer.data() + 2) = htonl(v);
+            *(uint32_t *)(m_buffer.data() + 10) = htonl(v);
         }
 
         void set_flags(uint16_t v)
         {
-            *(uint16_t *)(m_buffer.data() + 6) = htons(v);
+            *(uint16_t *)(m_buffer.data() + 14) = htons(v);
         }
 
         void set_cursor(uint64_t v)
         {
-            *(uint64_t *)(m_buffer.data() + 8) = htole64(v);
+            *(uint64_t *)(m_buffer.data() + 16) = htole64(v);
         }
 
         void set_payload(const const_buffer& payload)
@@ -113,12 +125,49 @@ class opened_channel : public channel, public pipe
             m_buffer.shrink(payload.size() + packet::header_size);
         }
 
+        void make_opened(uint64_t mask)
+        {
+            uint64_t s = salt() ^ mask;
+
+            set_salt(s);
+            apply_mask(s + mask);
+        }
+
+        void make_opaque(uint64_t mask)
+        {
+            std::random_device dev;
+            std::mt19937_64 gen(dev());
+            uint64_t s = static_cast<uint64_t>(gen());
+
+            set_salt(s ^ mask);
+            apply_mask(s + mask);
+        }
+
         void shrink(size_t size)
         {
             m_buffer.shrink(size);
         }
 
+        mutable_buffer buffer() const
+        {
+            return m_buffer;
+        }
+
     private:
+
+        void apply_mask(uint64_t mask)
+        {
+            size_t offset = sizeof(uint64_t);
+            while (offset < m_buffer.size())
+            {
+                uint8_t* v = (uint8_t*)(m_buffer.data() + offset);
+                for (size_t i = 0; i < std::min(sizeof(uint64_t), m_buffer.size() - sizeof(uint64_t)); ++i)
+                {
+                    v[i] = uint8_t(mask >> (i * 8));
+                }
+                offset += sizeof(uint64_t);
+            }
+        }
 
         mutable_buffer m_buffer;
     };
@@ -203,22 +252,12 @@ class opened_channel : public channel, public pipe
             return pin > 0 ? pin : make_pin();
         };
 
-        enum job
-        {
-            snd_syn,
-            snd_ack_syn,
-            snd_fin,
-            snd_ack_fin
-        };
-
         connect_handler(boost::asio::io_context& io)
             : m_io(io)
             , m_alive(true)
             , m_linked(false)
             , m_loc_pin(0)
             , m_rem_pin(0)
-            , m_last_in(0)
-            , m_last_out(0)
         {
         }
 
@@ -242,11 +281,10 @@ class opened_channel : public channel, public pipe
 
         bool parse(const packet& pack)
         {
-            if (!pack.valid() || m_loc_pin == 0)
+            if (m_loc_pin == 0)
                 return true;
 
-            if (m_rem_pin == 0 || m_rem_pin == pack.pin())
-                m_last_in = std::time(0);
+            auto now = boost::posix_time::second_clock::universal_time();
 
             if (pack.has_flag(packet::syn) && (m_rem_pin == 0 || m_rem_pin == pack.pin()))
             {
@@ -262,16 +300,17 @@ class opened_channel : public channel, public pipe
                         on_connect = 0;
                     }
 
-                    m_jobs.erase(job::snd_syn);
+                    m_jobs.erase(packet::syn);
+                    m_jobs.emplace(packet::png, now + boost::posix_time::seconds(30)); 
                 }
                 else
                 {
-                    m_jobs.insert(job::snd_ack_syn); 
+                    m_jobs.emplace(packet::syn | packet::ack, now); 
                 }
 
                 return true;
             }
-            else if (pack.has_flag(packet::fin) && m_rem_pin == pack.pin())
+            else if (pack.has_flag(packet::fin) && m_rem_pin != 0 && m_rem_pin == pack.pin())
             {
                 m_linked = false;
 
@@ -286,11 +325,24 @@ class opened_channel : public channel, public pipe
                         on_shutdown = 0;
                     }
 
-                    m_jobs.erase(job::snd_fin);
+                    m_jobs.erase(packet::fin);
                 }
                 else
                 {
-                    m_jobs.insert(job::snd_ack_fin);
+                    m_jobs.emplace(packet::fin | packet::ack, now); 
+                }
+
+                return true;
+            }
+            else if (pack.has_flag(packet::png) && m_rem_pin != 0 && m_rem_pin == pack.pin())
+            {
+                if (pack.has_flag(packet::ack))
+                {
+                    m_jobs.emplace(packet::png, now + boost::posix_time::seconds(30));
+                }
+                else
+                {
+                    m_jobs.emplace(packet::png | packet::ack, now); 
                 }
 
                 return true;
@@ -301,69 +353,51 @@ class opened_channel : public channel, public pipe
 
         bool imbue(packet& pack)
         {
-            pack.set_sign(packet::packet_sign);
-            pack.set_version(packet::packet_version);
-            pack.set_flags(0);
-            pack.set_pin(m_loc_pin);
-            pack.set_cursor(0);
+            auto now = boost::posix_time::microsec_clock::universal_time();
+            auto iter = std::find_if(m_jobs.begin(), m_jobs.end(), [now](const std::pair<uint16_t, boost::posix_time::ptime>& item)
+            {
+                return now > item.second;
+            });
 
-            auto iter = m_jobs.begin();
             if (iter != m_jobs.end())
             {
-                switch (*iter)
+                static const boost::posix_time::milliseconds RESEND_TIMEOUT(100);
+
+                pack.set_sign(packet::packet_sign);
+                pack.set_version(packet::packet_version);
+                pack.set_pin(m_loc_pin);
+                pack.set_cursor(0);
+                pack.set_flags(iter->first);
+                pack.shrink(packet::header_size);
+
+                iter->second = now + RESEND_TIMEOUT;
+
+                if (iter->first == (packet::syn | packet::ack))
                 {
-                    case job::snd_syn:
-                    {
-                        pack.set_flags(packet::syn);
-                        break;
-                    }
-                    case job::snd_ack_syn:
-                    {
-                        pack.set_flags(packet::syn | packet::ack);
-                        m_jobs.erase(job::snd_ack_syn);
-                        m_linked = true;
+                    m_jobs.erase(iter);
+                    m_linked = true;
 
-                        if (on_connect)
-                        {
-                            m_io.post(boost::bind(on_connect, boost::system::error_code()));
-                            on_connect = 0;
-                        }
-
-                        break;
-                    }
-                    case job::snd_fin:
+                    if (on_connect)
                     {
-                        pack.set_flags(packet::fin);
-                        m_linked = false;
-                        break;
+                        m_io.post(boost::bind(on_connect, boost::system::error_code()));
+                        on_connect = 0;
                     }
-                    case job::snd_ack_fin:
-                    {
-                        pack.set_flags(packet::fin | packet::ack);
-                        m_jobs.erase(job::snd_ack_fin);
-                        m_alive = false;
-
-                        if (on_shutdown)
-                        {
-                            m_io.post(boost::bind(on_shutdown, boost::system::error_code()));
-                            on_shutdown = 0;
-                        }
-
-                        break;
-                    }
-                    default:
-                        break;
                 }
+                else if (iter->first == packet::fin)
+                {
+                    m_linked = false;
+                }
+                else if (iter->first == (packet::fin | packet::ack))
+                {
+                    m_jobs.erase(iter);
+                    m_alive = false;
 
-                pack.shrink(packet::header_size);
-                m_last_out = std::time(0);
-                return true;
-            }
-
-            if (m_last_out + 20 > std::time(0))
-            {
-                pack.shrink(packet::header_size);
-                m_last_out = std::time(0);
+                    if (on_shutdown)
+                    {
+                        m_io.post(boost::bind(on_shutdown, boost::system::error_code()));
+                        on_shutdown = 0;
+                    }
+                }
 
                 return true;
             }
@@ -373,7 +407,7 @@ class opened_channel : public channel, public pipe
 
         bool is_local_fin(const packet& pack) const
         {
-            return pack.pin() == m_loc_pin && pack.flags() == packet::fin;
+            return m_loc_pin != 0 && pack.pin() == m_loc_pin && pack.flags() == packet::fin;
         }
 
         bool is_remote_fin(const packet& pack) const
@@ -381,8 +415,6 @@ class opened_channel : public channel, public pipe
             return m_rem_pin != 0 && pack.pin() == m_rem_pin && pack.flags() == packet::fin;
         }
 
-        bool is_ready() const { return m_alive && m_loc_pin != 0; }
-        
         bool is_alive() const { return m_alive; }
 
         bool is_linked() const { return m_linked; }
@@ -391,22 +423,27 @@ class opened_channel : public channel, public pipe
 
         bool is_shutdowning() const { return m_alive && on_shutdown; }
 
-        bool is_keepalive_lost() const
+        bool is_hangup() const
         {
-            return m_last_in != 0 && m_last_in + 30 > std::time(0);
+            auto deadline = boost::posix_time::microsec_clock::universal_time() - boost::posix_time::seconds(30);
+            auto iter = std::find_if(m_jobs.begin(), m_jobs.end(), [deadline](const std::pair<uint16_t, boost::posix_time::ptime>& item)
+            {
+                return deadline > item.second;
+            });
+            return iter != m_jobs.end();
         }
 
         void shutdown(const callback& handle)
         {
             on_shutdown = handle;
-            m_jobs.insert(job::snd_fin);
+            m_jobs.emplace(packet::fin, boost::posix_time::microsec_clock::universal_time());
         }
 
         void connect(const callback& handle)
         {
             m_loc_pin = make_pin();
             on_connect = handle;
-            m_jobs.insert(job::snd_syn);
+            m_jobs.emplace(packet::syn, boost::posix_time::microsec_clock::universal_time());
         }
 
         void accept(const callback& handle)
@@ -422,9 +459,7 @@ class opened_channel : public channel, public pipe
         bool m_linked;
         uint32_t m_loc_pin;
         uint32_t m_rem_pin;
-        std::time_t m_last_in;
-        std::time_t m_last_out;
-        std::set<job> m_jobs;
+        std::map<uint16_t, boost::posix_time::ptime> m_jobs;
         callback on_connect;
         callback on_shutdown;
     };
@@ -441,7 +476,7 @@ class opened_channel : public channel, public pipe
             auto hit = m_handles.begin();
             while (hit != m_handles.end())
             {
-                m_io.post(boost::bind(hit->second.first, ec, 0));
+                m_io.post(boost::bind(hit->second, ec));
                 ++hit;
             }
             m_handles.clear();
@@ -465,7 +500,7 @@ class opened_channel : public channel, public pipe
             {
                 if (hit->first <= top)
                 {
-                    m_io.post(boost::bind(hit->second.first, boost::system::error_code(), hit->second.second));
+                    m_io.post(boost::bind(hit->second, boost::system::error_code()));
                     hit = m_handles.erase(hit);
                 }
                 else
@@ -476,18 +511,22 @@ class opened_channel : public channel, public pipe
 
         bool imbue(packet& pack)
         {
-            auto iter = std::find_if(
-                    m_chunks.begin(), m_chunks.end(), [](const std::pair<cursor, chunk>& p) { return p.second.ready(); }
-                );
+            static const boost::posix_time::milliseconds RESEND_TIMEOUT(100);
+
+            auto now = boost::posix_time::microsec_clock::universal_time();
+            auto iter = std::find_if(m_chunks.begin(), m_chunks.end(), [now](const std::pair<cursor, chunk>& p) 
+            { 
+                return p.second.second < now; 
+            });
 
             if (iter == m_chunks.end())
                 return false;
 
-            pack.set_payload(iter->second.data);
+            pack.set_payload(iter->second.first);
             pack.set_cursor(iter->first.value);
             pack.set_flags(packet::psh);
 
-            iter->second.retime();
+            iter->second.second = now + RESEND_TIMEOUT;
             
             return true;
         }
@@ -505,44 +544,25 @@ class opened_channel : public channel, public pipe
             for(size_t shift = 0; shift < buf.size(); shift += packet::max_payload_size)
             {
                 m_chunks.emplace(
-                    m_tail++, buf.slice(shift, std::min(packet::max_payload_size, buf.size() - shift))
+                    m_tail++, std::make_pair(
+                        buf.slice(shift, std::min(packet::max_payload_size, buf.size() - shift)),
+                        boost::posix_time::min_date_time)
                     );
             }
-            m_handles.insert(std::make_pair(m_tail, std::make_pair(handle, buf.size())));
+            m_handles.emplace(m_tail, [buf, handle](const boost::system::error_code& error)
+            {
+                handle(error, error ? 0 : buf.size());
+            });
         }
 
     private:
 
-        struct chunk
-        {
-            const_buffer data;
-            boost::posix_time::ptime time;
-            
-            chunk(const const_buffer& buf) : data(buf) { }
-
-            bool ready() const
-            {
-                static const int64_t ACK_AGE = 100;
-
-                auto now = boost::posix_time::microsec_clock::universal_time();
-                if (time.is_not_a_date_time())
-                {
-                    return true;
-                }
-
-                return (time - now).total_milliseconds() > ACK_AGE;
-            };
-
-            void retime()
-            {
-                time = boost::posix_time::microsec_clock::universal_time();
-            }
-        };
+        typedef std::pair<const_buffer, boost::posix_time::ptime> chunk;
 
         boost::asio::io_context& m_io;
         cursor m_tail;
         std::map<cursor, chunk> m_chunks;
-        std::map<cursor, std::pair<io_callback, size_t>> m_handles;
+        std::map<cursor, callback> m_handles;
     };
 
     struct istream_handler
@@ -653,88 +673,122 @@ class opened_channel : public channel, public pipe
 
 protected:
 
-    void error(const boost::system::error_code& ec) noexcept(true) override
+    void mistake(const boost::asio::ip::udp::endpoint& peer, const boost::system::error_code& ec) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        m_connect.error(ec);
-        m_istream.error(ec);
-        m_ostream.error(ec);
+        if (peer == m_peer)
+        {
+            m_coupler.error(ec);
+            m_istream.error(ec);
+            m_ostream.error(ec);
+        }
     }
 
-    void push(const mutable_buffer& buffer) noexcept(true) override
+    void receive(const boost::asio::ip::udp::endpoint& peer, const mutable_buffer& buffer) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_connect.is_ready())
+        if (peer == m_peer && m_coupler.is_alive())
         {
             packet pack(buffer);
 
-            if (m_connect.parse(pack))
+            if (pack.valid())
             {
-                if (m_connect.is_remote_fin(pack))
+                if (m_mask)
+                    pack.make_opened(m_mask);
+
+                if (m_coupler.parse(pack))
                 {
-                    m_istream.error(boost::asio::error::connection_aborted);
-                    m_ostream.error(boost::asio::error::connection_aborted);
+                    if (m_coupler.is_remote_fin(pack))
+                    {
+                        m_istream.error(boost::asio::error::connection_aborted);
+                        m_ostream.error(boost::asio::error::connection_aborted);
+                    }
                 }
-            }
-            else if (m_connect.is_linked())
-            {
-                m_istream.parse(pack) || m_ostream.parse(pack);
+                else if (m_coupler.is_linked())
+                {
+                    m_istream.parse(pack) || m_ostream.parse(pack);
+                }
             }
         }
     }
 
-    bool pull(mutable_buffer& buffer) noexcept(true) override
+    void dispatch() noexcept(true)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_connect.is_ready())
+        while (m_coupler.is_alive())
         {
-            if (m_connect.is_keepalive_lost())
+            if (m_coupler.is_hangup())
             {
-                m_connect.error(boost::asio::error::connection_reset);
-                m_ostream.error(boost::asio::error::connection_reset);
-                m_istream.error(boost::asio::error::connection_reset);
-
-                return false;
+                m_coupler.error(boost::asio::error::broken_pipe);
+                m_istream.error(boost::asio::error::broken_pipe);
+                m_ostream.error(boost::asio::error::broken_pipe);
+                return;
             }
 
-            packet pack(buffer);
+            packet pack(m_stock.make_buffer());
 
-            if (m_connect.imbue(pack))
+            if (m_coupler.imbue(pack))
             {
-                if (m_connect.is_local_fin(pack))
+                if (m_coupler.is_local_fin(pack))
                 {
                     m_istream.error(boost::asio::error::connection_aborted);
                     m_ostream.error(boost::asio::error::connection_aborted);
                 }
 
-                buffer.shrink(pack.size());
-                return true;
+                if (m_mask)
+                    pack.make_opaque(m_mask);
+
+                m_transport->dispatch(m_peer, pack.buffer());
             }
-            else if (m_connect.is_linked() && (m_istream.imbue(pack) || m_ostream.imbue(pack)))
+            else if (m_coupler.is_linked() && (m_istream.imbue(pack) || m_ostream.imbue(pack)))
             {
-                buffer.shrink(pack.size());
-                return true;
+                if (m_mask)
+                    pack.make_opaque(m_mask);
+                
+                m_transport->dispatch(m_peer, pack.buffer());
+            }
+            else
+            {
+                std::weak_ptr<controller> weak = shared_from_this();
+
+                m_timer.expires_from_now(boost::posix_time::milliseconds(100));
+                m_timer.async_wait([weak, peer = m_peer](const boost::system::error_code& error)
+                {
+                    if (error == boost::asio::error::connection_aborted)
+                        return;
+
+                    auto ptr = weak.lock();
+                    if (ptr)
+                    {
+                        error ? ptr->mistake(peer, error) : ptr->dispatch();
+                    }
+                });
             }
         }
+    }
 
-        return false;
+    void resume_dispatch()
+    {
+        boost::system::error_code ec;
+        m_timer.cancel(ec);
+        m_reactor->get_io().post(boost::bind(&controller::dispatch, shared_from_this()));
     }
 
 public:
 
-    opened_channel(std::shared_ptr<reactor> reactor, std::shared_ptr<udp_binding> transport)
+    controller(std::shared_ptr<reactor> reactor, std::shared_ptr<udp::transport> transport, const boost::asio::ip::udp::endpoint& peer, uint64_t mask)
         : m_reactor(reactor)
         , m_transport(transport)
-        , m_connect(reactor->get_io())
+        , m_peer(peer)
+        , m_timer(reactor->get_io())
+        , m_coupler(reactor->get_io())
         , m_istream(reactor->get_io())
         , m_ostream(reactor->get_io())
-    {
-    }
-
-    ~opened_channel()
+        , m_stock(9992)
+        , m_mask(mask)
     {
     }
 
@@ -742,62 +796,65 @@ public:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (!m_connect.is_alive() || !m_connect.is_linked() || m_connect.is_shutdowning())
+        if (!m_coupler.is_alive() || !m_coupler.is_linked() || m_coupler.is_shutdowning())
         {
-            boost::system::error_code error = m_connect.is_shutdowning() ? 
-                boost::asio::error::already_started : m_connect.is_alive() ? 
+            boost::system::error_code error = m_coupler.is_shutdowning() ? 
+                boost::asio::error::already_started : m_coupler.is_alive() ? 
                     boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
             m_reactor->get_io().post(boost::bind(handle, error));
             return;
         }
 
-        m_connect.shutdown(handle);
-        m_transport->evoke();
+        m_coupler.shutdown(handle);
+        resume_dispatch();
     }
 
     void connect(const callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (!m_connect.is_alive() || m_connect.is_linked() || m_connect.is_connecting())
+        if (!m_coupler.is_alive() || m_coupler.is_linked() || m_coupler.is_connecting())
         {
-            boost::system::error_code ec = m_connect.is_connecting() ? 
-                boost::asio::error::already_started : m_connect.is_linked() ? 
+            boost::system::error_code ec = m_coupler.is_connecting() ? 
+                boost::asio::error::already_started : m_coupler.is_linked() ? 
                     boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
             m_reactor->get_io().post(boost::bind(handle, ec));
             return;
         }
 
-        m_connect.connect(handle);
-        m_transport->evoke();
+        m_coupler.connect(handle);
+        m_transport->subscribe(m_peer, shared_from_this());
+        resume_dispatch();
     }
 
     void accept(const callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (!m_connect.is_alive() || m_connect.is_linked() || m_connect.is_connecting())
+        if (!m_coupler.is_alive() || m_coupler.is_linked() || m_coupler.is_connecting())
         {
-            boost::system::error_code ec = m_connect.is_connecting() ? 
-                boost::asio::error::already_started : m_connect.is_linked() ? 
+            boost::system::error_code ec = m_coupler.is_connecting() ? 
+                boost::asio::error::already_started : m_coupler.is_linked() ? 
                     boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
             m_reactor->get_io().post(boost::bind(handle, ec));
             return;
         }
 
-        m_connect.accept(handle);
+        m_coupler.accept(handle);
+        m_transport->subscribe(m_peer, shared_from_this());
+        resume_dispatch();
     }
 
     void read(const mutable_buffer& buf, const io_callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (!m_connect.is_alive() || !m_connect.is_linked())
+        if (!m_coupler.is_alive() || !m_coupler.is_linked())
         {
-            boost::system::error_code ec = m_connect.is_alive() ? 
+            boost::system::error_code ec = m_coupler.is_alive() ? 
                 boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
             m_reactor->get_io().post(boost::bind(handle, ec, 0));
@@ -805,15 +862,16 @@ public:
         }
 
         m_istream.append(buf, handle);
+        resume_dispatch();
     }
 
     void write(const const_buffer& buf, const io_callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
                 
-        if (!m_connect.is_alive() || !m_connect.is_linked())
+        if (!m_coupler.is_alive() || !m_coupler.is_linked())
         {
-            boost::system::error_code ec = m_connect.is_alive() ? 
+            boost::system::error_code ec = m_coupler.is_alive() ? 
                 boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
             m_reactor->get_io().post(boost::bind(handle, ec, 0));
@@ -821,161 +879,27 @@ public:
         }
 
         m_ostream.append(buf, handle);
-        m_transport->evoke();
+        resume_dispatch();
     }
 
 private:
 
     std::shared_ptr<reactor> m_reactor;
-    std::shared_ptr<udp_binding> m_transport;
-    connect_handler m_connect;
+    std::shared_ptr<udp::transport> m_transport;
+    boost::asio::ip::udp::endpoint m_peer;
+    boost::asio::deadline_timer m_timer;
+    connect_handler m_coupler;
     istream_handler m_istream;
     ostream_handler m_ostream;
+    buffer_factory m_stock;
+    uint64_t m_mask;
     std::mutex m_mutex;
 };
 
-class opaque_channel : public opened_channel
+std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t mask) noexcept(false)
 {
-    struct packet
-    {
-        static constexpr size_t header_size = 8;
-
-        packet(const mutable_buffer& buffer) : m_buffer(buffer)
-        {
-        }
-
-        void make_opened(uint64_t mask)
-        {
-            uint64_t salt = get_head() ^ mask;
-
-            set_head(salt);
-            apply_mask(salt + mask);
-        }
-
-        void make_opaque(uint64_t mask)
-        {
-            std::random_device dev;
-            std::mt19937_64 gen(dev());
-            uint64_t salt = static_cast<uint64_t>(gen());
-
-            set_head(salt ^ mask);
-            apply_mask(salt + mask);
-        }
-
-        const uint8_t* data() const
-        {
-            return m_buffer.const_buffer::data();
-        }
-
-        size_t size() const
-        {
-            return m_buffer.size();
-        }
-
-        mutable_buffer payload() const
-        {
-            return m_buffer.slice(sizeof(uint64_t), m_buffer.size() - sizeof(uint64_t));
-        }
-    
-    private:
-
-        uint64_t get_head() const
-        {
-            return le64toh(*(uint64_t *)m_buffer.const_buffer::data());
-        }
-
-        void set_head(uint64_t s)
-        {
-            *(uint64_t*)m_buffer.data() = htole64(s);
-        }
-
-        void apply_mask(uint64_t mask)
-        {
-            size_t offset = sizeof(uint64_t);
-            while (offset < m_buffer.size())
-            {
-                uint8_t* v = (uint8_t*)(m_buffer.data() + offset);
-                for (size_t i = 0; i < std::min(sizeof(uint64_t), m_buffer.size() - sizeof(uint64_t)); ++i)
-                {
-                    v[i] = uint8_t(mask >> (i * 8));
-                }
-                offset += sizeof(uint64_t);
-            }
-        }
-
-        mutable_buffer m_buffer;
-        uint64_t m_mask;
-    };
-
-protected:
-
-    void push(const mutable_buffer& buffer) noexcept(true) override
-    {
-        packet pack(buffer);
-
-        pack.make_opened(m_mask);
-        opened_channel::push(pack.payload());
-    }
-
-    bool pull(mutable_buffer& buffer) noexcept(true) override
-    {
-        packet pack(buffer);
-
-        mutable_buffer data = pack.payload();
-        if (opened_channel::pull(data))
-        {
-            pack.make_opaque(m_mask);
-            buffer.shrink(packet::header_size + data.size());
-            return true;
-        }
-        
-        return false;
-    }
-
-public:
-
-    opaque_channel(std::shared_ptr<reactor> reactor, std::shared_ptr<udp_binding> transport, uint64_t mask)
-        : opened_channel(reactor, transport)
-        , m_mask(mask)
-    {
-    }
-
-private:
-
-    uint64_t m_mask;
-};
-
-std::shared_ptr<channel> create_channel(std::shared_ptr<reactor> reactor, const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t mask)
-{
-    static std::mutex s_mutex;
-    static std::map<boost::asio::ip::udp::endpoint, std::weak_ptr<udp_binding>> s_bindings;
-
-    std::unique_lock<std::mutex> lock(s_mutex);
-    std::shared_ptr<udp_binding> transport;
-
-    auto iter = s_bindings.find(bind);
-    if (iter != s_bindings.end())
-    {
-        transport = iter->second.lock();
-        if (!transport)
-        {
-            s_bindings.erase(iter);
-        }
-    }
-
-    if (!transport)
-    {
-        transport = std::make_shared<udp_binding>(bind);
-        s_bindings.emplace(bind, transport);
-    }
-
-    auto channel = mask == 0 
-        ? std::make_shared<opened_channel>(reactor, transport)
-        : std::make_shared<opaque_channel>(reactor, transport, mask);
-
-    transport->connect(peer, channel);
-
-    return channel;
+    static std::shared_ptr<reactor> s_reactor = std::make_shared<reactor>();
+    return std::make_shared<controller>(s_reactor, udp::create_transport(s_reactor, bind), peer, mask);
 }
 
 }

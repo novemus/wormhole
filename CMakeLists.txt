@@ -5,8 +5,8 @@ project(${PROJECT_NAME} VERSION 1.0)
 
 set(TESTS tests)
 
-set(SOURCES channel.cpp main.cpp)
-set(TESTS_SOURCES channel.cpp test.cpp)
+set(SOURCES transport.cpp controller.cpp main.cpp)
+set(TESTS_SOURCES transport.cpp controller.cpp test.cpp)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall")
 
