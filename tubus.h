@@ -6,7 +6,7 @@
 #include <boost/system/error_code.hpp>
 #include <boost/asio/ip/udp.hpp>
 
-namespace tubus {
+namespace novemus { namespace tubus {
 
 struct channel
 {
@@ -17,10 +17,10 @@ struct channel
     virtual void connect(const callback& handle) noexcept(true) = 0;
     virtual void accept(const callback& handle) noexcept(true) = 0;
     virtual void shutdown(const callback& handle) noexcept(true) = 0;
-    virtual void read(const mutable_buffer& buf, const io_callback& handle) noexcept(true) = 0;
-    virtual void write(const const_buffer& buf, const io_callback& handle) noexcept(true) = 0;
+    virtual void read(const mutable_buffer& buffer, const io_callback& handle) noexcept(true) = 0;
+    virtual void write(const const_buffer& buffer, const io_callback& handle) noexcept(true) = 0;
 };
 
 std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t mask = 0) noexcept(false);
 
-}
+}}

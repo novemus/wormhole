@@ -1,25 +1,15 @@
 #pragma once
 
-#include "buffer.h"
-#include "reactor.h"
+#include <memory>
 #include <boost/asio/ip/udp.hpp>
+#include <boost/asio/generic/datagram_protocol.hpp>
 
-namespace tubus { namespace udp {
+namespace novemus { namespace udp {
 
-struct receiver
-{
-    virtual ~receiver() {}
-    virtual void receive(const boost::asio::ip::udp::endpoint& peer, const mutable_buffer& buffer) noexcept(true) = 0;
-    virtual void mistake(const boost::asio::ip::udp::endpoint& peer, const boost::system::error_code& error) noexcept(true) = 0;
-};
+typedef boost::asio::generic::datagram_protocol::socket socket;
+typedef std::shared_ptr<socket> socket_ptr;
 
-struct transport
-{
-    virtual ~transport() {}
-    virtual void subscribe(const boost::asio::ip::udp::endpoint& peer, std::shared_ptr<receiver> receiver) noexcept(true) = 0;  
-    virtual void dispatch(const boost::asio::ip::udp::endpoint& peer, const const_buffer& buffer) noexcept(true) = 0;
-};
-
-std::shared_ptr<transport> create_transport(std::shared_ptr<reactor> reactor, const boost::asio::ip::udp::endpoint& bind) noexcept(false);
+socket_ptr connect(const boost::asio::ip::udp::endpoint& peer) noexcept(false);
+socket_ptr connect(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer) noexcept(false);
 
 }}

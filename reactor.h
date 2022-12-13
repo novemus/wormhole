@@ -5,7 +5,7 @@
 #include <iostream>
 #include <boost/asio.hpp>
 
-namespace tubus {
+namespace novemus {
 
 class reactor
 {
@@ -15,7 +15,7 @@ class reactor
         std::unique_ptr<boost::asio::io_context::work> work;
         boost::asio::thread_pool pool;
 
-        void activate(size_t threads) 
+        void activate(size_t threads) noexcept(true)
         {
             work.reset(new boost::asio::io_context::work(io));
 
@@ -30,7 +30,7 @@ class reactor
             }
         }
 
-        void terminate()
+        void terminate() noexcept(true)
         {
             try
             {
@@ -49,7 +49,8 @@ class reactor
 
 public:
 
-    reactor(size_t threads = std::thread::hardware_concurrency()) : m_context(std::make_shared<context>())
+    reactor(size_t threads = std::thread::hardware_concurrency()) noexcept(true)
+        : m_context(std::make_shared<context>())
     {
         m_context->activate(threads);
     }
@@ -61,10 +62,12 @@ public:
         }).detach();
     }
 
-    boost::asio::io_context& get_io()
+    boost::asio::io_context& io() noexcept(true)
     {
         return m_context->io;
     }
+
+    static boost::asio::io_context& shared_io() noexcept(true);
 };
 
 }

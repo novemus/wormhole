@@ -4,156 +4,84 @@
 #include <ctime>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 #include <type_traits>
+#include <boost/asio.hpp>
 #include <boost/shared_array.hpp>
 
-namespace tubus {
+namespace novemus {
 
-struct const_buffer
+struct const_buffer : public boost::asio::const_buffer
 {
-    const_buffer(size_t len)
-        : m_buffer(new uint8_t[len])
-        , m_beg(0)
-        , m_end(len)
+    typedef boost::shared_array<const uint8_t> shared_array;
+
+    const_buffer(size_t size) noexcept(true) 
+        : const_buffer(shared_array(new uint8_t[size]), 0, size)
     {
-        std::memset(m_buffer.get(), 0, len);
     }
 
-    const_buffer(const std::string& data)
-        : m_buffer(new uint8_t[data.size()])
-        , m_beg(0)
-        , m_end(data.size())
+    const_buffer(shared_array array, size_t offset, size_t size) noexcept(true)
+        : boost::asio::const_buffer(array.get() + offset, size)
+        , m_array(array)
     {
-        std::memcpy(m_buffer.get(), data.data(), data.size());
     }
 
-    const uint8_t* data() const
+    bool unique() const noexcept(true)
     {
-        return m_buffer.get() + m_beg;
-    }
-    
-    size_t size() const
-    {
-        return m_end - m_beg;
+        return m_array.unique();
     }
 
-    void shrink(size_t len)
-    {
-        if (len > size())
-            throw std::runtime_error("shrink: out of range");
-
-        m_end = m_beg + len;
-    }
-
-    void prune(size_t len)
-    {
-        if (len > size())
-            throw std::runtime_error("prune: out of range");
-
-        m_beg += len;
-    }
-
-    const_buffer slice(size_t off, size_t len) const
+    const_buffer slice(size_t off, size_t len) const noexcept(false)
     {
         if (off > size() || off + len > size())
             throw std::runtime_error("slice: out of range");
 
-        return const_buffer(m_buffer, m_beg + off, m_beg + off + len);
-    }
-
-    bool unique() const
-    {
-        return m_buffer.unique();
-    }
-
-protected:
-
-    const_buffer(boost::shared_array<uint8_t> buffer, size_t beg, size_t end)
-        : m_buffer(buffer)
-        , m_beg(beg)
-        , m_end(end)
-    {
-    }
-
-    boost::shared_array<uint8_t> m_buffer;
-    size_t m_beg;
-    size_t m_end;
-};
-
-struct mutable_buffer : public const_buffer
-{
-    mutable_buffer(size_t len) : const_buffer(len)
-    {
-    }
-
-    uint8_t* data()
-    {
-        return m_buffer.get() + m_beg;
-    }
-
-    mutable_buffer slice(size_t off, size_t len) const
-    {
-        if (off > size() || off + len > size())
-            throw std::runtime_error("slice: out of range");
-
-        return mutable_buffer(m_buffer, m_beg + off, m_beg + off + len);
-    }
-
-protected:
-
-    mutable_buffer(boost::shared_array<uint8_t> buffer, size_t beg, size_t end) : const_buffer(buffer, beg, end)
-    {
-    }
-};
-
-struct buffer_factory
-{
-    buffer_factory(size_t buff_size) : m_buff_size(buff_size)
-    {
-    }
-
-    mutable_buffer make_buffer()
-    {
-        auto it = m_cache.begin();
-        while (it != m_cache.end())
-        {
-            if (it->first.unique())
-            {
-                mutable_buffer buff = it->first;
-                std::memset(buff.data(), 0, buff.size());
-
-                it->second = std::time(0);
-
-                compress_cache();
-
-                return buff;
-            }
-            ++it;
-        }
-
-        m_cache.emplace_back(mutable_buffer(m_buff_size), std::time(0));
-
-        return m_cache.back().first;
+        return const_buffer(m_array, off, len);
     }
 
 private:
 
-    void compress_cache()
-    {
-        static const time_t TTL = 30;
-        time_t now = std::time(0);
+    shared_array m_array;
+};
 
-        auto it = m_cache.begin();
-        while (it != m_cache.end())
-        {
-            if (it->first.unique() && it->second + TTL > now)
-                it = m_cache.erase(it);
-            else
-                ++it;
-        }
+struct mutable_buffer : public virtual boost::asio::mutable_buffer
+{
+    typedef boost::shared_array<uint8_t> shared_array;
+
+    mutable_buffer(size_t size) noexcept(true) 
+        : mutable_buffer(shared_array(new uint8_t[size]), 0, size)
+    {
     }
 
-    size_t m_buff_size;
-    std::list<std::pair<mutable_buffer, time_t>> m_cache;
+    mutable_buffer(shared_array array, size_t offset, size_t size) noexcept(true)
+        : boost::asio::mutable_buffer(array.get() + offset, size)
+        , m_array(array)
+    {
+    }
+
+    bool unique() const noexcept(true)
+    {
+        return m_array.unique();
+    }
+
+    mutable_buffer slice(size_t off, size_t len) const noexcept(false)
+    {
+        if (off > size() || off + len > size())
+            throw std::runtime_error("slice: out of range");
+
+        return mutable_buffer(m_array, off, len);
+    }
+    
+    operator const_buffer() const noexcept(true)
+    {
+        return const_buffer(m_array, (uint8_t*)data() - m_array.get(), size());
+    }
+
+    static mutable_buffer create(size_t size) noexcept(true);
+
+private:
+
+    boost::shared_array<uint8_t> m_array;
 };
+
 }

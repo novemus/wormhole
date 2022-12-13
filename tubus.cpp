@@ -13,10 +13,9 @@
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
+namespace novemus { namespace tubus {
 
-namespace tubus {
-
-class controller : public channel, public udp::receiver, public std::enable_shared_from_this<controller>
+class transport : public novemus::tubus::channel, public std::enable_shared_from_this<transport>
 {
     struct packet
     {
@@ -32,7 +31,7 @@ class controller : public channel, public udp::receiver, public std::enable_shar
         static constexpr uint8_t packet_sign = 0x99;
         static constexpr uint8_t packet_version = 1 << 4;
         static constexpr size_t header_size = 24;
-        static constexpr size_t max_packet_size = 9984;
+        static constexpr size_t max_packet_size = 9992;
         static constexpr size_t max_payload_size = max_packet_size - header_size;
 
         packet(const mutable_buffer& buffer) : m_buffer(buffer)
@@ -41,32 +40,32 @@ class controller : public channel, public udp::receiver, public std::enable_shar
 
         uint64_t salt() const
         {
-            return le64toh(*(uint64_t *)m_buffer.const_buffer::data());
+            return le64toh(*(uint64_t *)data());
         }
 
         uint8_t sign() const
         {
-            return m_buffer.const_buffer::data()[8];
+            return data()[8];
         }
 
         uint8_t version() const
         {
-            return m_buffer.const_buffer::data()[9];
+            return data()[9];
         }
 
         uint32_t pin() const
         {
-            return ntohl(*(uint32_t *)(m_buffer.const_buffer::data() + 10));
+            return ntohl(*(uint32_t *)(data() + 10));
         }
 
         uint16_t flags() const
         {
-            return ntohs(*(uint16_t *)(m_buffer.const_buffer::data() + 14));
+            return ntohs(*(uint16_t *)(data() + 14));
         }
 
         uint64_t cursor() const
         {
-            return le64toh(*(uint64_t *)(m_buffer.const_buffer::data() + 16));
+            return le64toh(*(uint64_t *)(data() + 16));
         }
 
         mutable_buffer payload() const
@@ -79,11 +78,6 @@ class controller : public channel, public udp::receiver, public std::enable_shar
             return flags() & v;
         }
 
-        size_t size() const
-        {
-            return m_buffer.size();
-        }
-
         bool valid() const
         {
             return size() >= packet::header_size && sign() == packet::packet_sign && version() == packet::packet_version;
@@ -91,38 +85,38 @@ class controller : public channel, public udp::receiver, public std::enable_shar
 
         void set_salt(uint64_t s)
         {
-            *(uint64_t*)m_buffer.data() = htole64(s);
+            *(uint64_t*)data() = htole64(s);
         }
 
         void set_sign(uint8_t s)
         {
-            m_buffer.data()[8] = s;
+            data()[8] = s;
         }
 
         void set_version(uint8_t v)
         {
-            m_buffer.data()[9] = v;
+            data()[9] = v;
         }
 
         void set_pin(uint32_t v)
         {
-            *(uint32_t *)(m_buffer.data() + 10) = htonl(v);
+            *(uint32_t *)(data() + 10) = htonl(v);
         }
 
         void set_flags(uint16_t v)
         {
-            *(uint16_t *)(m_buffer.data() + 14) = htons(v);
+            *(uint16_t *)(data() + 14) = htons(v);
         }
 
         void set_cursor(uint64_t v)
         {
-            *(uint64_t *)(m_buffer.data() + 16) = htole64(v);
+            *(uint64_t *)(data() + 16) = htole64(v);
         }
 
         void set_payload(const const_buffer& payload)
         {
-            std::memcpy(m_buffer.data() + packet::header_size, payload.data(), payload.size());
-            m_buffer.shrink(payload.size() + packet::header_size);
+            shrink(payload.size());
+            std::memcpy(data() + packet::header_size, payload.data(), payload.size());
         }
 
         void make_opened(uint64_t mask)
@@ -143,14 +137,27 @@ class controller : public channel, public udp::receiver, public std::enable_shar
             apply_mask(s + mask);
         }
 
-        void shrink(size_t size)
+        void shrink(size_t len)
         {
-            m_buffer.shrink(size);
+            if (size() < len)
+                throw std::runtime_error("shrink: out of range");
+            else if (size() > len)
+                m_buffer = m_buffer.slice(0, len);
         }
 
-        mutable_buffer buffer() const
+        size_t size() const
         {
-            return m_buffer;
+            return m_buffer.size();
+        }
+
+        uint8_t* data()
+        {
+            return (uint8_t*)m_buffer.data();
+        }
+        
+        const uint8_t* data() const
+        {
+            return (uint8_t*)m_buffer.data();
         }
 
     private:
@@ -158,10 +165,10 @@ class controller : public channel, public udp::receiver, public std::enable_shar
         void apply_mask(uint64_t mask)
         {
             size_t offset = sizeof(uint64_t);
-            while (offset < m_buffer.size())
+            while (offset < size())
             {
-                uint8_t* v = (uint8_t*)(m_buffer.data() + offset);
-                for (size_t i = 0; i < std::min(sizeof(uint64_t), m_buffer.size() - sizeof(uint64_t)); ++i)
+                uint8_t* v = (uint8_t*)(data() + offset);
+                for (size_t i = 0; i < std::min(sizeof(uint64_t), size() - sizeof(uint64_t)); ++i)
                 {
                     v[i] = uint8_t(mask >> (i * 8));
                 }
@@ -636,7 +643,7 @@ class controller : public channel, public udp::receiver, public std::enable_shar
                 while (it != m_parts.end() && it->first == m_tail + 1)
                 {
                     size_t size = std::min(top.first.size() - shift, it->second.size());
-                    std::memcpy(top.first.data() + shift, it->second.data(), size);
+                    std::memcpy((uint8_t*)top.first.data() + shift, it->second.data(), size);
 
                     shift += size;
 
@@ -647,7 +654,7 @@ class controller : public channel, public udp::receiver, public std::enable_shar
                     }
                     else
                     {
-                        it->second.prune(size);
+                        it->second = it->second.slice(0, size);
                         break;
                     }
 
@@ -667,54 +674,71 @@ class controller : public channel, public udp::receiver, public std::enable_shar
         boost::asio::io_context& m_io;
         cursor m_tail;
         std::set<cursor> m_acks;
-        std::map<cursor, const_buffer> m_parts;
+        std::map<cursor, mutable_buffer> m_parts;
         std::list<std::pair<mutable_buffer, io_callback>> m_handles;
     };
 
 protected:
 
-    void mistake(const boost::asio::ip::udp::endpoint& peer, const boost::system::error_code& ec) noexcept(true) override
+    void mistake(const boost::system::error_code& ec)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (peer == m_peer)
-        {
-            m_coupler.error(ec);
-            m_istream.error(ec);
-            m_ostream.error(ec);
-        }
+        m_coupler.error(ec);
+        m_istream.error(ec);
+        m_ostream.error(ec);
     }
 
-    void receive(const boost::asio::ip::udp::endpoint& peer, const mutable_buffer& buffer) noexcept(true) override
+    void parse(const mutable_buffer& buffer)
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        packet pack(buffer);
 
-        if (peer == m_peer && m_coupler.is_alive())
+        if (pack.valid())
         {
-            packet pack(buffer);
+            if (m_mask)
+                pack.make_opened(m_mask);
 
-            if (pack.valid())
+            if (m_coupler.parse(pack))
             {
-                if (m_mask)
-                    pack.make_opened(m_mask);
-
-                if (m_coupler.parse(pack))
+                if (m_coupler.is_remote_fin(pack))
                 {
-                    if (m_coupler.is_remote_fin(pack))
-                    {
-                        m_istream.error(boost::asio::error::connection_aborted);
-                        m_ostream.error(boost::asio::error::connection_aborted);
-                    }
-                }
-                else if (m_coupler.is_linked())
-                {
-                    m_istream.parse(pack) || m_ostream.parse(pack);
+                    m_istream.error(boost::asio::error::connection_aborted);
+                    m_ostream.error(boost::asio::error::connection_aborted);
                 }
             }
+            else if (m_coupler.is_linked())
+            {
+                m_istream.parse(pack) || m_ostream.parse(pack);
+            }
+        }
+
+        receive();
+    }
+
+    void receive()
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        if (m_coupler.is_alive())
+        {
+            novemus::mutable_buffer buffer = novemus::mutable_buffer::create(packet::max_packet_size);
+            std::weak_ptr<transport> weak = shared_from_this();
+
+            m_socket->async_receive(boost::asio::buffer(buffer.data(), buffer.size()), [weak, buffer](const boost::system::error_code& error, size_t size)
+            {
+                auto ptr = weak.lock();
+                if (ptr)
+                {
+                    if (error)
+                        ptr->mistake(error);
+                    else
+                        ptr->parse(buffer.slice(0, size));
+                }
+            });
         }
     }
 
-    void dispatch() noexcept(true)
+    void dispatch()
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -728,34 +752,38 @@ protected:
                 return;
             }
 
-            packet pack(m_stock.make_buffer());
+            std::weak_ptr<transport> weak = shared_from_this();
+            packet pack(novemus::mutable_buffer::create(packet::max_packet_size));
 
-            if (m_coupler.imbue(pack))
+            if (m_coupler.imbue(pack) || (m_coupler.is_linked() && (m_istream.imbue(pack) || m_ostream.imbue(pack))))
             {
+                if (m_mask)
+                    pack.make_opaque(m_mask);
+
+                m_socket->async_send(boost::asio::buffer(pack.data(), pack.size()), [weak, pack](const boost::system::error_code& error, size_t size)
+                {
+                    auto ptr = weak.lock();
+                    if (ptr)
+                    {
+                        if (error)
+                            ptr->mistake(error);
+                        else if (pack.size() < size)
+                            ptr->mistake(boost::asio::error::message_size);
+                        else
+                            ptr->dispatch();
+                    }
+                });
+
                 if (m_coupler.is_local_fin(pack))
                 {
                     m_istream.error(boost::asio::error::connection_aborted);
                     m_ostream.error(boost::asio::error::connection_aborted);
                 }
-
-                if (m_mask)
-                    pack.make_opaque(m_mask);
-
-                m_transport->dispatch(m_peer, pack.buffer());
-            }
-            else if (m_coupler.is_linked() && (m_istream.imbue(pack) || m_ostream.imbue(pack)))
-            {
-                if (m_mask)
-                    pack.make_opaque(m_mask);
-                
-                m_transport->dispatch(m_peer, pack.buffer());
             }
             else
             {
-                std::weak_ptr<controller> weak = shared_from_this();
-
                 m_timer.expires_from_now(boost::posix_time::milliseconds(100));
-                m_timer.async_wait([weak, peer = m_peer](const boost::system::error_code& error)
+                m_timer.async_wait([weak](const boost::system::error_code& error)
                 {
                     if (error == boost::asio::error::connection_aborted)
                         return;
@@ -763,31 +791,35 @@ protected:
                     auto ptr = weak.lock();
                     if (ptr)
                     {
-                        error ? ptr->mistake(peer, error) : ptr->dispatch();
+                        if (error != boost::asio::error::connection_aborted)
+                            ptr->mistake(error);
+                        else
+                            ptr->dispatch();
                     }
                 });
             }
         }
     }
 
-    void resume_dispatch()
+    void resume_dispatch(std::unique_lock<std::mutex>&)
     {
         boost::system::error_code ec;
         m_timer.cancel(ec);
-        m_reactor->get_io().post(boost::bind(&controller::dispatch, shared_from_this()));
+    }
+
+    void begin_dispatch(std::unique_lock<std::mutex>&)
+    {
+        novemus::reactor::shared_io().post(boost::bind(&transport::dispatch, shared_from_this()));
     }
 
 public:
 
-    controller(std::shared_ptr<reactor> reactor, std::shared_ptr<udp::transport> transport, const boost::asio::ip::udp::endpoint& peer, uint64_t mask)
-        : m_reactor(reactor)
-        , m_transport(transport)
-        , m_peer(peer)
-        , m_timer(reactor->get_io())
-        , m_coupler(reactor->get_io())
-        , m_istream(reactor->get_io())
-        , m_ostream(reactor->get_io())
-        , m_stock(9992)
+    transport(novemus::udp::socket_ptr socket, uint64_t mask)
+        : m_socket(socket)
+        , m_timer(novemus::reactor::shared_io())
+        , m_coupler(novemus::reactor::shared_io())
+        , m_istream(novemus::reactor::shared_io())
+        , m_ostream(novemus::reactor::shared_io())
         , m_mask(mask)
     {
     }
@@ -802,12 +834,12 @@ public:
                 boost::asio::error::already_started : m_coupler.is_alive() ? 
                     boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            m_reactor->get_io().post(boost::bind(handle, error));
+            novemus::reactor::shared_io().post(boost::bind(handle, error));
             return;
         }
 
         m_coupler.shutdown(handle);
-        resume_dispatch();
+        resume_dispatch(lock);
     }
 
     void connect(const callback& handle) noexcept(true) override
@@ -820,13 +852,12 @@ public:
                 boost::asio::error::already_started : m_coupler.is_linked() ? 
                     boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-            m_reactor->get_io().post(boost::bind(handle, ec));
+            novemus::reactor::shared_io().post(boost::bind(handle, ec));
             return;
         }
 
         m_coupler.connect(handle);
-        m_transport->subscribe(m_peer, shared_from_this());
-        resume_dispatch();
+        begin_dispatch(lock);
     }
 
     void accept(const callback& handle) noexcept(true) override
@@ -839,16 +870,15 @@ public:
                 boost::asio::error::already_started : m_coupler.is_linked() ? 
                     boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-            m_reactor->get_io().post(boost::bind(handle, ec));
+            novemus::reactor::shared_io().post(boost::bind(handle, ec));
             return;
         }
 
         m_coupler.accept(handle);
-        m_transport->subscribe(m_peer, shared_from_this());
-        resume_dispatch();
+        begin_dispatch(lock);
     }
 
-    void read(const mutable_buffer& buf, const io_callback& handle) noexcept(true) override
+    void read(const mutable_buffer& buffer, const io_callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -857,15 +887,15 @@ public:
             boost::system::error_code ec = m_coupler.is_alive() ? 
                 boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            m_reactor->get_io().post(boost::bind(handle, ec, 0));
+            novemus::reactor::shared_io().post(boost::bind(handle, ec, 0));
             return;
         }
 
-        m_istream.append(buf, handle);
-        resume_dispatch();
+        m_istream.append(buffer, handle);
+        resume_dispatch(lock);
     }
 
-    void write(const const_buffer& buf, const io_callback& handle) noexcept(true) override
+    void write(const const_buffer& buffer, const io_callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
                 
@@ -874,32 +904,28 @@ public:
             boost::system::error_code ec = m_coupler.is_alive() ? 
                 boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            m_reactor->get_io().post(boost::bind(handle, ec, 0));
+            novemus::reactor::shared_io().post(boost::bind(handle, ec, 0));
             return;
         }
 
-        m_ostream.append(buf, handle);
-        resume_dispatch();
+        m_ostream.append(buffer, handle);
+        resume_dispatch(lock);
     }
 
 private:
 
-    std::shared_ptr<reactor> m_reactor;
-    std::shared_ptr<udp::transport> m_transport;
-    boost::asio::ip::udp::endpoint m_peer;
+    novemus::udp::socket_ptr m_socket;
     boost::asio::deadline_timer m_timer;
     connect_handler m_coupler;
     istream_handler m_istream;
     ostream_handler m_ostream;
-    buffer_factory m_stock;
     uint64_t m_mask;
     std::mutex m_mutex;
 };
 
 std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t mask) noexcept(false)
 {
-    static std::shared_ptr<reactor> s_reactor = std::make_shared<reactor>();
-    return std::make_shared<controller>(s_reactor, udp::create_transport(s_reactor, bind), peer, mask);
+    return std::make_shared<transport>(novemus::udp::connect(bind, peer), mask);
 }
 
-}
+}}

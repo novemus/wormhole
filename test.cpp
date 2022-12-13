@@ -7,7 +7,7 @@ BOOST_AUTO_TEST_CASE(buffer)
 {
     const char* text = "hello, tubus";
 
-    tubus::mutable_buffer mb(std::strlen(text));
+    novemus::mutable_buffer mb(std::strlen(text));
 
     std::memcpy(mb.data(), text, mb.size());
 
@@ -16,7 +16,7 @@ BOOST_AUTO_TEST_CASE(buffer)
     BOOST_CHECK_EQUAL(std::memcmp(mb.data(), text, mb.size()), 0);
 
     {
-        tubus::const_buffer cb = mb.slice(7, 5);
+        novemus::const_buffer cb = mb.slice(7, 5);
 
         BOOST_CHECK(!mb.unique());
         BOOST_CHECK(!cb.unique());
@@ -28,19 +28,19 @@ BOOST_AUTO_TEST_CASE(buffer)
         BOOST_CHECK_EQUAL(std::memcmp(cb.data(), "hello", cb.size()), 0);
     }
 
-    mb.shrink(5);
+    mb = mb.slice(0, 5);
     
     BOOST_CHECK_EQUAL(mb.size(), 5);
     BOOST_CHECK_EQUAL(std::memcmp(mb.data(), "tubus", mb.size()), 0);
 
-    mb.prune(1);
+    mb = mb.slice(1, 4);
 
     BOOST_CHECK_EQUAL(mb.size(), 4);
-    BOOST_REQUIRE_THROW(mb.prune(5), std::runtime_error);
-    BOOST_REQUIRE_THROW(mb.shrink(5), std::runtime_error);
+    BOOST_REQUIRE_THROW(mb.slice(0, 5), std::runtime_error);
+    BOOST_REQUIRE_THROW(mb.slice(5, 1), std::runtime_error);
     BOOST_REQUIRE_THROW(mb.slice(5, 5), std::runtime_error);
 
-    mb.shrink(0);
+    mb = mb.slice(0, 0);
 
     BOOST_CHECK_EQUAL(mb.size(), 0);
     BOOST_CHECK(mb.unique());
