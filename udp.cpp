@@ -2,6 +2,7 @@
 #include "buffer.h"
 #include "reactor.h"
 #include <map>
+#include <deque>
 #include <mutex>
 #include <boost/asio.hpp>
 #include <boost/asio/buffer.hpp>
@@ -17,8 +18,10 @@ class binding : public std::enable_shared_from_this<binding>
     class channel_pool
     {
         typedef std::map<boost::asio::ip::udp::endpoint, socket_ptr> channel_map;
+        typedef std::deque<socket_ptr> socket_queue;
 
-        channel_map m_pool;
+        mutable channel_map m_pool;
+        mutable socket_queue m_stock;
         mutable std::mutex m_mutex;
 
     public:
@@ -30,8 +33,12 @@ class binding : public std::enable_shared_from_this<binding>
         socket_ptr fetch(const boost::asio::ip::udp::endpoint& peer) const
         {
             std::unique_lock<std::mutex> lock(m_mutex);
+
             auto iter = m_pool.find(peer);
-            return iter != m_pool.end() ? iter->second : socket_ptr();
+            if (iter == m_pool.end())
+                return socket_ptr();
+
+            return iter->second;
         }
         
         bool empty()
@@ -49,7 +56,32 @@ class binding : public std::enable_shared_from_this<binding>
         void emplace(const boost::asio::ip::udp::endpoint& peer, socket_ptr socket)
         {
             std::unique_lock<std::mutex> lock(m_mutex);
+
+            if (m_pool.find(peer) != m_pool.end())
+                boost::asio::detail::throw_error(boost::asio::error::address_in_use, "connect");
+
             m_pool.emplace(peer, socket);
+        }
+
+        void stock(socket_ptr socket)
+        {
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_stock.emplace_back(socket);
+        }
+
+        socket_ptr yield(const boost::asio::ip::udp::endpoint& peer)
+        {
+            std::unique_lock<std::mutex> lock(m_mutex);
+
+            if (m_pool.find(peer) != m_pool.end() || m_stock.empty())
+                return socket_ptr();
+
+            auto socket = m_stock.front();
+
+            m_stock.pop_front();
+            m_pool.emplace(peer, socket);
+
+            return socket;
         }
 
         void remove(const boost::asio::ip::udp::endpoint& peer)
@@ -67,15 +99,16 @@ class binding : public std::enable_shared_from_this<binding>
 
     typedef std::shared_ptr<boost::asio::ip::udp::endpoint> endpoint_ptr;
 
+    novemus::reactor m_reactor;
     boost::asio::ip::udp::socket m_socket;
     channel_pool m_pool;
 
-    void transmit_to(boost::asio::ip::udp::endpoint peer, const void* data, size_t size)
+    void transmit_to(const boost::asio::ip::udp::endpoint& peer, mutable_buffer packet)
     {
         if (m_socket.is_open())
         {
             std::weak_ptr<binding> weak = shared_from_this();
-            m_socket.async_send_to(boost::asio::buffer(data, size), peer, [weak, peer, size](const boost::system::error_code& error, size_t sent)
+            m_socket.async_send_to(packet, peer, [weak, peer, packet](const boost::system::error_code& error, size_t sent)
             {
                 auto ptr = weak.lock();
 
@@ -87,7 +120,7 @@ class binding : public std::enable_shared_from_this<binding>
                         ptr->close(peer);
                     }
                 }
-                else if (size < sent)
+                else if (packet.size() < sent)
                 {
                     std::cout << "transmit_to " << peer << ": cant send packet " << std::endl;
                     if (ptr)
@@ -103,14 +136,12 @@ class binding : public std::enable_shared_from_this<binding>
         }
     }
 
-    void transmit_from(boost::asio::ip::udp::endpoint peer, const void* data, size_t size)
+    void transmit_from(const boost::asio::ip::udp::endpoint& peer, mutable_buffer packet)
     {
-        auto socket = m_pool.fetch(peer);
-
-        if (socket && socket->is_open())
+        std::weak_ptr<binding> weak = shared_from_this();
+        auto send_to = [&](socket_ptr socket)
         {
-            std::weak_ptr<binding> weak = shared_from_this();
-            socket->async_send(boost::asio::buffer(data, size), [weak, peer, size](const boost::system::error_code& error, size_t sent)
+            socket->async_send(packet, [weak, peer, packet](const boost::system::error_code& error, size_t sent)
             {
                 auto ptr = weak.lock();
 
@@ -122,7 +153,7 @@ class binding : public std::enable_shared_from_this<binding>
                         ptr->close(peer);
                     }
                 }
-                else if (size < sent)
+                else if (packet.size() < sent)
                 {
                     std::cout << "resend_from " << peer << ": cant send packet " << std::endl;
                     if (ptr)
@@ -131,14 +162,40 @@ class binding : public std::enable_shared_from_this<binding>
                     }
                 }
             });
+        };
+
+        auto socket = m_pool.fetch(peer);
+        if (socket)
+        {
+            if (socket->is_open())
+            {
+                send_to(socket);
+            }
+            else
+            {
+                close(peer);
+            }
         }
         else
         {
-            close(peer);
+            auto socket = m_pool.yield(peer);
+            if (socket)
+            {
+                if (socket->is_open())
+                {
+                    receive_for(peer);
+                    send_to(socket);
+                }
+                else
+                {
+                    close(peer);
+                }
+            }
         }
+
     }
 
-    void receive_for(boost::asio::ip::udp::endpoint peer)
+    void receive_for(const boost::asio::ip::udp::endpoint& peer)
     {
         auto backend = m_pool.fetch(peer);
 
@@ -147,7 +204,7 @@ class binding : public std::enable_shared_from_this<binding>
             std::weak_ptr<binding> weak = shared_from_this();
             mutable_buffer packet = mutable_buffer::create(max_udp_packet_size);
 
-            backend->async_receive(boost::asio::buffer(packet.data(), packet.size()), [weak, peer, packet](const boost::system::error_code& error, size_t size)
+            backend->async_receive(packet, [weak, peer, packet](const boost::system::error_code& error, size_t size)
             {
                 auto ptr = weak.lock();
                 if (error)
@@ -160,7 +217,7 @@ class binding : public std::enable_shared_from_this<binding>
                 }
                 else if (ptr)
                 {
-                    ptr->transmit_to(peer, packet.data(), size);
+                    ptr->transmit_to(peer, packet.slice(0, size));
                     ptr->receive_for(peer);
                 }
             });
@@ -175,7 +232,7 @@ class binding : public std::enable_shared_from_this<binding>
             endpoint_ptr peer = std::make_shared<boost::asio::ip::udp::endpoint>();
             mutable_buffer packet = mutable_buffer::create(max_udp_packet_size);
 
-            m_socket.async_receive_from(boost::asio::buffer(packet.data(), packet.size()), *peer, [packet, peer, weak](const boost::system::error_code& error, size_t size)
+            m_socket.async_receive_from(packet, *peer, [weak, peer, packet](const boost::system::error_code& error, size_t size)
             {
                 auto ptr = weak.lock();
 
@@ -192,23 +249,17 @@ class binding : public std::enable_shared_from_this<binding>
                 {
                     if (ptr)
                     {
-                        ptr->transmit_from(*peer, packet.data(), size);
+                        ptr->transmit_from(*peer, packet.slice(0, size));
+                        ptr->receive();
                     }
                 }
-
-                if (ptr)
-                {
-                    ptr->transmit_from(*peer, packet.data(), size);
-                }
-
-                ptr->receive();
             });
         }
     }
 
 public:
 
-    binding() : m_socket(novemus::reactor::shared_io())
+    binding() : m_reactor(2), m_socket(m_reactor.io())
     {
     }
 
@@ -223,7 +274,6 @@ public:
     void bind(const boost::asio::ip::udp::endpoint& bind)
     {
         m_socket.open(bind.protocol());
-        m_socket.non_blocking(true);
         m_socket.bind(bind);
 
         receive();
@@ -231,19 +281,38 @@ public:
 
     socket_ptr connect(const boost::asio::ip::udp::endpoint& peer) noexcept(false)
     {
-        if (m_pool.contains(peer))
-            boost::asio::detail::throw_error(boost::asio::error::address_in_use, "connect");
+        auto self = shared_from_this();
+        auto reactor = std::make_shared<novemus::reactor>(2);
 
-        boost::asio::local::datagram_protocol::socket frontend(novemus::reactor::shared_io());
-        boost::asio::local::datagram_protocol::socket backend(novemus::reactor::shared_io());
-        
-        boost::asio::local::connect_pair(frontend, backend);
+        boost::asio::local::datagram_protocol::socket front(reactor->io());
+        boost::asio::local::datagram_protocol::socket back(reactor->io());
+        boost::asio::local::connect_pair(front, back);
 
-        m_pool.emplace(peer, std::make_shared<socket>(std::move(backend)));
+        socket_ptr frontend(new socket(std::move(front)), [self, reactor](socket* s) { delete s; });
+        socket_ptr backend(new socket(std::move(back)), [reactor](socket* s) { delete s; });
+
+        m_pool.emplace(peer, backend);
 
         receive_for(peer);
 
-        return std::make_shared<socket>(std::move(frontend));
+        return frontend;
+    }
+
+    socket_ptr accept() noexcept(false)
+    {
+        auto self = shared_from_this();
+        auto reactor = std::make_shared<novemus::reactor>(2);
+
+        boost::asio::local::datagram_protocol::socket front(reactor->io());
+        boost::asio::local::datagram_protocol::socket back(reactor->io());
+        boost::asio::local::connect_pair(front, back);
+
+        socket_ptr frontend(new socket(std::move(front)), [self, reactor](socket* s) { delete s; });
+        socket_ptr backend(new socket(std::move(back)), [reactor](socket* s) { delete s; });
+
+        m_pool.stock(backend);
+
+        return frontend;
     }
 
     void close(boost::asio::ip::udp::endpoint peer)
@@ -254,15 +323,15 @@ public:
 
 socket_ptr connect(const boost::asio::ip::udp::endpoint& peer) noexcept(false)
 {
-    boost::asio::ip::udp::socket sock(novemus::reactor::shared_io(), peer.protocol());
+    auto reactor = std::make_shared<novemus::reactor>(2);
+    boost::asio::ip::udp::socket sock(reactor->io(), peer.protocol());
     
-    sock.non_blocking(true);
     sock.connect(peer);
 
-    return std::make_shared<socket>(std::move(sock));
+    return socket_ptr(new socket(std::move(sock)), [reactor](socket* s) { delete s; });
 }
 
-socket_ptr connect(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer) noexcept(false)
+std::shared_ptr<binding> fetch_binding(const boost::asio::ip::udp::endpoint& bind)
 {
     static std::mutex s_mutex;
     static std::map<boost::asio::ip::udp::endpoint, std::weak_ptr<binding>> s_pool;
@@ -288,7 +357,17 @@ socket_ptr connect(const boost::asio::ip::udp::endpoint& bind, const boost::asio
         s_pool.emplace(bind, transport);
     }
 
-    return transport->connect(peer);
+    return transport;
+}
+
+socket_ptr connect(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer) noexcept(false)
+{
+    return fetch_binding(bind)->connect(peer);
+}
+
+socket_ptr accept(const boost::asio::ip::udp::endpoint& bind) noexcept(false)
+{
+    return fetch_binding(bind)->accept();
 }
 
 }}
