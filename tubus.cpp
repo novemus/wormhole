@@ -119,22 +119,22 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             std::memcpy(data() + packet::header_size, payload.data(), payload.size());
         }
 
-        void make_opened(uint64_t mask)
+        void make_opened(uint64_t key)
         {
-            uint64_t s = salt() ^ mask;
+            uint64_t s = salt() ^ key;
 
             set_salt(s);
-            apply_mask(s + mask);
+            invert(s, key);
         }
 
-        void make_opaque(uint64_t mask)
+        void make_opaque(uint64_t key)
         {
             std::random_device dev;
             std::mt19937_64 gen(dev());
             uint64_t s = static_cast<uint64_t>(gen());
 
-            set_salt(s ^ mask);
-            apply_mask(s + mask);
+            set_salt(s ^ key);
+            invert(s, key);
         }
 
         void shrink(size_t len)
@@ -162,17 +162,26 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
     private:
 
-        void apply_mask(uint64_t mask)
+        void invert(uint64_t salt, uint64_t key)
         {
-            size_t offset = sizeof(uint64_t);
-            while (offset < size())
+            uint64_t inverter = key + salt;
+
+            uint8_t* ptr = data() + sizeof(uint64_t);
+            uint8_t* end = data() + size();
+
+            while (ptr + sizeof(uint64_t) < end)
             {
-                uint8_t* v = (uint8_t*)(data() + offset);
-                for (size_t i = 0; i < std::min(sizeof(uint64_t), size() - sizeof(uint64_t)); ++i)
-                {
-                    v[i] = uint8_t(mask >> (i * 8));
-                }
-                offset += sizeof(uint64_t);
+                *(uint64_t*)ptr ^= inverter;
+                inverter = (inverter ^ key) + salt;
+
+                ptr += sizeof(uint64_t);
+            }
+
+            uint8_t* inv = (uint8_t*)&inverter;
+            while (ptr < end)
+            {
+                *ptr ^= *inv;
+                ++ptr;
             }
         }
 
@@ -695,8 +704,8 @@ protected:
 
         if (pack.valid())
         {
-            if (m_mask)
-                pack.make_opened(m_mask);
+            if (m_key)
+                pack.make_opened(m_key);
 
             if (m_coupler.parse(pack))
             {
@@ -757,8 +766,8 @@ protected:
 
             if (m_coupler.imbue(pack) || (m_coupler.is_linked() && (m_istream.imbue(pack) || m_ostream.imbue(pack))))
             {
-                if (m_mask)
-                    pack.make_opaque(m_mask);
+                if (m_key)
+                    pack.make_opaque(m_key);
 
                 m_socket->async_send(boost::asio::buffer(pack.data(), pack.size()), [weak, pack](const boost::system::error_code& error, size_t size)
                 {
@@ -814,13 +823,13 @@ protected:
 
 public:
 
-    transport(novemus::udp::socket_ptr socket, uint64_t mask)
+    transport(novemus::udp::socket_ptr socket, uint64_t key)
         : m_socket(socket)
         , m_timer(novemus::reactor::shared_io())
         , m_coupler(novemus::reactor::shared_io())
         , m_istream(novemus::reactor::shared_io())
         , m_ostream(novemus::reactor::shared_io())
-        , m_mask(mask)
+        , m_key(key)
     {
     }
 
@@ -919,13 +928,13 @@ private:
     connect_handler m_coupler;
     istream_handler m_istream;
     ostream_handler m_ostream;
-    uint64_t m_mask;
+    uint64_t m_key;
     std::mutex m_mutex;
 };
 
-std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t mask) noexcept(false)
+std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t key) noexcept(false)
 {
-    return std::make_shared<transport>(novemus::udp::connect(bind, peer), mask);
+    return std::make_shared<transport>(novemus::udp::connect(bind, peer), key);
 }
 
 }}

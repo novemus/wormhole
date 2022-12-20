@@ -21,6 +21,6 @@ struct channel
     virtual void write(const const_buffer& buffer, const io_callback& handle) noexcept(true) = 0;
 };
 
-std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t mask = 0) noexcept(false);
+std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t key = 0) noexcept(false);
 
 }}

@@ -47,7 +47,7 @@ BOOST_AUTO_TEST_CASE(buffer)
     BOOST_CHECK(mb.unique());
 }
 
-BOOST_AUTO_TEST_CASE(udp_connect)
+BOOST_AUTO_TEST_CASE(udp)
 {
     boost::asio::ip::udp::endpoint e1(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint e2(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
