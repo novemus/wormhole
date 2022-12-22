@@ -99,7 +99,6 @@ class binding : public std::enable_shared_from_this<binding>
 
     typedef std::shared_ptr<boost::asio::ip::udp::endpoint> endpoint_ptr;
 
-    novemus::reactor m_reactor;
     boost::asio::ip::udp::socket m_socket;
     channel_pool m_pool;
 
@@ -114,7 +113,7 @@ class binding : public std::enable_shared_from_this<binding>
 
                 if (error)
                 {
-                    std::cout << "transmit_to " << peer << ": " << error.message() << std::endl;
+                    std::cout << "async_send_to " << peer << ": " << error.message() << std::endl;
                     if (ptr)
                     {
                         ptr->close(peer);
@@ -122,7 +121,7 @@ class binding : public std::enable_shared_from_this<binding>
                 }
                 else if (packet.size() < sent)
                 {
-                    std::cout << "transmit_to " << peer << ": cant send packet " << std::endl;
+                    std::cout << "async_send_to " << peer << ": cant send packet " << std::endl;
                     if (ptr)
                     {
                         ptr->close(peer);
@@ -139,7 +138,7 @@ class binding : public std::enable_shared_from_this<binding>
     void transmit_from(const boost::asio::ip::udp::endpoint& peer, mutable_buffer packet)
     {
         std::weak_ptr<binding> weak = shared_from_this();
-        auto send_to = [&](socket_ptr socket)
+        auto forward_to = [&](socket_ptr socket)
         {
             socket->async_send(packet, [weak, peer, packet](const boost::system::error_code& error, size_t sent)
             {
@@ -147,7 +146,7 @@ class binding : public std::enable_shared_from_this<binding>
 
                 if (error)
                 {
-                    std::cout << "resend_from " << peer << ": " << error.message() << std::endl;
+                    std::cout << "async_send " << peer << ": " << error.message() << std::endl;
                     if (ptr)
                     {
                         ptr->close(peer);
@@ -155,7 +154,7 @@ class binding : public std::enable_shared_from_this<binding>
                 }
                 else if (packet.size() < sent)
                 {
-                    std::cout << "resend_from " << peer << ": cant send packet " << std::endl;
+                    std::cout << "async_send " << peer << ": cant send packet " << std::endl;
                     if (ptr)
                     {
                         ptr->close(peer);
@@ -169,7 +168,7 @@ class binding : public std::enable_shared_from_this<binding>
         {
             if (socket->is_open())
             {
-                send_to(socket);
+                forward_to(socket);
             }
             else
             {
@@ -184,7 +183,7 @@ class binding : public std::enable_shared_from_this<binding>
                 if (socket->is_open())
                 {
                     receive_for(peer);
-                    send_to(socket);
+                    forward_to(socket);
                 }
                 else
                 {
@@ -209,7 +208,7 @@ class binding : public std::enable_shared_from_this<binding>
                 auto ptr = weak.lock();
                 if (error)
                 {
-                    std::cout << "receive_for " << peer << ": " << error.message();
+                    std::cout << "async_receive " << peer << ": " << error.message() << std::endl;
                     if (ptr)
                     {
                         ptr->close(peer);
@@ -238,7 +237,7 @@ class binding : public std::enable_shared_from_this<binding>
 
                 if (error)
                 {
-                    std::cout << "receive_for " << peer << ": " << error.message();
+                    std::cout << "async_receive_from " << *peer << ": " << error.message() << std::endl;
 
                     if (ptr)
                     {
@@ -259,7 +258,7 @@ class binding : public std::enable_shared_from_this<binding>
 
 public:
 
-    binding() : m_reactor(2), m_socket(m_reactor.io())
+    binding() : m_socket(novemus::reactor::shared_io())
     {
     }
 
@@ -282,14 +281,13 @@ public:
     socket_ptr connect(const boost::asio::ip::udp::endpoint& peer) noexcept(false)
     {
         auto self = shared_from_this();
-        auto reactor = std::make_shared<novemus::reactor>(2);
 
-        boost::asio::local::datagram_protocol::socket front(reactor->io());
-        boost::asio::local::datagram_protocol::socket back(reactor->io());
+        boost::asio::local::datagram_protocol::socket front(novemus::reactor::shared_io());
+        boost::asio::local::datagram_protocol::socket back(novemus::reactor::shared_io());
         boost::asio::local::connect_pair(front, back);
 
-        socket_ptr frontend(new socket(std::move(front)), [self, reactor](socket* s) { delete s; });
-        socket_ptr backend(new socket(std::move(back)), [reactor](socket* s) { delete s; });
+        socket_ptr frontend(new socket(std::move(front)), [self = shared_from_this()](socket* s) { delete s; });
+        socket_ptr backend(new socket(std::move(back)));
 
         m_pool.emplace(peer, backend);
 
@@ -300,15 +298,12 @@ public:
 
     socket_ptr accept() noexcept(false)
     {
-        auto self = shared_from_this();
-        auto reactor = std::make_shared<novemus::reactor>(2);
-
-        boost::asio::local::datagram_protocol::socket front(reactor->io());
-        boost::asio::local::datagram_protocol::socket back(reactor->io());
+        boost::asio::local::datagram_protocol::socket front(novemus::reactor::shared_io());
+        boost::asio::local::datagram_protocol::socket back(novemus::reactor::shared_io());
         boost::asio::local::connect_pair(front, back);
 
-        socket_ptr frontend(new socket(std::move(front)), [self, reactor](socket* s) { delete s; });
-        socket_ptr backend(new socket(std::move(back)), [reactor](socket* s) { delete s; });
+        socket_ptr frontend(new socket(std::move(front)), [self = shared_from_this()](socket* s) { delete s; });
+        socket_ptr backend(new socket(std::move(back)));
 
         m_pool.stock(backend);
 
@@ -323,12 +318,11 @@ public:
 
 socket_ptr connect(const boost::asio::ip::udp::endpoint& peer) noexcept(false)
 {
-    auto reactor = std::make_shared<novemus::reactor>(2);
-    boost::asio::ip::udp::socket sock(reactor->io(), peer.protocol());
+    boost::asio::ip::udp::socket sock(novemus::reactor::shared_io(), peer.protocol());
     
     sock.connect(peer);
 
-    return socket_ptr(new socket(std::move(sock)), [reactor](socket* s) { delete s; });
+    return socket_ptr(new socket(std::move(sock)));
 }
 
 std::shared_ptr<binding> fetch_binding(const boost::asio::ip::udp::endpoint& bind)

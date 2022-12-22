@@ -1,7 +1,9 @@
 #define BOOST_TEST_MODULE tubus_tests
 
+#include "buffer.h"
 #include "udp.h"
 #include "tubus.h"
+#include <future>
 #include <boost/test/included/unit_test.hpp>
 
 BOOST_AUTO_TEST_CASE(buffer)
@@ -89,4 +91,77 @@ BOOST_AUTO_TEST_CASE(udp)
     
     BOOST_CHECK_EQUAL(a1->receive(boost::asio::buffer(buf, sizeof(buf))), c1->local_endpoint().size());
     BOOST_CHECK_EQUAL(std::memcmp(buf, c1->local_endpoint().data(), c1->local_endpoint().size()), 0);
+}
+
+BOOST_AUTO_TEST_CASE(tubus)
+{
+    boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
+    boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
+
+    auto left = novemus::tubus::create_channel(le, re);
+    auto right = novemus::tubus::create_channel(re, le);
+
+    std::promise<boost::system::error_code> lap;
+    left->accept([&lap](const boost::system::error_code& error)
+    {
+        lap.set_value(error);
+    });
+
+    std::promise<boost::system::error_code> rcp;
+    right->connect([&rcp](const boost::system::error_code& error)
+    {
+        rcp.set_value(error);
+    });
+
+    BOOST_CHECK_EQUAL(lap.get_future().get(), boost::system::error_code());
+    BOOST_CHECK_EQUAL(rcp.get_future().get(), boost::system::error_code());
+
+    novemus::mutable_buffer lb(10);
+    novemus::mutable_buffer rb(10);
+
+    std::memcpy(lb.data(), "1234567890", lb.size());
+    std::memcpy(rb.data(), "1234567890", rb.size());
+
+    std::vector<std::promise<boost::system::error_code>> lwps(lb.size());
+    for(size_t i = 0; i < lb.size(); ++i)
+    {
+        left->write(lb.slice(i, 1), [i, &lwps](const boost::system::error_code& error, size_t)
+        {
+            lwps[i].set_value(error);
+        });
+    }
+
+    std::vector<std::promise<boost::system::error_code>> rwps(rb.size());
+    for(size_t i = 0; i < rb.size(); ++i)
+    {
+        right->write(rb.slice(i, 1), [i, &rwps](const boost::system::error_code& error, size_t)
+        {
+            rwps[i].set_value(error);
+        });
+    }
+
+    for(auto& p : lwps)
+    {
+        BOOST_CHECK_EQUAL(p.get_future().get(), boost::system::error_code());
+    }
+
+    for(auto& p : rwps)
+    {
+        BOOST_CHECK_EQUAL(p.get_future().get(), boost::system::error_code());
+    }
+
+    std::promise<boost::system::error_code> lsp;
+    left->shutdown([&lsp](const boost::system::error_code& error)
+    {
+        lsp.set_value(error);
+    });
+
+    std::promise<boost::system::error_code> rsp;
+    right->shutdown([&rsp](const boost::system::error_code& error)
+    {
+        rsp.set_value(error);
+    });
+
+    BOOST_CHECK_EQUAL(lsp.get_future().get(), boost::system::error_code());
+    BOOST_CHECK_EQUAL(rsp.get_future().get(), boost::system::error_code());
 }
