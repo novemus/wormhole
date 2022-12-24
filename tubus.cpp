@@ -701,8 +701,10 @@ protected:
         m_ostream.error(ec);
     }
 
-    void parse(const mutable_buffer& buffer)
+    void feed(const mutable_buffer& buffer)
     {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
         packet pack(buffer);
 
         if (pack.valid())
@@ -723,11 +725,9 @@ protected:
                 m_istream.parse(pack) || m_ostream.parse(pack);
             }
         }
-
-        receive();
     }
 
-    void receive()
+    void consume()
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -742,15 +742,20 @@ protected:
                 if (ptr)
                 {
                     if (error)
+                    {
                         ptr->mistake(error);
+                    }
                     else
-                        ptr->parse(buffer.slice(0, size));
+                    {
+                        ptr->feed(buffer.slice(0, size));
+                        ptr->consume();
+                    }
                 }
             });
         }
     }
 
-    void dispatch()
+    void produce()
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -782,7 +787,7 @@ protected:
                         else if (pack.size() < size)
                             ptr->mistake(boost::asio::error::message_size);
                         else
-                            ptr->dispatch();
+                            ptr->produce();
                     }
                 });
 
@@ -803,7 +808,7 @@ protected:
                         if (error && error != boost::asio::error::operation_aborted)
                             ptr->mistake(error);
                         else
-                            ptr->dispatch();
+                            ptr->produce();
                     }
                 });
             }
@@ -856,8 +861,8 @@ public:
         }
 
         m_coupler.connect(handle);
-        novemus::reactor::shared_io().post(boost::bind(&transport::dispatch, shared_from_this()));
-        novemus::reactor::shared_io().post(boost::bind(&transport::receive, shared_from_this()));
+        novemus::reactor::shared_io().post(boost::bind(&transport::produce, shared_from_this()));
+        novemus::reactor::shared_io().post(boost::bind(&transport::consume, shared_from_this()));
     }
 
     void accept(const callback& handle) noexcept(true) override
@@ -875,8 +880,8 @@ public:
         }
 
         m_coupler.accept(handle);
-        novemus::reactor::shared_io().post(boost::bind(&transport::dispatch, shared_from_this()));
-        novemus::reactor::shared_io().post(boost::bind(&transport::receive, shared_from_this()));
+        novemus::reactor::shared_io().post(boost::bind(&transport::produce, shared_from_this()));
+        novemus::reactor::shared_io().post(boost::bind(&transport::consume, shared_from_this()));
     }
 
     void read(const mutable_buffer& buffer, const io_callback& handle) noexcept(true) override
