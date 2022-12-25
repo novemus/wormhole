@@ -4,7 +4,8 @@
 #include "udp.h"
 #include "tubus.h"
 #include <future>
-#include <boost/test/included/unit_test.hpp>
+#include <iostream>
+#include <boost/test/unit_test.hpp>
 
 BOOST_AUTO_TEST_CASE(buffer)
 {
@@ -125,18 +126,18 @@ BOOST_AUTO_TEST_CASE(tubus)
     std::vector<std::promise<boost::system::error_code>> lwps(lb.size());
     for(size_t i = 0; i < lb.size(); ++i)
     {
-        left->write(lb.slice(i, 1), [i, &lwps](const boost::system::error_code& error, size_t)
+        left->write(lb.slice(i, 1), [i, &lwps](const boost::system::error_code& error, size_t size)
         {
-            lwps[i].set_value(error);
+            lwps[i].set_value(error ? error : size == 1 ? boost::system::error_code() : boost::asio::error::message_size);
         });
     }
 
     std::vector<std::promise<boost::system::error_code>> rwps(rb.size());
     for(size_t i = 0; i < rb.size(); ++i)
     {
-        right->write(rb.slice(i, 1), [i, &rwps](const boost::system::error_code& error, size_t)
+        right->write(rb.slice(i, 1), [i, &rwps](const boost::system::error_code& error, size_t size)
         {
-            rwps[i].set_value(error);
+            rwps[i].set_value(error ? error : size == 1 ? boost::system::error_code() : boost::asio::error::message_size);
         });
     }
 

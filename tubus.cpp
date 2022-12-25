@@ -201,12 +201,10 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         bool operator<(const cursor& other) const
         {
-            static const uint64_t pivot = std::numeric_limits<uint64_t>::max() / 2;
-            
-            if (other.value > pivot && value < pivot && other.value - value > pivot)
-                return false;
+            static const uint64_t half_turn = std::numeric_limits<uint64_t>::max() >> 1;
 
-            return value < other.value;
+            return (value < other.value && other.value - value <= half_turn) 
+                || (value > other.value && value - other.value > half_turn);
         }
 
         bool operator<=(const cursor& other) const
@@ -216,12 +214,10 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         bool operator>(const cursor& other) const
         {
-            static const uint64_t pivot = std::numeric_limits<uint64_t>::max() / 2;
-            
-            if (other.value > pivot && value < pivot && other.value - value > pivot)
-                return true;
+            static const uint64_t half_turn = std::numeric_limits<uint64_t>::max() >> 1;
 
-            return value > other.value;
+            return (value > other.value && value - other.value <= half_turn) 
+                || (value < other.value && other.value - value > half_turn);
         }
 
         bool operator==(const cursor& other) const
@@ -733,7 +729,7 @@ protected:
 
         if (m_coupler.is_alive())
         {
-            novemus::mutable_buffer buffer = novemus::mutable_buffer::create(packet::max_packet_size);
+            novemus::mutable_buffer buffer = m_store->obtain(packet::max_packet_size);
             std::weak_ptr<transport> weak = shared_from_this();
 
             m_socket->async_receive(buffer, [weak, buffer](const boost::system::error_code& error, size_t size)
@@ -770,7 +766,7 @@ protected:
             }
 
             std::weak_ptr<transport> weak = shared_from_this();
-            packet pack(novemus::mutable_buffer::create(packet::max_packet_size));
+            packet pack(m_store->obtain(packet::max_packet_size));
 
             if (m_coupler.imbue(pack) || (m_coupler.is_linked() && (m_istream.imbue(pack) || m_ostream.imbue(pack))))
             {
@@ -818,11 +814,13 @@ protected:
 public:
 
     transport(novemus::udp::socket_ptr socket, uint64_t key)
-        : m_socket(socket)
-        , m_timer(novemus::reactor::shared_io())
-        , m_coupler(novemus::reactor::shared_io())
-        , m_istream(novemus::reactor::shared_io())
-        , m_ostream(novemus::reactor::shared_io())
+        : m_reactor(novemus::reactor::shared_reactor())
+        , m_socket(socket)
+        , m_timer(m_reactor->io())
+        , m_coupler(m_reactor->io())
+        , m_istream(m_reactor->io())
+        , m_ostream(m_reactor->io())
+        , m_store(novemus::buffer_factory::shared_factory())
         , m_key(key)
     {
     }
@@ -837,7 +835,7 @@ public:
                 boost::asio::error::already_started : m_coupler.is_alive() ? 
                     boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            novemus::reactor::shared_io().post(boost::bind(handle, error));
+            m_reactor->io().post(boost::bind(handle, error));
             return;
         }
 
@@ -856,13 +854,13 @@ public:
                 boost::asio::error::already_started : m_coupler.is_linked() ? 
                     boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-            novemus::reactor::shared_io().post(boost::bind(handle, ec));
+            m_reactor->io().post(boost::bind(handle, ec));
             return;
         }
 
         m_coupler.connect(handle);
-        novemus::reactor::shared_io().post(boost::bind(&transport::produce, shared_from_this()));
-        novemus::reactor::shared_io().post(boost::bind(&transport::consume, shared_from_this()));
+        m_reactor->io().post(boost::bind(&transport::produce, shared_from_this()));
+        m_reactor->io().post(boost::bind(&transport::consume, shared_from_this()));
     }
 
     void accept(const callback& handle) noexcept(true) override
@@ -875,13 +873,13 @@ public:
                 boost::asio::error::already_started : m_coupler.is_linked() ? 
                     boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-            novemus::reactor::shared_io().post(boost::bind(handle, ec));
+            m_reactor->io().post(boost::bind(handle, ec));
             return;
         }
 
         m_coupler.accept(handle);
-        novemus::reactor::shared_io().post(boost::bind(&transport::produce, shared_from_this()));
-        novemus::reactor::shared_io().post(boost::bind(&transport::consume, shared_from_this()));
+        m_reactor->io().post(boost::bind(&transport::produce, shared_from_this()));
+        m_reactor->io().post(boost::bind(&transport::consume, shared_from_this()));
     }
 
     void read(const mutable_buffer& buffer, const io_callback& handle) noexcept(true) override
@@ -893,7 +891,7 @@ public:
             boost::system::error_code ec = m_coupler.is_alive() ? 
                 boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            novemus::reactor::shared_io().post(boost::bind(handle, ec, 0));
+            m_reactor->io().post(boost::bind(handle, ec, 0));
             return;
         }
 
@@ -911,7 +909,7 @@ public:
             boost::system::error_code ec = m_coupler.is_alive() ? 
                 boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            novemus::reactor::shared_io().post(boost::bind(handle, ec, 0));
+            m_reactor->io().post(boost::bind(handle, ec, 0));
             return;
         }
 
@@ -922,11 +920,13 @@ public:
 
 private:
 
+    std::shared_ptr<reactor> m_reactor;
     novemus::udp::socket_ptr m_socket;
     boost::asio::deadline_timer m_timer;
     connect_handler m_coupler;
     istream_handler m_istream;
     ostream_handler m_ostream;
+    std::shared_ptr<buffer_factory> m_store;
     uint64_t m_key;
     std::mutex m_mutex;
 };

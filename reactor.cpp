@@ -3,10 +3,21 @@
 
 namespace novemus {
 
-boost::asio::io_context& reactor::shared_io() noexcept(true)
+std::shared_ptr<reactor> reactor::shared_reactor() noexcept(true)
 {
-    static std::shared_ptr<reactor> s_reactor = std::make_shared<reactor>();
-    return s_reactor->io();
+    static std::weak_ptr<reactor> s_reactor;
+    static std::mutex s_mutex;
+
+    std::unique_lock<std::mutex> lock(s_mutex);
+    auto ptr = s_reactor.lock();
+
+    if (!ptr)
+    {
+        ptr = std::make_shared<reactor>();
+        s_reactor = ptr;
+    }
+
+    return ptr;
 }
 
 }

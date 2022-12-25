@@ -12,8 +12,8 @@ class reactor
     struct context
     {
         boost::asio::io_context io;
-        std::unique_ptr<boost::asio::io_context::work> work;
         boost::asio::thread_pool pool;
+        std::unique_ptr<boost::asio::io_context::work> work;
 
         void activate(size_t threads) noexcept(true)
         {
@@ -21,7 +21,8 @@ class reactor
 
             for (std::size_t i = 0; i < threads; ++i)
             {
-                boost::asio::post(pool, [this]() {
+                boost::asio::post(pool, [this]()
+                {
                     boost::system::error_code code;
                     io.run(code);
                     if (code)
@@ -67,7 +68,7 @@ public:
         return m_context->io;
     }
 
-    static boost::asio::io_context& shared_io() noexcept(true);
+    static std::shared_ptr<reactor> shared_reactor() noexcept(true);
 };
 
 }
