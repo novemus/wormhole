@@ -120,8 +120,10 @@ BOOST_AUTO_TEST_CASE(tubus)
     novemus::mutable_buffer lb(10);
     novemus::mutable_buffer rb(10);
 
-    std::memcpy(lb.data(), "1234567890", lb.size());
-    std::memcpy(rb.data(), "1234567890", rb.size());
+    uint8_t data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+
+    std::memcpy(lb.data(), data, lb.size());
+    std::memcpy(rb.data(), data, rb.size());
 
     std::vector<std::promise<boost::system::error_code>> lwps(lb.size());
     for(size_t i = 0; i < lb.size(); ++i)
@@ -150,6 +152,25 @@ BOOST_AUTO_TEST_CASE(tubus)
     {
         BOOST_CHECK_EQUAL(p.get_future().get(), boost::system::error_code());
     }
+
+    std::promise<boost::system::error_code> lrp;
+    left->read(lb, [lb, data, &lrp](const boost::system::error_code& error, size_t size)
+    {
+        BOOST_CHECK_EQUAL(size, lb.size());
+        BOOST_CHECK_EQUAL(std::memcmp(lb.data(), data, lb.size()), 0);
+        lrp.set_value(error ? error : size == lb.size() ? boost::system::error_code() : boost::asio::error::broken_pipe);
+    });
+
+    std::promise<boost::system::error_code> rrp;
+    right->read(rb, [rb, data, &rrp](const boost::system::error_code& error, size_t size)
+    {
+        BOOST_CHECK_EQUAL(size, rb.size());
+        BOOST_CHECK_EQUAL(std::memcmp(rb.data(), data, rb.size()), 0);
+        rrp.set_value(error ? error : size == rb.size() ? boost::system::error_code() : boost::asio::error::broken_pipe);
+    });
+
+    BOOST_CHECK_EQUAL(lrp.get_future().get(), boost::system::error_code());
+    BOOST_CHECK_EQUAL(rrp.get_future().get(), boost::system::error_code());
 
     std::promise<boost::system::error_code> lsp;
     left->shutdown([&lsp](const boost::system::error_code& error)

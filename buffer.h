@@ -49,10 +49,11 @@ struct const_buffer
 
     const_buffer slice(size_t off, size_t len) const noexcept(false)
     {
-        if (off > size() || off + len > size())
+        if (off > m_buffer.size() || off + len > m_buffer.size())
             throw std::runtime_error("slice: out of range");
 
-        return const_buffer(m_array, off, len);
+        size_t offset = (uint8_t*)m_buffer.data() - m_array.get();
+        return const_buffer(m_array, offset + off, len);
     }
 
 private:
@@ -102,12 +103,14 @@ struct mutable_buffer
         if (off > m_buffer.size() || off + len > m_buffer.size())
             throw std::runtime_error("slice: out of range");
 
-        return mutable_buffer(m_array, off, len);
+        size_t offset = (uint8_t*)m_buffer.data() - m_array.get();
+        return mutable_buffer(m_array, offset + off, len);
     }
     
     operator const_buffer() const noexcept(true)
     {
-        return const_buffer(m_array, (uint8_t*)m_buffer.data() - m_array.get(), m_buffer.size());
+        size_t offset = (uint8_t*)m_buffer.data() - m_array.get();
+        return const_buffer(m_array, offset, m_buffer.size());
     }
 
 private:

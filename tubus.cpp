@@ -251,7 +251,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         cursor operator+(uint64_t v) const
         {
-            return cursor(value - v);
+            return cursor(value + v);
         }
 
         cursor operator-(uint64_t v) const
@@ -545,7 +545,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             return true;
         }
 
-        void append(const const_buffer& buf, const io_callback& handle)
+        void append(const const_buffer& buffer, const io_callback& handle)
         {
             static const size_t MAX_BUFFERED_PACKETS = 16384;
 
@@ -555,17 +555,17 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 return;
             }
 
-            for(size_t shift = 0; shift < buf.size(); shift += packet::max_payload_size)
+            for(size_t shift = 0; shift < buffer.size(); shift += packet::max_payload_size)
             {
                 m_chunks.emplace(
                     m_tail++, std::make_pair(
-                        buf.slice(shift, std::min(packet::max_payload_size, buf.size() - shift)),
+                        buffer.slice(shift, std::min(packet::max_payload_size, buffer.size() - shift)),
                         boost::posix_time::min_date_time)
                     );
             }
-            m_handles.emplace(m_tail, [buf, handle](const boost::system::error_code& error)
+            m_handles.emplace(m_tail, [buffer, handle](const boost::system::error_code& error)
             {
-                handle(error, error ? 0 : buf.size());
+                handle(error, error ? 0 : buffer.size());
             });
         }
 
