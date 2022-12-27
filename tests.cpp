@@ -122,8 +122,8 @@ class tubus_channel
 
 public:
 
-    tubus_channel(const boost::asio::ip::udp::endpoint& b, const boost::asio::ip::udp::endpoint& p)
-        : m_channel(novemus::tubus::create_channel(b, p))
+    tubus_channel(const boost::asio::ip::udp::endpoint& b, const boost::asio::ip::udp::endpoint& p, uint64_t s)
+        : m_channel(novemus::tubus::create_channel(b, p, s))
     {
     }
 
@@ -158,8 +158,8 @@ BOOST_AUTO_TEST_CASE(tubus_core)
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    tubus_channel left(le, re);
-    tubus_channel right(re, le);
+    tubus_channel left(le, re, 123456789);
+    tubus_channel right(re, le, 123456789);
 
     uint8_t data[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
