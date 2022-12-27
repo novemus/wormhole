@@ -23,13 +23,12 @@ class binding : public std::enable_shared_from_this<binding>
         boost::asio::local::datagram_protocol::socket m_socket;
         boost::asio::io_context::strand m_strand;
 
-        void do_send(const const_buffer& packet, const io_callback& callback)
+        void invoke_send(const const_buffer& packet, const io_callback& callback)
         {
             if (m_socket.is_open())
             {
                 try
                 {
-                    m_socket.cancel();
                     callback(boost::system::error_code(), m_socket.send(packet));
                 }
                 catch(const boost::system::system_error& ex)
@@ -43,25 +42,11 @@ class binding : public std::enable_shared_from_this<binding>
             }
         }
 
-        void do_receive(const mutable_buffer& packet, const io_callback& callback)
+        void invoke_async_receive(const mutable_buffer& packet, const io_callback& callback)
         {
             if (m_socket.is_open())
             {
-                std::weak_ptr<channel> weak = shared_from_this();
-                m_socket.async_receive(packet, [weak, packet, callback](const boost::system::error_code& error, size_t size)
-                {
-                    if (error == boost::asio::error::operation_aborted)
-                    {
-                        auto ptr = weak.lock();
-                        if (ptr)
-                        {
-                            ptr->async_receive(packet, callback);
-                            return;
-                        }
-                    }
-
-                    callback(error, size);
-                });
+                m_socket.async_receive(packet, callback);
             }
             else
             {
@@ -85,12 +70,12 @@ class binding : public std::enable_shared_from_this<binding>
                 auto ptr = weak.lock();
                 if (ptr)
                 {
-                    ptr->do_send(packet, callback);
+                    ptr->invoke_send(packet, callback);
                 }
             });
         }
 
-        void async_receive(const mutable_buffer& packet, const io_callback& callback)
+        void schedule_receive(const mutable_buffer& packet, const io_callback& callback)
         {
             std::weak_ptr<channel> weak = shared_from_this();
             m_strand.post([weak, packet, callback]()
@@ -98,7 +83,7 @@ class binding : public std::enable_shared_from_this<binding>
                 auto ptr = weak.lock();
                 if (ptr)
                 {
-                    ptr->do_receive(packet, callback);
+                    ptr->invoke_async_receive(packet, callback);
                 }
             });
         }
@@ -191,7 +176,7 @@ class binding : public std::enable_shared_from_this<binding>
 
     typedef std::shared_ptr<boost::asio::ip::udp::endpoint> endpoint_ptr;
 
-    void do_receive_from_remote()
+    void invoke_async_receive_from_remote()
     {
         if (m_socket.is_open())
         {
@@ -205,12 +190,12 @@ class binding : public std::enable_shared_from_this<binding>
                 if (error)
                 {
                     if (error != boost::asio::error::operation_aborted)
-                        std::cout << "do_receive_from_remote " << *peer << ": " << error.message() << std::endl;
+                        std::cout << "invoke_async_receive_from_remote " << *peer << ": " << error.message() << std::endl;
 
                     if (ptr)
                     {
                         if (error == boost::asio::error::operation_aborted)
-                            ptr->async_receive_from_remote();
+                            ptr->schedule_receive_from_remote();
                         else
                             ptr->close();
                     }
@@ -220,35 +205,33 @@ class binding : public std::enable_shared_from_this<binding>
                     if (ptr && size > 0)
                     {
                         ptr->schedule_send_to_local(*peer, packet.slice(0, size));
-                        ptr->async_receive_from_remote();
+                        ptr->schedule_receive_from_remote();
                     }
                 }
             });
         }
     }
 
-    void do_send_to_remote(const boost::asio::ip::udp::endpoint& peer, const const_buffer& packet)
+    void invoke_send_to_remote(const boost::asio::ip::udp::endpoint& peer, const const_buffer& packet)
     {
         if (m_socket.is_open())
         {
             try
             {
-                m_socket.cancel();
-
                 size_t size = m_socket.send_to(packet, peer);
                 if (size < packet.size())
                 {
                     close(peer);
-                    std::cout << "do_send_to_remote " << peer << ": can't send packet"  << std::endl;
+                    std::cout << "invoke_send_to_remote " << peer << ": can't send packet"  << std::endl;
                 }
                 else
                 {
-                    async_receive_from_local(peer);
+                    schedule_receive_from_local(peer);
                 }
             }
             catch(const boost::system::system_error& ex)
             {
-                std::cout << "do_send_to_remote " << peer << ": " << ex.what() << std::endl;
+                std::cout << "invoke_send_to_remote " << peer << ": " << ex.what() << std::endl;
                 close(peer);
             }
         }
@@ -266,7 +249,7 @@ class binding : public std::enable_shared_from_this<binding>
             auto ptr = weak.lock();
             if (ptr)
             {
-                ptr->do_send_to_remote(peer, packet);
+                ptr->invoke_send_to_remote(peer, packet);
             }
         });
     }
@@ -277,7 +260,7 @@ class binding : public std::enable_shared_from_this<binding>
         if (!channel)
         {
             channel = m_pool.yield(peer);
-            async_receive_from_local(peer);
+            schedule_receive_from_local(peer);
         }
 
         if (channel)
@@ -303,21 +286,21 @@ class binding : public std::enable_shared_from_this<binding>
         }
     }
 
-    void async_receive_from_local(const boost::asio::ip::udp::endpoint& peer)
+    void schedule_receive_from_local(const boost::asio::ip::udp::endpoint& peer)
     {
         auto channel = m_pool.fetch(peer);
         if (channel)
         {
             std::weak_ptr<binding> weak = shared_from_this();
             mutable_buffer packet = m_store->obtain(max_udp_packet_size);
-            channel->async_receive(packet, [weak, peer, packet](const boost::system::error_code& error, size_t size)
+            channel->schedule_receive(packet, [weak, peer, packet](const boost::system::error_code& error, size_t size)
             {
                 auto ptr = weak.lock();
                 if (ptr)
                 {
                     if (error)
                     {
-                        std::cout << "async_receive_from_local " << peer << ": " << error << std::endl;
+                        std::cout << "schedule_receive_from_local " << peer << ": " << error << std::endl;
                         ptr->close(peer);
                     }
                     else if (size > 0)
@@ -329,7 +312,7 @@ class binding : public std::enable_shared_from_this<binding>
         }
     }
 
-    void async_receive_from_remote()
+    void schedule_receive_from_remote()
     {
         std::weak_ptr<binding> weak = shared_from_this();
         m_strand.post([weak]()
@@ -337,7 +320,7 @@ class binding : public std::enable_shared_from_this<binding>
             auto ptr = weak.lock();
             if (ptr)
             {
-                ptr->do_receive_from_remote();
+                ptr->invoke_async_receive_from_remote();
             }
         });
     }
@@ -364,7 +347,7 @@ public:
 
     void open() noexcept(true)
     {
-        async_receive_from_remote();
+        schedule_receive_from_remote();
     }
 
     socket_ptr connect(const boost::asio::ip::udp::endpoint& peer) noexcept(false)
@@ -374,7 +357,7 @@ public:
         channel_ptr channel = m_pool.emplace(peer);
         channel->connect(frontend);
 
-        async_receive_from_local(peer);
+        schedule_receive_from_local(peer);
 
         return socket_ptr(new socket(std::move(frontend)), [keep = shared_from_this()](socket* s) { delete s; });
     }
