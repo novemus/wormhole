@@ -119,22 +119,22 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             std::memcpy(data() + packet::header_size, payload.data(), payload.size());
         }
 
-        void make_opened(uint64_t key)
+        void make_opened(uint64_t mask)
         {
-            uint64_t s = salt() ^ key;
+            uint64_t s = salt() ^ mask;
 
             set_salt(s);
-            invert(s, key);
+            invert(s, mask);
         }
 
-        void make_opaque(uint64_t key)
+        void make_opaque(uint64_t mask)
         {
             std::random_device dev;
             std::mt19937_64 gen(dev());
             uint64_t s = static_cast<uint64_t>(gen());
 
-            set_salt(s ^ key);
-            invert(s, key);
+            set_salt(s ^ mask);
+            invert(s, mask);
         }
 
         void shrink(size_t len)
@@ -167,9 +167,9 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
     private:
 
-        void invert(uint64_t salt, uint64_t key)
+        void invert(uint64_t salt, uint64_t mask)
         {
-            uint64_t inverter = key + salt;
+            uint64_t inverter = mask + salt;
 
             uint8_t* ptr = data() + sizeof(uint64_t);
             uint8_t* end = data() + size();
@@ -177,7 +177,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             while (ptr + sizeof(uint64_t) < end)
             {
                 *(uint64_t*)ptr ^= inverter;
-                inverter = (inverter ^ key) + salt;
+                inverter = (inverter ^ mask) + (inverter ^ salt);
 
                 ptr += sizeof(uint64_t);
             }
@@ -292,6 +292,8 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 on_shutdown = 0;
             }
 
+            m_jobs.clear();
+
             m_alive = false;
             m_linked = false;
         }
@@ -342,11 +344,12 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                         on_shutdown = 0;
                     }
 
+                    m_jobs.erase(0);
                     m_jobs.erase(packet::fin);
                 }
                 else
                 {
-                    m_jobs.emplace(packet::fin | packet::ack, now); 
+                    m_jobs.emplace(packet::fin | packet::ack, now);
                 }
 
                 return true;
@@ -384,6 +387,23 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             {
                 static const boost::posix_time::milliseconds RESEND_TIMEOUT(100);
 
+                if (iter->first == 0)
+                {
+                    m_jobs.erase(iter);
+                    m_alive = false;
+
+                    if (on_shutdown)
+                    {
+                        m_io.post(boost::bind(on_shutdown, boost::asio::error::timed_out));
+                        on_shutdown = 0;
+                    }
+
+                    m_jobs.erase(0);
+                    m_jobs.erase(packet::fin);
+
+                    return false;
+                }
+
                 pack.set_cursor(0);
                 pack.set_flags(iter->first);
                 pack.shrink(packet::header_size);
@@ -408,13 +428,6 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 else if (iter->first == (packet::fin | packet::ack))
                 {
                     m_jobs.erase(iter);
-                    m_alive = false;
-
-                    if (on_shutdown)
-                    {
-                        m_io.post(boost::bind(on_shutdown, boost::system::error_code()));
-                        on_shutdown = 0;
-                    }
                 }
 
                 return true;
@@ -439,7 +452,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         bool is_connecting() const { return m_alive && on_connect; }
 
-        bool is_shutdowning() const { return m_alive && on_shutdown; }
+        bool is_shutting() const { return m_alive && on_shutdown; }
 
         bool is_hangup() const
         {
@@ -453,8 +466,13 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         void shutdown(const callback& handle)
         {
+            static const boost::posix_time::milliseconds SHUTDOWN_TIMEOUT(1000);
+
+            auto now = boost::posix_time::microsec_clock::universal_time();
             on_shutdown = handle;
-            m_jobs.emplace(packet::fin, boost::posix_time::microsec_clock::universal_time());
+
+            m_jobs.emplace(packet::fin, now);
+            m_jobs.emplace(0, now + SHUTDOWN_TIMEOUT);
         }
 
         void connect(const callback& handle)
@@ -545,13 +563,13 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             return true;
         }
 
-        void append(const const_buffer& buffer, const io_callback& handle)
+        void append(const const_buffer& buffer, const callback& handle)
         {
             static const size_t MAX_BUFFERED_PACKETS = 16384;
 
             if (m_chunks.size() >= MAX_BUFFERED_PACKETS)
             {
-                m_io.post(boost::bind(handle, boost::asio::error::no_buffer_space, 0));
+                m_io.post(boost::bind(handle, boost::asio::error::no_buffer_space));
                 return;
             }
 
@@ -563,10 +581,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                         boost::posix_time::min_date_time)
                     );
             }
-            m_handles.emplace(m_tail, [buffer, handle](const boost::system::error_code& error)
-            {
-                handle(error, error ? 0 : buffer.size());
-            });
+            m_handles.emplace(m_tail, handle);
         }
 
     private:
@@ -591,7 +606,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             auto it = m_handles.begin();
             while (it != m_handles.end())
             {
-                m_io.post(boost::bind(it->second, ec, 0));
+                m_io.post(boost::bind(it->second, ec));
                 ++it;
             }
             m_handles.clear();
@@ -632,7 +647,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             return false;
         }
 
-        void append(const mutable_buffer& buf, const io_callback& handle)
+        void append(const mutable_buffer& buf, const callback& handle)
         {
             m_handles.push_back(std::make_pair(buf, handle));
             transmit_data();
@@ -644,25 +659,25 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             while (!m_handles.empty())
             {
-                auto top = m_handles.front();
+                auto& top = m_handles.front();
                 size_t shift = 0;
 
-                auto it = m_parts.begin();
-                while (it != m_parts.end() && it->first == m_tail + 1)
+                auto part = m_parts.begin();
+                while (part != m_parts.end() && part->first == m_tail + 1)
                 {
-                    size_t size = std::min(top.first.size() - shift, it->second.size());
-                    std::memcpy((uint8_t*)top.first.data() + shift, it->second.data(), size);
+                    size_t size = std::min(top.first.size() - shift, part->second.size());
+                    std::memcpy((uint8_t*)top.first.data() + shift, part->second.data(), size);
 
                     shift += size;
 
-                    if (it->second.size() == size)
+                    if (part->second.size() == size)
                     {
-                        m_tail = it->first;
-                        it = m_parts.erase(it);
+                        m_tail = part->first;
+                        part = m_parts.erase(part);
                     }
                     else
                     {
-                        it->second = it->second.slice(0, size);
+                        part->second = part->second.slice(0, size);
                         break;
                     }
 
@@ -670,12 +685,14 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                         break;
                 }
 
-                if (shift == 0)
+                if (shift < top.first.size())
+                {
+                    top.first = top.first.slice(shift, top.first.size() - shift);
                     break;
+                }
 
                 m_handles.pop_front();
-
-                m_io.post(boost::bind(top.second, boost::system::error_code(), shift));
+                m_io.post(boost::bind(top.second, boost::system::error_code()));
             }
         }
 
@@ -683,7 +700,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         cursor m_tail;
         std::set<cursor> m_acks;
         std::map<cursor, mutable_buffer> m_parts;
-        std::list<std::pair<mutable_buffer, io_callback>> m_handles;
+        std::list<std::pair<mutable_buffer, callback>> m_handles;
     };
 
 protected:
@@ -705,8 +722,8 @@ protected:
 
         if (pack.valid())
         {
-            if (m_key)
-                pack.make_opened(m_key);
+            if (m_mask)
+                pack.make_opened(m_mask);
 
             if (m_coupler.parse(pack))
             {
@@ -770,8 +787,8 @@ protected:
 
             if (m_coupler.imbue(pack) || (m_coupler.is_linked() && (m_istream.imbue(pack) || m_ostream.imbue(pack))))
             {
-                if (m_key)
-                    pack.make_opaque(m_key);
+                if (m_mask)
+                    pack.make_opaque(m_mask);
 
                 m_socket->async_send(pack.buffer(), [weak, pack](const boost::system::error_code& error, size_t size)
                 {
@@ -813,7 +830,7 @@ protected:
 
 public:
 
-    transport(novemus::udp::socket_ptr socket, uint64_t key)
+    transport(novemus::udp::socket_ptr socket, uint64_t mask)
         : m_reactor(novemus::reactor::shared_reactor())
         , m_socket(socket)
         , m_timer(m_reactor->io())
@@ -821,7 +838,7 @@ public:
         , m_istream(m_reactor->io())
         , m_ostream(m_reactor->io())
         , m_store(novemus::buffer_factory::shared_factory())
-        , m_key(key)
+        , m_mask(mask)
     {
     }
 
@@ -829,11 +846,10 @@ public:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (!m_coupler.is_alive() || !m_coupler.is_linked() || m_coupler.is_shutdowning())
+        if (!m_coupler.is_alive() || m_coupler.is_shutting())
         {
-            boost::system::error_code error = m_coupler.is_shutdowning() ? 
-                boost::asio::error::already_started : m_coupler.is_alive() ? 
-                    boost::asio::error::not_connected : boost::asio::error::broken_pipe;
+            boost::system::error_code error = m_coupler.is_shutting() ? 
+                boost::asio::error::in_progress : boost::asio::error::broken_pipe;
 
             m_reactor->io().post(boost::bind(handle, error));
             return;
@@ -851,7 +867,7 @@ public:
         if (!m_coupler.is_alive() || m_coupler.is_linked() || m_coupler.is_connecting())
         {
             boost::system::error_code ec = m_coupler.is_connecting() ? 
-                boost::asio::error::already_started : m_coupler.is_linked() ? 
+                boost::asio::error::in_progress : m_coupler.is_linked() ?
                     boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
             m_reactor->io().post(boost::bind(handle, ec));
@@ -870,7 +886,7 @@ public:
         if (!m_coupler.is_alive() || m_coupler.is_linked() || m_coupler.is_connecting())
         {
             boost::system::error_code ec = m_coupler.is_connecting() ? 
-                boost::asio::error::already_started : m_coupler.is_linked() ? 
+                boost::asio::error::in_progress : m_coupler.is_linked() ?
                     boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
             m_reactor->io().post(boost::bind(handle, ec));
@@ -882,7 +898,7 @@ public:
         m_reactor->io().post(boost::bind(&transport::consume, shared_from_this()));
     }
 
-    void read(const mutable_buffer& buffer, const io_callback& handle) noexcept(true) override
+    void read(const mutable_buffer& buffer, const callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -891,7 +907,7 @@ public:
             boost::system::error_code ec = m_coupler.is_alive() ? 
                 boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            m_reactor->io().post(boost::bind(handle, ec, 0));
+            m_reactor->io().post(boost::bind(handle, ec));
             return;
         }
 
@@ -900,7 +916,7 @@ public:
         m_timer.cancel(ec);
     }
 
-    void write(const const_buffer& buffer, const io_callback& handle) noexcept(true) override
+    void write(const const_buffer& buffer, const callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
                 
@@ -909,7 +925,7 @@ public:
             boost::system::error_code ec = m_coupler.is_alive() ? 
                 boost::asio::error::not_connected : boost::asio::error::broken_pipe;
 
-            m_reactor->io().post(boost::bind(handle, ec, 0));
+            m_reactor->io().post(boost::bind(handle, ec));
             return;
         }
 
@@ -927,13 +943,13 @@ private:
     istream_handler m_istream;
     ostream_handler m_ostream;
     std::shared_ptr<buffer_factory> m_store;
-    uint64_t m_key;
+    uint64_t m_mask;
     std::mutex m_mutex;
 };
 
-std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t key) noexcept(false)
+std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t mask) noexcept(false)
 {
-    return std::make_shared<transport>(novemus::udp::connect(bind, peer), key);
+    return std::make_shared<transport>(novemus::udp::connect(bind, peer), mask);
 }
 
 }}

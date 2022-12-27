@@ -4,8 +4,7 @@
 #include "udp.h"
 #include "tubus.h"
 #include <future>
-#include <iostream>
-#include <boost/test/unit_test.hpp>
+#include <boost/test/included/unit_test.hpp>
 
 BOOST_AUTO_TEST_CASE(buffer)
 {
@@ -94,96 +93,108 @@ BOOST_AUTO_TEST_CASE(udp)
     BOOST_CHECK_EQUAL(std::memcmp(buf, c1->local_endpoint().data(), c1->local_endpoint().size()), 0);
 }
 
-BOOST_AUTO_TEST_CASE(tubus)
+class tubus_channel
+{
+#define HANDLER(FILTER) [&promise](const boost::system::error_code& error) \
+{ \
+    if (FILTER) \
+        promise.set_exception(std::make_exception_ptr(boost::system::system_error(error))); \
+    else \
+        promise.set_value(); \
+} \
+
+#define ACCEPT m_channel->accept(HANDLER(error))
+#define CONNECT m_channel->connect(HANDLER(error))
+#define SHUTDOWN m_channel->shutdown(HANDLER(error && error != boost::asio::error::timed_out))
+#define READ m_channel->read(buffer, HANDLER(error))
+#define WRITE m_channel->write(buffer, HANDLER(error))
+
+#define EXECUTE(TASK) return std::async([=]() { \
+    std::promise<void> promise; \
+    std::future<void> future = promise.get_future(); \
+    TASK; \
+    if (future.wait_for(std::chrono::seconds(3)) == std::future_status::timeout) \
+        throw boost::system::system_error(boost::asio::error::timed_out); \
+    return future.get(); \
+}) \
+
+    std::shared_ptr<novemus::tubus::channel> m_channel;
+
+public:
+
+    tubus_channel(const boost::asio::ip::udp::endpoint& b, const boost::asio::ip::udp::endpoint& p)
+        : m_channel(novemus::tubus::create_channel(b, p))
+    {
+    }
+
+    std::future<void> accept()
+    {
+        EXECUTE(ACCEPT);
+    }
+
+    std::future<void> connect()
+    {
+        EXECUTE(CONNECT);
+    }
+
+    std::future<void> shutdown()
+    {
+        EXECUTE(SHUTDOWN);
+    }
+
+    std::future<void> write(const novemus::const_buffer& buffer)
+    {
+        EXECUTE(WRITE);
+    }
+
+    std::future<void> read(const novemus::mutable_buffer& buffer)
+    {
+        EXECUTE(READ);
+    }
+};
+
+BOOST_AUTO_TEST_CASE(tubus_core)
 {
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    auto left = novemus::tubus::create_channel(le, re);
-    auto right = novemus::tubus::create_channel(re, le);
+    tubus_channel left(le, re);
+    tubus_channel right(re, le);
 
-    std::promise<boost::system::error_code> lap;
-    left->accept([&lap](const boost::system::error_code& error)
-    {
-        lap.set_value(error);
-    });
+    uint8_t data[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
-    std::promise<boost::system::error_code> rcp;
-    right->connect([&rcp](const boost::system::error_code& error)
-    {
-        rcp.set_value(error);
-    });
-
-    BOOST_CHECK_EQUAL(lap.get_future().get(), boost::system::error_code());
-    BOOST_CHECK_EQUAL(rcp.get_future().get(), boost::system::error_code());
-
-    novemus::mutable_buffer lb(10);
-    novemus::mutable_buffer rb(10);
-
-    uint8_t data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    novemus::mutable_buffer lb(sizeof(data));
+    novemus::mutable_buffer rb(sizeof(data));
 
     std::memcpy(lb.data(), data, lb.size());
     std::memcpy(rb.data(), data, rb.size());
 
-    std::vector<std::promise<boost::system::error_code>> lwps(lb.size());
-    for(size_t i = 0; i < lb.size(); ++i)
+    auto la = left.accept();
+    auto rc = right.connect();
+
+    BOOST_REQUIRE_NO_THROW(la.get());
+    BOOST_REQUIRE_NO_THROW(rc.get());
+
+    for(size_t i = 0; i < sizeof(data); ++i)
     {
-        left->write(lb.slice(i, 1), [i, &lwps](const boost::system::error_code& error, size_t size)
-        {
-            lwps[i].set_value(error ? error : size == 1 ? boost::system::error_code() : boost::asio::error::message_size);
-        });
+        BOOST_REQUIRE_NO_THROW(left.write(lb.slice(i, 1)).get());
+        BOOST_REQUIRE_NO_THROW(right.write(rb.slice(i, 1)).get());
     }
 
-    std::vector<std::promise<boost::system::error_code>> rwps(rb.size());
-    for(size_t i = 0; i < rb.size(); ++i)
-    {
-        right->write(rb.slice(i, 1), [i, &rwps](const boost::system::error_code& error, size_t size)
-        {
-            rwps[i].set_value(error ? error : size == 1 ? boost::system::error_code() : boost::asio::error::message_size);
-        });
-    }
+    BOOST_REQUIRE_NO_THROW(left.read(lb).get());
+    BOOST_CHECK_EQUAL(std::memcmp(lb.data(), data, lb.size()), 0);
 
-    for(auto& p : lwps)
-    {
-        BOOST_CHECK_EQUAL(p.get_future().get(), boost::system::error_code());
-    }
+    BOOST_REQUIRE_NO_THROW(right.read(lb).get());
+    BOOST_CHECK_EQUAL(std::memcmp(rb.data(), data, rb.size()), 0);
 
-    for(auto& p : rwps)
-    {
-        BOOST_CHECK_EQUAL(p.get_future().get(), boost::system::error_code());
-    }
+    auto ls = left.shutdown();
+    auto rs = right.shutdown();
 
-    std::promise<boost::system::error_code> lrp;
-    left->read(lb, [lb, data, &lrp](const boost::system::error_code& error, size_t size)
-    {
-        BOOST_CHECK_EQUAL(size, lb.size());
-        BOOST_CHECK_EQUAL(std::memcmp(lb.data(), data, lb.size()), 0);
-        lrp.set_value(error ? error : size == lb.size() ? boost::system::error_code() : boost::asio::error::broken_pipe);
-    });
+    BOOST_REQUIRE_NO_THROW(ls.get());
+    BOOST_REQUIRE_NO_THROW(rs.get());
+}
 
-    std::promise<boost::system::error_code> rrp;
-    right->read(rb, [rb, data, &rrp](const boost::system::error_code& error, size_t size)
-    {
-        BOOST_CHECK_EQUAL(size, rb.size());
-        BOOST_CHECK_EQUAL(std::memcmp(rb.data(), data, rb.size()), 0);
-        rrp.set_value(error ? error : size == rb.size() ? boost::system::error_code() : boost::asio::error::broken_pipe);
-    });
+BOOST_AUTO_TEST_CASE(tubus_mask)
+{
 
-    BOOST_CHECK_EQUAL(lrp.get_future().get(), boost::system::error_code());
-    BOOST_CHECK_EQUAL(rrp.get_future().get(), boost::system::error_code());
-
-    std::promise<boost::system::error_code> lsp;
-    left->shutdown([&lsp](const boost::system::error_code& error)
-    {
-        lsp.set_value(error);
-    });
-
-    std::promise<boost::system::error_code> rsp;
-    right->shutdown([&rsp](const boost::system::error_code& error)
-    {
-        rsp.set_value(error);
-    });
-
-    BOOST_CHECK_EQUAL(lsp.get_future().get(), boost::system::error_code());
-    BOOST_CHECK_EQUAL(rsp.get_future().get(), boost::system::error_code());
 }
