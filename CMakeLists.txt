@@ -5,8 +5,8 @@ project(${PROJECT_NAME} VERSION 1.0)
 
 set(TESTS tests)
 
-set(SOURCES buffer.cpp reactor.cpp udp.cpp tubus.cpp main.cpp)
-set(TESTS_SOURCES buffer.cpp reactor.cpp udp.cpp tubus.cpp tests.cpp)
+set(SOURCES buffer.cpp reactor.cpp tubus.cpp main.cpp)
+set(TESTS_SOURCES buffer.cpp reactor.cpp tubus.cpp tests.cpp)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall")
 

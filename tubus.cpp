@@ -1,5 +1,4 @@
 #include "tubus.h"
-#include "udp.h"
 #include "reactor.h"
 #include <map>
 #include <set>
@@ -208,10 +207,10 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         bool operator<(const cursor& other) const
         {
-            static const uint64_t half_turn = std::numeric_limits<uint64_t>::max() >> 1;
+            static const uint64_t one_to_midday = std::numeric_limits<uint64_t>::max() >> 1;
 
-            return (value < other.value && other.value - value <= half_turn) 
-                || (value > other.value && value - other.value > half_turn);
+            return (value < other.value && other.value - value <= one_to_midday) 
+                || (value > other.value && value - other.value > one_to_midday);
         }
 
         bool operator<=(const cursor& other) const
@@ -221,10 +220,15 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         bool operator>(const cursor& other) const
         {
-            static const uint64_t half_turn = std::numeric_limits<uint64_t>::max() >> 1;
+            static const uint64_t one_to_midday = std::numeric_limits<uint64_t>::max() >> 1;
 
-            return (value > other.value && value - other.value <= half_turn) 
-                || (value < other.value && other.value - value > half_turn);
+            return (value > other.value && value - other.value <= one_to_midday) 
+                || (value < other.value && other.value - value > one_to_midday);
+        }
+        
+        bool operator>=(const cursor& other) const
+        {
+            return this->operator>(other) || this->operator==(other);
         }
 
         bool operator==(const cursor& other) const
@@ -759,7 +763,7 @@ protected:
             novemus::mutable_buffer buffer = m_store->obtain(packet::max_packet_size);
             std::weak_ptr<transport> weak = shared_from_this();
 
-            m_socket->async_receive(buffer, [weak, buffer](const boost::system::error_code& error, size_t size)
+            m_socket.async_receive(buffer, [weak, buffer](const boost::system::error_code& error, size_t size)
             {
                 auto ptr = weak.lock();
                 if (ptr)
@@ -800,7 +804,7 @@ protected:
                 if (m_mask)
                     pack.make_opaque(m_mask);
 
-                m_socket->async_send(pack.buffer(), [weak, pack](const boost::system::error_code& error, size_t size)
+                m_socket.async_send(pack.buffer(), [weak, pack](const boost::system::error_code& error, size_t size)
                 {
                     auto ptr = weak.lock();
                     if (ptr)
@@ -840,9 +844,9 @@ protected:
 
 public:
 
-    transport(novemus::udp::socket_ptr socket, uint64_t mask)
+    transport(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t mask)
         : m_reactor(novemus::reactor::shared_reactor())
-        , m_socket(socket)
+        , m_socket(m_reactor->io(), bind.protocol())
         , m_timer(m_reactor->io())
         , m_coupler(m_reactor->io())
         , m_istream(m_reactor->io())
@@ -850,6 +854,9 @@ public:
         , m_store(novemus::buffer_factory::shared_factory())
         , m_mask(mask)
     {
+        m_socket.set_option(boost::asio::socket_base::reuse_address(true));
+        m_socket.bind(bind);
+        m_socket.connect(peer);
     }
 
     void shutdown(const callback& handle) noexcept(true) override
@@ -947,7 +954,7 @@ public:
 private:
 
     std::shared_ptr<reactor> m_reactor;
-    novemus::udp::socket_ptr m_socket;
+    boost::asio::ip::udp::socket m_socket;
     boost::asio::deadline_timer m_timer;
     connect_handler m_coupler;
     istream_handler m_istream;
@@ -959,7 +966,7 @@ private:
 
 std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t secret) noexcept(false)
 {
-    return std::make_shared<transport>(novemus::udp::connect(bind, peer), secret);
+    return std::make_shared<transport>(bind, peer, secret);
 }
 
 }}
