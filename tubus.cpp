@@ -151,12 +151,12 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         uint8_t* data()
         {
-            return (uint8_t*)m_buffer.data();
+            return m_buffer.data();
         }
         
         const uint8_t* data() const
         {
-            return (uint8_t*)m_buffer.data();
+            return m_buffer.data();
         }
 
         mutable_buffer buffer() const

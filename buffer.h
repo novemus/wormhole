@@ -32,9 +32,9 @@ struct const_buffer
 
     const_iterator end() const { return &m_buffer + 1; }
 
-    const void* data() const noexcept(true)
+    const uint8_t* data() const noexcept(true)
     {
-        return m_buffer.data();
+        return (uint8_t*)m_buffer.data();
     }
 
     std::size_t size() const noexcept(true)
@@ -83,9 +83,9 @@ struct mutable_buffer
 
     const_iterator end() const { return &m_buffer + 1; }
 
-    void* data() const noexcept(true)
+    uint8_t* data() const noexcept(true)
     {
-        return m_buffer.data();
+        return (uint8_t*)m_buffer.data();
     }
 
     std::size_t size() const noexcept(true)
