@@ -9,10 +9,26 @@
 #include <mutex>
 #include <boost/asio.hpp>
 #include <boost/bind/bind.hpp>
+#include <boost/lexical_cast.hpp>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
 namespace novemus { namespace tubus {
+
+template<class var> var getenv(const std::string& name, const var& def)
+{
+    try
+    {
+        const char *env = std::getenv(name.c_str());
+        return env ? boost::lexical_cast<var>(env) : def;
+    }
+    catch (const boost::bad_lexical_cast& ex)
+    {
+        std::cout << "getenv: " << ex.what() << std::endl;
+    }
+
+    return def;
+}
 
 class transport : public novemus::tubus::channel, public std::enable_shared_from_this<transport>
 {
@@ -273,6 +289,24 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
     struct connect_handler
     {
+        inline static boost::posix_time::seconds ping_timeout()
+        {
+            static boost::posix_time::seconds s_timeout(getenv("TUBUS_PING_TIMEOUT", 30));
+            return s_timeout;
+        }
+
+        inline static boost::posix_time::milliseconds resend_timeout()
+        {
+            static boost::posix_time::milliseconds s_timeout(getenv("TUBUS_RESEND_TIMEOUT", 100));
+            return s_timeout;
+        }
+
+        inline static boost::posix_time::milliseconds shutdown_timeout()
+        {
+            static boost::posix_time::milliseconds s_timeout(getenv("TUBUS_SHUTDOWN_TIMEOUT", 1000));
+            return s_timeout;
+        }
+
         static uint16_t make_pin()
         {
             static std::atomic<uint16_t> s_pin;
@@ -286,6 +320,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             , m_linked(false)
             , m_loc_pin(0)
             , m_rem_pin(0)
+            , m_last(boost::posix_time::second_clock::universal_time())
         {
         }
 
@@ -314,7 +349,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             if (m_loc_pin == 0)
                 return true;
 
-            auto now = boost::posix_time::second_clock::universal_time();
+            m_last = boost::posix_time::second_clock::universal_time();
 
             if (pack.has_flag(packet::syn) && (m_rem_pin == 0 || m_rem_pin == pack.pin()))
             {
@@ -331,11 +366,11 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     }
 
                     m_jobs.erase(packet::syn);
-                    m_jobs.emplace(packet::png, now + boost::posix_time::seconds(30)); 
+                    m_jobs.emplace(packet::png, m_last + ping_timeout()); 
                 }
                 else
                 {
-                    m_jobs.emplace(packet::syn | packet::ack, now); 
+                    m_jobs.emplace(packet::syn | packet::ack, m_last); 
                 }
 
                 return true;
@@ -360,7 +395,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 }
                 else
                 {
-                    m_jobs.emplace(packet::fin | packet::ack, now);
+                    m_jobs.emplace(packet::fin | packet::ack, m_last);
                 }
 
                 return true;
@@ -369,11 +404,12 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             {
                 if (pack.has_flag(packet::ack))
                 {
-                    m_jobs.emplace(packet::png, now + boost::posix_time::seconds(30));
+                    m_jobs.erase(packet::png);
+                    m_jobs.emplace(packet::png, m_last + ping_timeout());
                 }
                 else
                 {
-                    m_jobs.emplace(packet::png | packet::ack, now); 
+                    m_jobs.emplace(packet::png | packet::ack, m_last);
                 }
 
                 return true;
@@ -396,8 +432,6 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             if (iter != m_jobs.end())
             {
-                static const boost::posix_time::milliseconds RESEND_TIMEOUT(100);
-
                 if (iter->first == 0)
                 {
                     m_jobs.erase(iter);
@@ -419,7 +453,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 pack.set_flags(iter->first);
                 pack.shrink(packet::header_size);
 
-                iter->second = now + RESEND_TIMEOUT;
+                iter->second = now + resend_timeout();
 
                 if (iter->first == (packet::syn | packet::ack))
                 {
@@ -436,7 +470,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 {
                     m_linked = false;
                 }
-                else if (iter->first == (packet::fin | packet::ack))
+                else if (iter->first == (packet::fin | packet::ack) || iter->first == (packet::png | packet::ack))
                 {
                     m_jobs.erase(iter);
                 }
@@ -467,23 +501,16 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         bool is_hangup() const
         {
-            auto deadline = boost::posix_time::microsec_clock::universal_time() - boost::posix_time::seconds(30);
-            auto iter = std::find_if(m_jobs.begin(), m_jobs.end(), [deadline](const std::pair<uint16_t, boost::posix_time::ptime>& item)
-            {
-                return deadline > item.second;
-            });
-            return iter != m_jobs.end();
+            return m_last < boost::posix_time::microsec_clock::universal_time() - ping_timeout();
         }
 
         void shutdown(const callback& handle)
         {
-            static const boost::posix_time::milliseconds SHUTDOWN_TIMEOUT(1000);
-
             auto now = boost::posix_time::microsec_clock::universal_time();
             on_shutdown = handle;
 
             m_jobs.emplace(packet::fin, now);
-            m_jobs.emplace(0, now + SHUTDOWN_TIMEOUT);
+            m_jobs.emplace(0, now + shutdown_timeout());
         }
 
         void connect(const callback& handle)
@@ -506,6 +533,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         bool m_linked;
         uint32_t m_loc_pin;
         uint32_t m_rem_pin;
+        boost::posix_time::ptime m_last;
         std::map<uint16_t, boost::posix_time::ptime> m_jobs;
         callback on_connect;
         callback on_shutdown;

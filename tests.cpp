@@ -3,7 +3,9 @@
 #include "buffer.h"
 #include "reactor.h"
 #include "tubus.h"
+#include <stdlib.h>
 #include <future>
+#include <functional>
 #include <boost/test/included/unit_test.hpp>
 
 BOOST_AUTO_TEST_CASE(buffer)
@@ -49,38 +51,76 @@ BOOST_AUTO_TEST_CASE(buffer)
     BOOST_CHECK(mb.unique());
 }
 
-#define HANDLER(p, filter) [&p](const boost::system::error_code& error) \
+#define ASYNC(object, method, filter, ...) \
+return std::async([=, obj = object]() \
 { \
-    if (filter) \
-        p.set_exception(std::make_exception_ptr(boost::system::system_error(error))); \
-    else \
-        p.set_value(); \
-} \
+    std::promise<void> promise; \
+    std::future<void> future = promise.get_future(); \
+    obj->method(__VA_ARGS__[&promise](const boost::system::error_code& error) \
+    { \
+        if (filter) \
+            promise.set_exception(std::make_exception_ptr(boost::system::system_error(error))); \
+        else \
+            promise.set_value(); \
+    }); \
+    future.get(); \
+}) \
 
-#define WAIT(n) \
-    if (f##n.wait_for(std::chrono::seconds(3)) == std::future_status::timeout) \
-        throw boost::system::system_error(boost::asio::error::timed_out); \
-    f##n.get(); \
+class tubus_channel
+{
+    boost::asio::ip::udp::endpoint m_bind;
+    boost::asio::ip::udp::endpoint m_peer;
+    uint64_t m_secret;
+    std::shared_ptr<novemus::tubus::channel> m_channel;
 
-#define ASYNC_ACCEPT(n, c) std::promise<void> p##n; auto f##n = p##n.get_future(); c->accept(HANDLER(p##n, error));
-#define ASYNC_CONNECT(n, c) std::promise<void> p##n; auto f##n = p##n.get_future(); c->connect(HANDLER(p##n, error));
-#define ASYNC_SHUTDOWN(n, c) std::promise<void> p##n; auto f##n = p##n.get_future(); c->shutdown(HANDLER(p##n, error && error != boost::asio::error::timed_out));
-#define ASYNC_READ(n, c, b) std::promise<void> p##n; auto f##n = p##n.get_future(); c->read(b, (HANDLER(p##n, error)));
-#define ASYNC_WRITE(n, c, b) std::promise<void> p##n; auto f##n = p##n.get_future(); c->write(b, (HANDLER(p##n, error)));
+public:
 
-#define ACCEPT(c) { ASYNC_ACCEPT(p, c); WAIT(p); }
-#define CONNECT(c) { ASYNC_CONNECT(p, c); WAIT(p); }
-#define SHUTDOWN(c) { ASYNC_SHUTDOWN(p, c); WAIT(p); }
-#define READ(c, b) { ASYNC_READ(p, c, b); WAIT(p); }
-#define WRITE(c, b) { ASYNC_WRITE(p, c, b); WAIT(p); }
+    tubus_channel(const boost::asio::ip::udp::endpoint& b, const boost::asio::ip::udp::endpoint& p, uint64_t s)
+        : m_bind(b)
+        , m_peer(p)
+        , m_secret(s)
+        , m_channel(novemus::tubus::create_channel(b, p, s))
+    {
+    }
+
+    void reset()
+    {
+        m_channel = novemus::tubus::create_channel(m_bind, m_peer, m_secret);
+    }
+
+    std::future<void> async_accept()
+    {
+        ASYNC(m_channel, accept, error, );
+    }
+
+    std::future<void> async_connect()
+    {
+        ASYNC(m_channel, connect, error, );
+    }
+
+    std::future<void> async_shutdown()
+    {
+        ASYNC(m_channel, shutdown, error && error != boost::asio::error::timed_out && error != boost::asio::error::broken_pipe , );
+    }
+
+    std::future<void> async_write(const novemus::const_buffer& buffer)
+    {
+        ASYNC(m_channel, write, error, buffer, );
+    }
+
+    std::future<void> async_read(const novemus::mutable_buffer& buffer)
+    {
+        ASYNC(m_channel, read, error, buffer, );
+    }
+};
 
 BOOST_AUTO_TEST_CASE(tubus_core)
 {
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    auto left = novemus::tubus::create_channel(le, re, 123456789);
-    auto right = novemus::tubus::create_channel(re, le, 123456789);
+    tubus_channel left(le, re, 123456789);
+    tubus_channel right(re, le, 123456789);
 
     uint8_t data[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
@@ -90,32 +130,32 @@ BOOST_AUTO_TEST_CASE(tubus_core)
     std::memcpy(lb.data(), data, lb.size());
     std::memcpy(rb.data(), data, rb.size());
 
-    ASYNC_ACCEPT(la, left);
-    ASYNC_CONNECT(rc, right);
+    auto la = left.async_accept();
+    auto rc = right.async_connect();
 
-    BOOST_REQUIRE_NO_THROW(WAIT(la));
-    BOOST_REQUIRE_NO_THROW(WAIT(rc));
+    BOOST_REQUIRE_NO_THROW(la.get());
+    BOOST_REQUIRE_NO_THROW(rc.get());
 
     for(size_t i = 0; i < sizeof(data); ++i)
     {
-        BOOST_REQUIRE_NO_THROW(WRITE(left, lb.slice(i, 1)));
-        BOOST_REQUIRE_NO_THROW(WRITE(right, rb.slice(i, 1)));
+        BOOST_REQUIRE_NO_THROW(left.async_write(lb.slice(i, 1)).get());
+        BOOST_REQUIRE_NO_THROW(right.async_write(rb.slice(i, 1)).get());
     }
 
     std::memset(lb.data(), 0, lb.size());
     std::memset(rb.data(), 0, rb.size());
 
-    BOOST_REQUIRE_NO_THROW(READ(left, lb));
+    BOOST_REQUIRE_NO_THROW(left.async_read(lb).get());
     BOOST_CHECK_EQUAL(std::memcmp(lb.data(), data, lb.size()), 0);
 
-    BOOST_REQUIRE_NO_THROW(READ(right, rb));
+    BOOST_REQUIRE_NO_THROW(right.async_read(rb).get());
     BOOST_CHECK_EQUAL(std::memcmp(rb.data(), data, rb.size()), 0);
 
-    ASYNC_SHUTDOWN(ls, left);
-    ASYNC_SHUTDOWN(rs, right);
+    auto ls = left.async_shutdown();
+    auto rs = right.async_shutdown();
 
-    BOOST_REQUIRE_NO_THROW(WAIT(ls));
-    BOOST_REQUIRE_NO_THROW(WAIT(rs));
+    BOOST_REQUIRE_NO_THROW(ls.get());
+    BOOST_REQUIRE_NO_THROW(rs.get());
 }
 
 class mediator
@@ -240,42 +280,69 @@ BOOST_AUTO_TEST_CASE(tubus_integrity)
 
     mediator proxy(pe, le, re);
 
-    auto left = novemus::tubus::create_channel(le, pe, 0);
-    auto right = novemus::tubus::create_channel(re, pe, 0);
+    tubus_channel left(le, pe, 0);
+    tubus_channel right(re, pe, 0);
 
-    ASYNC_ACCEPT(la, left);
-    ASYNC_CONNECT(rc, right);
+    auto la = left.async_accept();
+    auto rc = right.async_connect();
 
-    BOOST_REQUIRE_NO_THROW(WAIT(la));
-    BOOST_REQUIRE_NO_THROW(WAIT(rc));
+    BOOST_REQUIRE_NO_THROW(la.get());
+    BOOST_REQUIRE_NO_THROW(rc.get());
 
     stream_source source;
     stream_sink sink;
 
-    BOOST_REQUIRE_NO_THROW(WRITE(left, source.read_some()));
-    BOOST_REQUIRE_NO_THROW(WRITE(left, source.read_some()));
-    BOOST_REQUIRE_NO_THROW(WRITE(left, source.read_some()));
-    BOOST_REQUIRE_NO_THROW(WRITE(left, source.read_some()));
+    BOOST_REQUIRE_NO_THROW(left.async_write(source.read_some()).get());
+    BOOST_REQUIRE_NO_THROW(left.async_write(source.read_some()).get());
+    BOOST_REQUIRE_NO_THROW(left.async_write(source.read_some()).get());
+    BOOST_REQUIRE_NO_THROW(left.async_write(source.read_some()).get());
 
     novemus::mutable_buffer buffer(source.read() / 4);
 
-    BOOST_REQUIRE_NO_THROW(READ(right, buffer));
+    BOOST_REQUIRE_NO_THROW(right.async_read(buffer).get());
     BOOST_REQUIRE_NO_THROW(sink.write_some(buffer));
-    BOOST_REQUIRE_NO_THROW(READ(right, buffer));
+    BOOST_REQUIRE_NO_THROW(right.async_read(buffer).get());
     BOOST_REQUIRE_NO_THROW(sink.write_some(buffer));
-    BOOST_REQUIRE_NO_THROW(READ(right, buffer));
+    BOOST_REQUIRE_NO_THROW(right.async_read(buffer).get());
     BOOST_REQUIRE_NO_THROW(sink.write_some(buffer));
-    BOOST_REQUIRE_NO_THROW(READ(right, buffer));
+    BOOST_REQUIRE_NO_THROW(right.async_read(buffer).get());
     BOOST_REQUIRE_NO_THROW(sink.write_some(buffer));
 
     BOOST_CHECK_EQUAL(source.read(), sink.written());
 
-    ASYNC_READ(rr, right, buffer);
-    BOOST_REQUIRE_THROW(WAIT(rr), boost::system::system_error);
+    BOOST_REQUIRE_THROW(right.async_read(buffer.slice(0, 1)).get(), boost::system::system_error);
 
-    ASYNC_SHUTDOWN(ls, left);
-    ASYNC_SHUTDOWN(rs, right);
+    auto ls = left.async_shutdown();
+    auto rs = right.async_shutdown();
 
-    BOOST_REQUIRE_NO_THROW(WAIT(ls));
-    BOOST_REQUIRE_NO_THROW(WAIT(rs));
+    BOOST_REQUIRE_NO_THROW(ls.get());
+    BOOST_REQUIRE_NO_THROW(rs.get());
+}
+
+BOOST_AUTO_TEST_CASE(tubus_connectivity)
+{
+    boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
+    boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
+
+    tubus_channel left(le, re, 123456789);
+    tubus_channel right(re, le, 123456789);
+
+    BOOST_REQUIRE_THROW(left.async_accept().get(), boost::system::system_error);
+    BOOST_REQUIRE_THROW(right.async_connect().get(), boost::system::system_error);
+
+    left.reset();
+    right.reset();
+
+    auto la = left.async_accept();
+    auto rc = right.async_connect();
+
+    BOOST_REQUIRE_NO_THROW(la.get());
+    BOOST_REQUIRE_NO_THROW(rc.get());
+
+    BOOST_REQUIRE_NO_THROW(left.async_shutdown().get());
+
+    BOOST_REQUIRE_THROW(left.async_read(novemus::mutable_buffer(1)).get(), boost::system::system_error);
+    BOOST_REQUIRE_THROW(right.async_write(novemus::mutable_buffer(1)).get(), boost::system::system_error);
+
+    BOOST_REQUIRE_NO_THROW(right.async_shutdown().get());
 }
