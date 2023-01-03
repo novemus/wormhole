@@ -7,6 +7,7 @@
 #include <future>
 #include <functional>
 #include <boost/test/included/unit_test.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 BOOST_AUTO_TEST_CASE(buffer)
 {
@@ -345,4 +346,122 @@ BOOST_AUTO_TEST_CASE(tubus_connectivity)
     BOOST_REQUIRE_THROW(right.async_write(novemus::mutable_buffer(1)).get(), boost::system::system_error);
 
     BOOST_REQUIRE_NO_THROW(right.async_shutdown().get());
+}
+
+BOOST_AUTO_TEST_CASE(tubus_speed)
+{
+    boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
+    boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
+
+    auto left = novemus::tubus::create_channel(le, re, 0);
+    auto right = novemus::tubus::create_channel(re, le, 0);
+
+    right->accept([=](const boost::system::error_code& error)
+    {
+        if (error)
+        {
+            std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
+            return;
+        }
+
+        std::cout << boost::posix_time::microsec_clock::local_time() << ": right accept" << std::endl;
+        right->read(novemus::mutable_buffer(1024 * 1024 * 100), [=](const boost::system::error_code& error)
+        {
+            if (error)
+            {
+                std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
+                return;
+            }
+
+            std::cout << boost::posix_time::microsec_clock::local_time() << ": right read" << std::endl;
+            right->read(novemus::mutable_buffer(1024 * 1024 * 100), [=](const boost::system::error_code& error)
+            {
+                if (error)
+                {
+                    std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
+                    return;
+                }
+
+                std::cout << boost::posix_time::microsec_clock::local_time() << ": right shutdown" << std::endl;
+            });
+        });
+    });
+
+    left->connect([=](const boost::system::error_code& error)
+    {
+        if (error)
+        {
+            std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
+            return;
+        }
+
+        std::cout << boost::posix_time::microsec_clock::local_time() << ": left connect" << std::endl;
+        left->write(novemus::mutable_buffer(1024 * 1024 * 100), [=](const boost::system::error_code& error)
+        {
+            if (error)
+            {
+                std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
+                return;
+            }
+
+            std::cout << boost::posix_time::microsec_clock::local_time() << ": left write" << std::endl;
+            left->write(novemus::mutable_buffer(1024 * 1024 * 100), [=](const boost::system::error_code& error)
+            {
+                if (error)
+                {
+                    std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
+                    return;
+                }
+
+                std::cout << boost::posix_time::microsec_clock::local_time() << ": left shutdown" << std::endl;
+            });
+        });
+    });
+
+    std::cin.get();
+}
+
+BOOST_AUTO_TEST_CASE(udp_speed)
+{
+    boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
+    boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
+
+    auto reactor = novemus::reactor::shared_reactor();
+
+    auto right = std::make_shared<boost::asio::ip::udp::socket>(reactor->io(), re.protocol());
+
+    right->set_option(boost::asio::socket_base::reuse_address(true));
+    right->set_option(boost::asio::socket_base::send_buffer_size(1048576));
+    right->set_option(boost::asio::socket_base::receive_buffer_size(1048576));
+    
+    right->bind(re);
+    right->connect(le);
+
+    auto left = std::make_shared<boost::asio::ip::udp::socket>(reactor->io(), le.protocol());
+
+    left->set_option(boost::asio::socket_base::send_buffer_size(1048576));
+    left->set_option(boost::asio::socket_base::receive_buffer_size(1048576));
+    left->set_option(boost::asio::socket_base::reuse_address(true));
+
+    left->bind(le);
+    left->connect(re);
+    
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": start" << std::endl;
+
+    size_t recv = 0;
+    size_t sent = 0;
+
+    novemus::mutable_buffer data(9992);
+    for (size_t i = 0; i < 25; ++i)
+    {
+        sent += left->send(data);
+    }
+
+    for (size_t i = 0; i < 25; ++i)
+    {
+        recv += right->receive(data);
+    }
+
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": sent " << sent << std::endl;
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": receive " << recv << std::endl;
 }

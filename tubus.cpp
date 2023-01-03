@@ -34,7 +34,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 {
     struct packet
     {
-        enum flag 
+        enum flag
         {
             syn = 0x01,
             png = 0x02,
@@ -882,7 +882,12 @@ public:
         , m_store(novemus::buffer_factory::shared_factory())
         , m_mask(mask)
     {
+        static const size_t SOCKET_BUFFER_SIZE = 1048576;
+
+        m_socket.set_option(boost::asio::socket_base::send_buffer_size(SOCKET_BUFFER_SIZE));
+        m_socket.set_option(boost::asio::socket_base::receive_buffer_size(SOCKET_BUFFER_SIZE));
         m_socket.set_option(boost::asio::socket_base::reuse_address(true));
+        
         m_socket.bind(bind);
         m_socket.connect(peer);
     }
