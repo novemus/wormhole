@@ -10,7 +10,7 @@ namespace novemus { namespace tubus {
 
 struct channel
 {
-    typedef std::function<void(const boost::system::error_code&)> callback;
+    typedef std::function<void(const boost::system::error_code&, size_t)> callback;
 
     virtual ~channel() {}
     virtual void connect(const callback& handle) noexcept(true) = 0;

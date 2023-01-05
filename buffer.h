@@ -13,13 +13,14 @@ namespace novemus {
 
 struct const_buffer
 {
-    typedef boost::shared_array<const uint8_t> shared_array;
+    typedef boost::shared_array<uint8_t> shared_array;
     typedef boost::asio::const_buffer value_type;
     typedef const boost::asio::const_buffer* const_iterator;
 
-    const_buffer(size_t size) noexcept(true) 
-        : const_buffer(shared_array(new uint8_t[size]), 0, size)
+    const_buffer(const std::string& str) noexcept(true) 
+        : const_buffer(shared_array(new uint8_t[str.size()]), 0, str.size())
     {
+        std::memcpy(m_array.get(), str.data(), str.size());
     }
 
     const_buffer(shared_array array, size_t offset, size_t size) noexcept(true)
@@ -34,7 +35,7 @@ struct const_buffer
 
     const uint8_t* data() const noexcept(true)
     {
-        return (uint8_t*)m_buffer.data();
+        return (const uint8_t*)m_buffer.data();
     }
 
     std::size_t size() const noexcept(true)
@@ -56,10 +57,64 @@ struct const_buffer
         return const_buffer(m_array, offset + off, len);
     }
 
+    const_buffer pop_front(size_t len) noexcept(false)
+    {
+        if (len > m_buffer.size())
+            throw std::runtime_error("pop_front: out of range");
+
+        size_t offset = (uint8_t*)m_buffer.data() - m_array.get() + len;
+        m_buffer += len;
+
+        return const_buffer(m_array, offset, len);
+    }
+
+    const_buffer pop_back(size_t len) noexcept(false)
+    {
+        if (len > m_buffer.size())
+            throw std::runtime_error("pop_back: out of range");
+
+        m_buffer = boost::asio::const_buffer(m_buffer.data(), m_buffer.size() - len);
+
+        return const_buffer(m_array, (uint8_t*)m_buffer.data() - m_array.get(), len);
+    }
+
+    template<class type> type get(size_t off) const noexcept(false)
+    {
+        if (off + sizeof(type) > m_buffer.size())
+            throw std::runtime_error("get: out of range");
+
+        return *(const type*)(buffer.data() + off);
+    }
+
+    void copy(size_t off, size_t len, uint8_t* dst) const noexcept(false)
+    {
+        if (off + len > m_buffer.size())
+            throw std::runtime_error("copy: out of range");
+
+        std::memcpy(dst, m_buffer.data() + off, len);
+    }
+
+    void truncate(size_t len) noexcept(false)
+    {
+        if (len > m_buffer.size())
+            throw std::runtime_error("truncate: out of range");
+
+        m_buffer = boost::asio::const_buffer(m_buffer.data(), len);
+    }
+
+    void crop(size_t len) noexcept(false)
+    {
+        if (len > m_buffer.size())
+            throw std::runtime_error("crop: out of range");
+
+        size_t offset = (const uint8_t*)m_buffer.data() - m_array.get() + len;
+        m_buffer += len;
+    }
+
 private:
 
     boost::asio::const_buffer m_buffer;
-    boost::shared_array<const uint8_t> m_array;
+    boost::shared_array<uint8_t> m_array;
 };
 
 struct mutable_buffer
@@ -71,6 +126,12 @@ struct mutable_buffer
     mutable_buffer(size_t size) noexcept(true) 
         : mutable_buffer(shared_array(new uint8_t[size]), 0, size)
     {
+    }
+
+    mutable_buffer(const std::string& str) noexcept(true) 
+        : mutable_buffer(shared_array(new uint8_t[str.size()]), 0, str.size())
+    {
+        std::memcpy(m_array.get(), str.data(), str.size());
     }
 
     mutable_buffer(shared_array array, size_t offset, size_t size) noexcept(true)
@@ -103,14 +164,82 @@ struct mutable_buffer
         if (off > m_buffer.size() || off + len > m_buffer.size())
             throw std::runtime_error("slice: out of range");
 
-        size_t offset = (uint8_t*)m_buffer.data() - m_array.get();
-        return mutable_buffer(m_array, offset + off, len);
+        return mutable_buffer(m_array, (uint8_t*)m_buffer.data() - m_array.get() + off, len);
     }
-    
+
+    mutable_buffer pop_front(size_t len) noexcept(false)
+    {
+        if (len > m_buffer.size())
+            throw std::runtime_error("pop_front: out of range");
+
+        size_t offset = (uint8_t*)m_buffer.data() - m_array.get() + len;
+        m_buffer += len;
+
+        return mutable_buffer(m_array, offset, len);
+    }
+
+    mutable_buffer pop_back(size_t len) noexcept(false)
+    {
+        if (len > m_buffer.size())
+            throw std::runtime_error("pop_back: out of range");
+
+        m_buffer = boost::asio::mutable_buffer(m_buffer.data(), m_buffer.size() - len);
+
+        return mutable_buffer(m_array, (uint8_t*)m_buffer.data() - m_array.get(), len);
+    }
+
     operator const_buffer() const noexcept(true)
     {
-        size_t offset = (uint8_t*)m_buffer.data() - m_array.get();
-        return const_buffer(m_array, offset, m_buffer.size());
+        return const_buffer(m_array, (uint8_t*)m_buffer.data() - m_array.get(), m_buffer.size());
+    }
+
+    template<class type> type get(size_t off) const noexcept(false)
+    {
+        if (off + sizeof(type) > m_buffer.size())
+            throw std::runtime_error("get: out of range");
+
+        return *(type*)(buffer.data() + off);
+    }
+
+    template<class type> void set(size_t off, type val) noexcept(false)
+    {
+        if (off + sizeof(type) > m_buffer.size())
+            throw std::runtime_error("set: out of range");
+
+        *(type*)(buffer.data() + off) = val;
+    }
+
+    void fill(size_t off, size_t len, const uint8_t* src) noexcept(false)
+    {
+        if (off + len > m_buffer.size())
+            throw std::runtime_error("fill: out of range");
+        
+        std::memcpy(m_buffer.data() + off, src, len);
+    }
+
+    void copy(size_t off, size_t len, uint8_t* dst) const noexcept(false)
+    {
+        if (off + len > m_buffer.size())
+            throw std::runtime_error("copy: out of range");
+        
+        std::memcpy(dst, m_buffer.data() + off, len);
+    }
+
+    void crop(size_t len) noexcept(false)
+    {
+        if (len > m_buffer.size())
+            throw std::runtime_error("crop: out of range");
+        
+        size_t offset = (uint8_t*)m_buffer.data() - m_array.get() + len;
+        m_buffer += len;
+    }
+
+    void truncate(size_t len) noexcept(false)
+    {
+        if (len > m_buffer.size())
+            throw std::runtime_error("truncate: out of range");
+
+        m_buffer = boost::asio::mutable_buffer(m_buffer.data(), len);
     }
 
 private:
