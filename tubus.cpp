@@ -183,7 +183,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             packet::section sec = pack.useless();
             while (sec.size() >= packet::section::header_size)
             {
-                auto iter = std::find_if(m_jobs.begin(), m_jobs.end(), [now](const std::pair<uint16_t, boost::posix_time::ptime>& item)
+                auto iter = std::find_if(m_jobs.begin(), m_jobs.end(), [now](const auto& item)
                 {
                     return item.second < now; 
                 });
@@ -359,7 +359,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 uint64_t to = hit->first;
 
                 size_t sent = total > from && total <= to ? total - from : 0;
-                m_io.post(boost::bind(hit->second, ec, sent));
+                m_io.post(boost::bind(hit->second.first, ec, sent));
 
                 ++hit;
             }
@@ -401,9 +401,9 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             auto sect = pack.useless();
             while (sect.size() > snippet::header_size + packet::section::header_size)
             {
-                auto iter = std::find_if(m_flight.begin(), m_flight.end(), [&sect, &now](auto item)
+                auto iter = std::find_if(m_flight.begin(), m_flight.end(), [&sect, &now](const auto& item)
                 {
-                    return item->second.second < now && item->second.first.size() <= sect.size() - packet::section::header_size;
+                    return item.second.second < now && item.second.first.size() <= sect.size() - packet::section::header_size;
                 });
 
                 if (iter == m_flight.end())
@@ -432,7 +432,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             }
         }
 
-        void append(const const_buffer& buffer, const callback& handle)
+        void append(const const_buffer& buffer, const io_callback& handle)
         {
             m_handles.emplace(m_store.push(buffer), std::make_pair(handle, buffer.size()));
         }
@@ -447,7 +447,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         boost::asio::io_context& m_io;
         storage m_store;
         std::map<uint64_t, std::pair<snippet, boost::posix_time::ptime>> m_flight;
-        std::map<uint64_t, std::pair<callback, uint64_t>> m_handles;
+        std::map<uint64_t, std::pair<io_callback, uint64_t>> m_handles;
     };
 
     struct istream_handler
@@ -546,7 +546,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             }
         }
 
-        void append(const mutable_buffer& buf, const callback& handle)
+        void append(const mutable_buffer& buf, const io_callback& handle)
         {
             m_handles.push_back(std::make_pair(buf, handle));
             transmit();
@@ -585,7 +585,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         boost::asio::io_context& m_io;
         storage m_store;
         std::set<uint64_t> m_acks;
-        std::list<std::pair<mutable_buffer, callback>> m_handles;
+        std::list<std::pair<mutable_buffer, io_callback>> m_handles;
     };
 
 protected:
@@ -804,7 +804,7 @@ public:
         schedule();
     }
 
-    void read(const mutable_buffer& buffer, const callback& handle) noexcept(true) override
+    void read(const mutable_buffer& buffer, const io_callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -813,14 +813,14 @@ public:
             boost::system::error_code ec = m_coupler.status() == state::tearing || m_coupler.status() == state::finished ? 
                 boost::asio::error::broken_pipe : boost::asio::error::not_connected;
 
-            m_reactor->io().post(boost::bind(handle, ec));
+            m_reactor->io().post(boost::bind(handle, ec, 0));
             return;
         }
 
         m_istream.append(buffer, handle);
     }
 
-    void write(const const_buffer& buffer, const callback& handle) noexcept(true) override
+    void write(const const_buffer& buffer, const io_callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
                 
@@ -829,7 +829,7 @@ public:
             boost::system::error_code ec = m_coupler.status() == state::tearing || m_coupler.status() == state::finished ? 
                 boost::asio::error::broken_pipe : boost::asio::error::not_connected;
 
-            m_reactor->io().post(boost::bind(handle, ec));
+            m_reactor->io().post(boost::bind(handle, ec, 0));
             return;
         }
 
