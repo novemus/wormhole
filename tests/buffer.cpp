@@ -107,13 +107,13 @@ BOOST_AUTO_TEST_CASE(mutable_buffer)
     pb = mb.pop_back(mb.size());
     pb.truncate(5);
 
-    BOOST_CHECK_EQUAL(pb.size(), strlen(greet) - 5);
+    BOOST_CHECK_EQUAL(pb.size(), 5);
     BOOST_CHECK_EQUAL(std::memcmp(pb.data(), greet, pb.size()), 0);
 
-    pb.crop(5);
+    pb.crop(3);
 
-    BOOST_CHECK_EQUAL(pb.size(), strlen(greet) - 10);
-    BOOST_CHECK_EQUAL(std::memcmp(pb.data(), greet + 5, pb.size()), 0);
+    BOOST_CHECK_EQUAL(pb.size(), 2);
+    BOOST_CHECK_EQUAL(std::memcmp(pb.data(), greet + 3, pb.size()), 0);
 
     BOOST_REQUIRE_THROW(mb.truncate(mb.size() + 1), std::runtime_error);
     BOOST_REQUIRE_THROW(mb.crop(mb.size() + 1), std::runtime_error);
@@ -214,13 +214,13 @@ BOOST_AUTO_TEST_CASE(const_buffer)
     pb = cb.pop_back(cb.size());
     pb.truncate(5);
 
-    BOOST_CHECK_EQUAL(pb.size(), strlen(greet) - 5);
+    BOOST_CHECK_EQUAL(pb.size(), 5);
     BOOST_CHECK_EQUAL(std::memcmp(pb.data(), greet, pb.size()), 0);
 
-    pb.crop(5);
+    pb.crop(3);
 
-    BOOST_CHECK_EQUAL(pb.size(), strlen(greet) - 10);
-    BOOST_CHECK_EQUAL(std::memcmp(pb.data(), greet + 5, pb.size()), 0);
+    BOOST_CHECK_EQUAL(pb.size(), 2);
+    BOOST_CHECK_EQUAL(std::memcmp(pb.data(), greet + 3, pb.size()), 0);
 
     BOOST_REQUIRE_THROW(cb.truncate(cb.size() + 1), std::runtime_error);
     BOOST_REQUIRE_THROW(cb.crop(cb.size() + 1), std::runtime_error);

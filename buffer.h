@@ -99,7 +99,7 @@ struct const_buffer
         if (len > m_buffer.size())
             throw std::runtime_error("truncate: out of range");
 
-        m_buffer = boost::asio::const_buffer(m_buffer.data(), m_buffer.size() - len);
+        m_buffer = boost::asio::const_buffer(m_buffer.data(), len);
     }
 
     void crop(size_t len) noexcept(false)
@@ -237,7 +237,7 @@ struct mutable_buffer
         if (len > m_buffer.size())
             throw std::runtime_error("truncate: out of range");
 
-        m_buffer = boost::asio::mutable_buffer(m_buffer.data(), m_buffer.size() - len);
+        m_buffer = boost::asio::mutable_buffer(m_buffer.data(), len);
     }
 
 private:

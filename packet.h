@@ -7,7 +7,47 @@ namespace novemus { namespace tubus {
     
 struct snippet
 {
-    static constexpr uint16_t header_size = sizeof(uint64_t);
+    struct info
+    {
+        info(const mutable_buffer& buf) : m_buffer(buf)
+        {
+            if (m_buffer.size() > header_size)
+                m_buffer.truncate(header_size);
+        }
+
+        void set(uint64_t pos, uint16_t len)
+        {
+            m_buffer.set<uint64_t>(0, htole64(pos));
+            m_buffer.set<uint16_t>(sizeof(uint64_t), htons(len));
+            m_buffer.truncate(header_size);
+        }
+
+        uint64_t pos() const
+        {
+            return le64toh(m_buffer.get<uint64_t>(0));
+        }
+
+        uint16_t length() const
+        {
+            return m_buffer.size() >= header_size ? ntohs(m_buffer.get<uint16_t>(sizeof(uint64_t))) : 0;
+        }
+
+        uint16_t size() const
+        {
+            return (uint16_t)m_buffer.size();
+        }
+
+        const_buffer buffer() const
+        {
+            return m_buffer;
+        }
+
+    private:
+
+        mutable_buffer m_buffer;
+    };
+
+    static constexpr uint16_t header_size = sizeof(uint64_t) + sizeof(uint16_t);
 
     snippet(const mutable_buffer& buf) : m_buffer(buf)
     {
@@ -16,6 +56,7 @@ struct snippet
     void set(uint64_t pos, const const_buffer& buf)
     {
         m_buffer.set<uint64_t>(0, htole64(pos));
+        m_buffer.set<uint16_t>(sizeof(uint64_t), htons(buf.size()));
         m_buffer.fill(header_size, buf.size(), buf.data());
         m_buffer.truncate(header_size + buf.size());
     }
@@ -23,6 +64,16 @@ struct snippet
     uint64_t pos() const
     {
         return le64toh(m_buffer.get<uint64_t>(0));
+    }
+
+    uint16_t length() const
+    {
+        return m_buffer.size() >= header_size ? ntohs(m_buffer.get<uint16_t>(sizeof(uint64_t))) : 0;
+    }
+
+    info header() const
+    {
+        return info(m_buffer.slice(0, m_buffer.size() >= header_size ? header_size : 0));
     }
 
     mutable_buffer data() const
@@ -64,12 +115,8 @@ struct packet
             tear_ack
         };
 
-        section(const mutable_buffer& buf) : m_parent(buf), m_buffer(buf)
+        section(const mutable_buffer& buf) : section(buf, buf)
         {
-            if (type() != list_end)
-                m_buffer.truncate(header_size + length());
-            else if (m_buffer.size() > header_size)
-                m_buffer.set<uint16_t>(sizeof(uint16_t), m_buffer.size() - header_size);
         }
 
         section(const mutable_buffer& par, const mutable_buffer& buf) : m_parent(par), m_buffer(buf)
@@ -83,14 +130,6 @@ struct packet
             m_buffer.set<uint16_t>(0, htons(t));
             m_buffer.set<uint16_t>(sizeof(uint16_t), 0);
             m_buffer.truncate(header_size);
-        }
-
-        void set(uint16_t t, uint64_t v)
-        {
-            m_buffer.set<uint16_t>(0, htons(t));
-            m_buffer.set<uint16_t>(sizeof(uint16_t), htons(sizeof(uint64_t)));
-            m_buffer.set<uint64_t>(header_size, htole64(v));
-            m_buffer.truncate(header_size + sizeof(uint64_t));
         }
 
         void set(uint16_t t, const const_buffer& v)
@@ -121,12 +160,13 @@ struct packet
 
         void type(uint16_t t)
         {
-            m_buffer.set<uint16_t>(sizeof(uint64_t), htons(t));
+            m_buffer.set<uint16_t>(0, htons(t));
         }
 
         void length(uint16_t l)
         {
             m_buffer.set<uint16_t>(sizeof(uint16_t), htons(l));
+            m_buffer.truncate(header_size + l);
         }
 
         void value(const const_buffer& v)
@@ -153,12 +193,10 @@ struct packet
 
         section tail() const
         {
-            section more = next();
+            if (type() == list_end)
+                return *this;
 
-            if (more.type() != list_end)
-                return more.tail();
-
-            return more;
+            return next().tail();
         }
 
         const_buffer buffer() const
@@ -225,7 +263,7 @@ struct packet
 
     void pin(uint32_t p)
     {
-        m_buffer.set<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2, htonl(p));
+        m_buffer.set<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2, htonl(p));
     }
 
     size_t size() const
@@ -251,6 +289,12 @@ struct packet
     const_buffer buffer() const
     {
         return m_buffer;
+    }
+
+    void trim()
+    {
+        section tail = useless();
+        m_buffer.truncate(tail.buffer().data() - m_buffer.data());
     }
 
     void make_opened(uint64_t secret)

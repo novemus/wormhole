@@ -379,7 +379,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 {
                     snippet snip(sect.value());
 
-                    m_store.forget(snip.pos(), snip.size() - snippet::header_size);
+                    m_store.forget(snip.pos(), snip.length());
                     m_flight.erase(snip.pos());
 
                     auto iter = m_handles.begin();
@@ -523,7 +523,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 {
                     snippet snip(sect.value());
                     m_store.emplace(snip.pos(), snip.data());
-                    m_acks.emplace(snip.pos());
+                    m_acks.emplace_back(snip.header());
                 }
 
                 sect = sect.next();
@@ -539,7 +539,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             auto iter = m_acks.begin();
             while (iter != m_acks.end() && sect.size() >= packet::section::header_size)
             {
-                sect.set(packet::section::push_ack, *iter);
+                sect.set(packet::section::push_ack, iter->buffer());
 
                 iter = m_acks.erase(iter);
                 sect = sect.next();
@@ -584,7 +584,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         boost::asio::io_context& m_io;
         storage m_store;
-        std::set<uint64_t> m_acks;
+        std::list<snippet::info> m_acks;
         std::list<std::pair<mutable_buffer, io_callback>> m_handles;
     };
 
@@ -654,6 +654,8 @@ protected:
             m_istream.imbue(pack);
             m_ostream.imbue(pack);
         }
+
+        pack.trim();
 
         if (pack.size() > packet::header_size)
         {
