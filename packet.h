@@ -4,297 +4,263 @@
 #include <random>
 
 namespace novemus { namespace tubus {
-    
-struct snippet
+
+struct handle : public mutable_buffer
 {
-    struct info
-    {
-        info(const mutable_buffer& buf) : m_buffer(buf)
-        {
-            if (m_buffer.size() > header_size)
-                m_buffer.truncate(header_size);
-        }
+    static constexpr uint16_t handle_size = sizeof(uint64_t) + sizeof(uint16_t);
 
-        void set(uint64_t pos, uint16_t len)
-        {
-            m_buffer.set<uint64_t>(0, htole64(pos));
-            m_buffer.set<uint16_t>(sizeof(uint64_t), htons(len));
-            m_buffer.truncate(header_size);
-        }
-
-        uint64_t pos() const
-        {
-            return le64toh(m_buffer.get<uint64_t>(0));
-        }
-
-        uint16_t length() const
-        {
-            return m_buffer.size() >= header_size ? ntohs(m_buffer.get<uint16_t>(sizeof(uint64_t))) : 0;
-        }
-
-        uint16_t size() const
-        {
-            return (uint16_t)m_buffer.size();
-        }
-
-        const_buffer buffer() const
-        {
-            return m_buffer;
-        }
-
-    private:
-
-        mutable_buffer m_buffer;
-    };
-
-    static constexpr uint16_t header_size = sizeof(uint64_t) + sizeof(uint16_t);
-
-    snippet(const mutable_buffer& buf) : m_buffer(buf)
+    explicit handle(const mutable_buffer& buf) : mutable_buffer(buf)
     {
     }
 
-    void set(uint64_t pos, const const_buffer& buf)
+    void set(uint64_t pos, uint16_t len)
     {
-        m_buffer.set<uint64_t>(0, htole64(pos));
-        m_buffer.set<uint16_t>(sizeof(uint64_t), htons(buf.size()));
-        m_buffer.fill(header_size, buf.size(), buf.data());
-        m_buffer.truncate(header_size + buf.size());
+        mutable_buffer::set<uint64_t>(0, htole64(pos));
+        mutable_buffer::set<uint16_t>(sizeof(uint64_t), htons(len));
+        truncate(handle_size);
     }
 
-    uint64_t pos() const
+    uint64_t offset() const
     {
-        return le64toh(m_buffer.get<uint64_t>(0));
+        return size() >= sizeof(uint64_t) ? le64toh(get<uint64_t>(0)) : 0;
     }
 
     uint16_t length() const
     {
-        return m_buffer.size() >= header_size ? ntohs(m_buffer.get<uint16_t>(sizeof(uint64_t))) : 0;
+        return size() >= handle_size ? ntohs(get<uint16_t>(sizeof(uint64_t))) : 0;
     }
 
-    info header() const
+    bool operator<(const handle& other) const
     {
-        return info(m_buffer.slice(0, m_buffer.size() >= header_size ? header_size : 0));
+        return offset() < other.offset();
+    }
+};
+
+struct snippet : public mutable_buffer
+{
+    static constexpr uint16_t header_size = sizeof(uint64_t) + sizeof(uint16_t);
+
+    explicit snippet(const mutable_buffer& buf) : mutable_buffer(buf)
+    {
     }
 
-    mutable_buffer data() const
+    void set(uint64_t pos, const const_buffer& scrap)
     {
-        return m_buffer.slice(header_size, m_buffer.size() - header_size);
+        mutable_buffer::set<uint64_t>(0, htole64(pos));
+        mutable_buffer::set<uint16_t>(sizeof(uint64_t), htons(scrap.size()));
+        mutable_buffer::fill(header_size, scrap.size(), scrap.data());
+        truncate(header_size + scrap.size());
     }
 
-    uint16_t size() const
+    uint64_t offset() const
     {
-        return (uint16_t)m_buffer.size();
+        return size() >= sizeof(uint64_t) ? le64toh(get<uint64_t>(0)) : 0;
     }
 
-    const_buffer buffer() const
+    uint16_t length() const
     {
-        return m_buffer;
+        return size() >= header_size ? ntohs(get<uint16_t>(sizeof(uint64_t))) : 0;
+    }
+
+    handle header() const
+    {
+        return handle(slice(0, header_size));
+    }
+
+    mutable_buffer scrap() const
+    {
+        return slice(header_size, size() - header_size);
+    }
+
+    bool operator<(const snippet& other) const
+    {
+        return offset() < other.offset();
+    }
+};
+
+struct section : public mutable_buffer
+{
+    static constexpr uint16_t header_size = sizeof(uint16_t) * 2;
+
+    enum kind
+    {
+        list_stub = 0,
+        link_init, link_ackn,
+        ping_shot, ping_ackn,
+        data_move, data_ackn,
+        tear_init, tear_ackn
+    };
+
+    section(const mutable_buffer& buf) : section(buf, buf)
+    {
+    }
+
+    section(const mutable_buffer& par, const mutable_buffer& buf) : mutable_buffer(buf), m_parent(par)
+    {
+        if (type() != list_stub)
+            truncate(header_size + length());
+    }
+
+    void set(uint16_t t)
+    {
+        mutable_buffer::set<uint16_t>(0, htons(t));
+        mutable_buffer::set<uint16_t>(sizeof(uint16_t), 0);
+        truncate(header_size);
+    }
+
+    void set(const handle& h)
+    {
+        mutable_buffer::set<uint16_t>(0, htons(kind::data_ackn));
+        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(handle::handle_size));
+        fill(header_size, h.size(), h.data());
+        truncate(header_size + handle::handle_size);
+    }
+
+    void set(const snippet& s)
+    {
+        mutable_buffer::set<uint16_t>(0, htons(kind::data_move));
+        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(s.size()));
+        fill(header_size, s.size(), s.data());
+        truncate(header_size + s.size());
+    }
+
+    uint16_t type() const
+    {
+        return size() >= sizeof(uint16_t) ? ntohs(get<uint16_t>(0)) : 0;
+    }
+
+    uint16_t length() const
+    {
+        return size() >= header_size ? ntohs(get<uint16_t>(sizeof(uint16_t))) : 0;
+    }
+
+    mutable_buffer value() const
+    {
+        if (size() <= header_size)
+            return slice(size(), 0);
+
+        return slice(header_size, type() == list_stub ? size() - header_size : length());
+    }
+
+    void type(uint16_t t)
+    {
+        mutable_buffer::set<uint16_t>(0, htons(t));
+    }
+
+    void length(uint16_t l)
+    {
+        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(l));
+        truncate(header_size + l);
+    }
+
+    void value(const const_buffer& v)
+    {
+        length(v.size());
+        fill(header_size, v.size(), v.data());
+    }
+
+    section next() const
+    {
+        auto shift = data() - m_parent.data() + size();
+        return section(m_parent, m_parent.slice(shift, m_parent.size() - shift));
+    }
+
+    section head() const
+    {
+        return section(m_parent, m_parent);
+    }
+
+    section tail() const
+    {
+        if (type() == list_stub)
+            return *this;
+
+        return next().tail();
     }
 
 private:
 
-    mutable_buffer m_buffer;
+    mutable_buffer m_parent;
 };
 
-struct packet
+struct packet : public mutable_buffer
 {
-    struct section
-    {
-        static constexpr uint16_t header_size = sizeof(uint16_t) * 2;
-
-        enum kind
-        {
-            list_end,
-            link_req,
-            link_ack,
-            ping_req,
-            ping_ack,
-            push_req,
-            push_ack,
-            tear_req,
-            tear_ack
-        };
-
-        section(const mutable_buffer& buf) : section(buf, buf)
-        {
-        }
-
-        section(const mutable_buffer& par, const mutable_buffer& buf) : m_parent(par), m_buffer(buf)
-        {
-            if (type() != list_end)
-                m_buffer.truncate(header_size + length());
-        }
-
-        void set(uint16_t t)
-        {
-            m_buffer.set<uint16_t>(0, htons(t));
-            m_buffer.set<uint16_t>(sizeof(uint16_t), 0);
-            m_buffer.truncate(header_size);
-        }
-
-        void set(uint16_t t, const const_buffer& v)
-        {
-            m_buffer.set<uint16_t>(0, htons(t));
-            m_buffer.set<uint16_t>(sizeof(uint16_t), htons(v.size()));
-            m_buffer.fill(header_size, v.size(), v.data());
-            m_buffer.truncate(header_size + v.size());
-        }
-
-        uint16_t type() const
-        {
-            return m_buffer.size() >= sizeof(uint16_t) ? ntohs(m_buffer.get<uint16_t>(0)) : 0;
-        }
-
-        uint16_t length() const
-        {
-            return m_buffer.size() >= header_size ? ntohs(m_buffer.get<uint16_t>(sizeof(uint16_t))) : 0;
-        }
-
-        mutable_buffer value() const
-        {
-            if (m_buffer.size() <= header_size)
-                return m_buffer.slice(m_buffer.size(), 0);
-
-            return m_buffer.slice(header_size, type() == list_end ? m_buffer.size() - header_size : length());
-        }
-
-        void type(uint16_t t)
-        {
-            m_buffer.set<uint16_t>(0, htons(t));
-        }
-
-        void length(uint16_t l)
-        {
-            m_buffer.set<uint16_t>(sizeof(uint16_t), htons(l));
-            m_buffer.truncate(header_size + l);
-        }
-
-        void value(const const_buffer& v)
-        {
-            m_buffer.fill(header_size, v.size(), v.data());
-            m_buffer.truncate(header_size + v.size());
-        }
-
-        uint16_t size() const
-        {
-            return m_buffer.size();
-        }
-
-        section next() const
-        {
-            auto shift = m_buffer.data() - m_parent.data() + m_buffer.size();
-            return section(m_parent, m_parent.slice(shift, m_parent.size() - shift));
-        }
-
-        section head() const
-        {
-            return section(m_parent);
-        }
-
-        section tail() const
-        {
-            if (type() == list_end)
-                return *this;
-
-            return next().tail();
-        }
-
-        const_buffer buffer() const
-        {
-            return m_buffer;
-        }
-
-    private:
-
-        mutable_buffer m_parent;
-        mutable_buffer m_buffer;
-    };
-
     static constexpr uint16_t packet_sign = 0x0909;
     static constexpr uint16_t packet_version = 0x0100;
     static constexpr uint16_t header_size = 16;
     static constexpr uint16_t max_packet_size = 9992;
     static constexpr uint16_t max_payload_size = max_packet_size - header_size;
 
-    packet(const mutable_buffer& buf) : m_buffer(buf)
+    explicit packet(const mutable_buffer& buf) : mutable_buffer(buf)
     {
     }
 
     uint64_t salt() const
     {
-        return le64toh(m_buffer.get<uint64_t>(0));
+        return le64toh(get<uint64_t>(0));
     }
 
     uint16_t sign() const
     {
-        return ntohs(m_buffer.get<uint16_t>(sizeof(uint64_t)));
+        return ntohs(get<uint16_t>(sizeof(uint64_t)));
     }
 
     uint16_t version() const
     {
-        return ntohs(m_buffer.get<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t)));
+        return ntohs(get<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t)));
     }
 
     uint32_t pin() const
     {
-        return ntohl(m_buffer.get<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2));
+        return ntohl(get<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2));
     }
 
     bool valid() const
     {
-        return m_buffer.size() >= packet::header_size + packet::section::header_size 
+        return size() >= packet::header_size + section::header_size 
             && sign() == packet::packet_sign && version() == packet::packet_version;
     }
 
     void salt(uint64_t s)
     {
-        m_buffer.set<uint64_t>(0, htole64(s));
+        set<uint64_t>(0, htole64(s));
     }
 
     void sign(uint16_t s)
     {
-        m_buffer.set<uint16_t>(sizeof(uint64_t), htons(s));
+        set<uint16_t>(sizeof(uint64_t), htons(s));
     }
 
     void version(uint16_t v)
     {
-        m_buffer.set<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t), htons(v));
+        set<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t), htons(v));
     }
 
     void pin(uint32_t p)
     {
-        m_buffer.set<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2, htonl(p));
-    }
-
-    size_t size() const
-    {
-        return m_buffer.size();
+        set<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2, htonl(p));
     }
 
     section payload() const
     {
-        return section(m_buffer.slice(packet::header_size, m_buffer.size() - packet::header_size));
+        auto body = slice(packet::header_size, size() - packet::header_size);
+        return section(body, body);
     }
 
     section useless() const
     {
         section head = payload();
 
-        if (head.type() != section::list_end)
+        if (head.type() != section::list_stub)
             return head.tail();
 
         return head;
     }
 
-    const_buffer buffer() const
-    {
-        return m_buffer;
-    }
-
     void trim()
     {
         section tail = useless();
-        m_buffer.truncate(tail.buffer().data() - m_buffer.data());
+        truncate(tail.data() - data());
     }
 
     void make_opened(uint64_t secret)
@@ -328,8 +294,8 @@ private:
     {
         uint64_t inverter = make_inverter(secret, salt);
 
-        uint8_t* ptr = m_buffer.data() + sizeof(uint64_t);
-        uint8_t* end = m_buffer.data() + m_buffer.size();
+        uint8_t* ptr = data() + sizeof(uint64_t);
+        uint8_t* end = data() + size();
 
         while (ptr + sizeof(uint64_t) <= end)
         {
@@ -346,8 +312,6 @@ private:
             ++inv;
         }
     }
-
-    mutable_buffer m_buffer;
 };
 
 }}

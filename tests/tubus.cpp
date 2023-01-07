@@ -1,14 +1,10 @@
-#define BOOST_TEST_MODULE tubus_tests
-
-#include "buffer.h"
-#include "reactor.h"
-#include "tubus.h"
-#include <stdlib.h>
+#include "../buffer.h"
+#include "../reactor.h"
+#include "../tubus.h"
 #include <future>
 #include <functional>
-#include <boost/test/included/unit_test.hpp>
+#include <boost/test/unit_test.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
-
 
 #define ASYNC_IO(object, method, buffer, filter) \
 return std::async([obj = object, buffer]() \
@@ -393,8 +389,6 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
             });
         });
     });
-
-    std::cin.get();
 }
 
 BOOST_AUTO_TEST_CASE(udp_speed)
@@ -428,14 +422,17 @@ BOOST_AUTO_TEST_CASE(udp_speed)
     size_t sent = 0;
 
     novemus::mutable_buffer data(9992);
-    for (size_t i = 0; i < 25; ++i)
+    for (size_t j = 0; j < 1000; ++j)
     {
-        sent += left->send(data);
-    }
+        for (size_t i = 0; i < 10; ++i)
+        {
+            sent += left->send(data);
+        }
 
-    for (size_t i = 0; i < 25; ++i)
-    {
-        recv += right->receive(data);
+        for (size_t i = 0; i < 10; ++i)
+        {
+            recv += right->receive(data);
+        }
     }
 
     std::cout << boost::posix_time::microsec_clock::local_time() << ": sent " << sent << std::endl;

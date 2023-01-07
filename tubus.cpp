@@ -34,7 +34,7 @@ template<class var> var getenv(const std::string& name, const var& def)
 
 class transport : public novemus::tubus::channel, public std::enable_shared_from_this<transport>
 {
-    enum state { initial, waiting, linking, linked, tearing, finished };
+    enum state { initial, accepting, connecting, linked, shutting, tearing, finished };
 
     inline static boost::posix_time::time_duration ping_timeout()
     {
@@ -60,7 +60,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         return s_flight;
     }
 
-    struct connect_handler
+    struct connector
     {
         static uint16_t make_pin()
         {
@@ -69,7 +69,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             return pin > 0 ? pin : make_pin();
         };
 
-        connect_handler(boost::asio::io_context& io)
+        connector(boost::asio::io_context& io)
             : m_io(io)
             , m_status(state::initial)
             , m_local(0)
@@ -113,62 +113,73 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             m_pass = boost::posix_time::microsec_clock::universal_time();
 
-            packet::section seg = pack.payload();
-            while (seg.type() != packet::section::list_end)
+            section sect = pack.payload();
+            while (sect.type() != section::list_stub)
             {
-                switch (seg.type())
+                switch (sect.type())
                 {
-                    case packet::section::link_req:
+                    case section::link_init:
                     {
-                        m_remote = pack.pin();
-                        m_jobs.emplace(packet::section::link_ack, m_pass + resend_timeout());
+                        m_jobs.emplace(section::link_ackn, m_pass);
+
+                        if (m_status == state::accepting)
+                        {
+                            m_remote = pack.pin();
+                        }
                         break;
                     }
-                    case packet::section::link_ack:
+                    case section::link_ackn:
                     {
-                        m_status = state::linked;
-                        if (on_connect)
+                        if (m_status == state::connecting)
                         {
+                            m_status = state::linked;
+                            m_remote = pack.pin();
+
+                            m_jobs.erase(section::link_init);
+                            m_jobs.emplace(section::ping_shot, m_pass);
+
                             m_io.post(boost::bind(on_connect, boost::system::error_code()));
                             on_connect = 0;
                         }
-                        m_jobs.erase(packet::section::link_req);
-                        m_jobs.emplace(packet::section::ping_req, m_pass + ping_timeout()); 
                         break;
                     }
-                    case packet::section::tear_req:
+                    case section::tear_init:
                     {
-                        m_jobs.emplace(packet::section::tear_ack, m_pass + resend_timeout());
-                        break;
-                    }
-                    case packet::section::tear_ack:
-                    {
-                        m_remote = 0;
-                        m_status = state::finished;
-                        if (on_shutdown)
+                        m_jobs.emplace(section::tear_ackn, m_pass);
+
+                        if (m_status == state::linked)
                         {
+                            m_status = state::tearing;
+                        }
+                        break;
+                    }
+                    case section::tear_ackn:
+                    {
+                        if (m_status == state::shutting)
+                        {
+                            m_status = state::finished;
+                            m_jobs.erase(section::tear_init);
+
                             m_io.post(boost::bind(on_shutdown, boost::system::error_code()));
                             on_shutdown = 0;
                         }
-                        m_jobs.erase(0);
-                        m_jobs.erase(packet::section::tear_req);
                         break;
                     } 
-                    case packet::section::ping_req:
+                    case section::ping_shot:
                     {
-                        m_jobs.emplace(packet::section::ping_ack, m_pass + resend_timeout());
+                        m_jobs.emplace(section::ping_ackn, m_pass);
                         break;
                     }
-                    case packet::section::ping_ack:
+                    case section::ping_ackn:
                     {
-                        m_jobs.erase(packet::section::ping_req);
-                        m_jobs.emplace(packet::section::ping_req, m_pass + resend_timeout());
+                        m_jobs.erase(section::ping_shot);
+                        m_jobs.emplace(section::ping_shot, m_pass + ping_timeout());
                         break;
                     }
                     default: break;
                 }
 
-                seg = seg.next();
+                sect = sect.next();
             }
         }
 
@@ -180,40 +191,40 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             auto now = boost::posix_time::microsec_clock::universal_time();
 
-            packet::section sec = pack.useless();
-            while (sec.size() >= packet::section::header_size)
+            section sect = pack.useless();
+            while (sect.size() >= section::header_size)
             {
                 auto iter = std::find_if(m_jobs.begin(), m_jobs.end(), [now](const auto& item)
                 {
-                    return item.second < now; 
+                    return item.second < now;
                 });
 
                 if (iter == m_jobs.end())
                     return;
  
-                sec.set(iter->first);
-
-                if (iter->first == packet::section::link_ack)
+                sect.set(iter->first);
+                
+                if (iter->first == section::link_ackn)
                 {
                     m_jobs.erase(iter);
-                    m_status = state::linked;
 
-                    if (on_connect)
+                    if (m_status == state::accepting)
                     {
+                        m_status = state::linked;
                         m_io.post(boost::bind(on_connect, boost::system::error_code()));
                         on_connect = 0;
                     }
                 }
-                else if (iter->first == packet::section::tear_req)
-                {
-                    m_status = state::tearing;
-                }
-                else if (iter->first == packet::section::tear_ack || iter->first == packet::section::ping_ack)
+                else if (iter->first == section::ping_ackn || iter->first == section::tear_ackn)
                 {
                     m_jobs.erase(iter);
                 }
+                else
+                {
+                    iter->second = now + resend_timeout();
+                }
 
-                sec = sec.next();
+                sect = sect.next();
             }
         }
 
@@ -228,31 +239,77 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             return now > m_dead || m_pass + ping_timeout() < now - boost::posix_time::seconds(5);
         }
 
-        void shutdown(const callback& handle)
+        bool shutdown(const callback& handle)
         {
+            if (m_status != state::linked && m_status != state::tearing)
+            {
+                boost::system::error_code error = m_status == state::shutting ? 
+                    boost::asio::error::in_progress : boost::asio::error::broken_pipe;
+
+                m_io.post(boost::bind(handle, error));
+                return false;
+            }
+
+            if (m_status == state::tearing)
+            {
+                m_status = state::finished;
+                m_remote = 0;
+
+                m_io.post(boost::bind(handle, boost::system::error_code()));
+                return true;
+            }
+
             auto now = boost::posix_time::microsec_clock::universal_time();
             on_shutdown = handle;
-            m_jobs.emplace(packet::section::tear_req, now);
+
             m_dead = now + shutdown_timeout();
-            m_status = state::tearing;
+            m_status = state::shutting;
+
+            m_jobs.emplace(section::ping_shot, now);
+            return true;
         }
 
-        void connect(const callback& handle)
+        bool connect(const callback& handle)
         {
-            auto now = boost::posix_time::microsec_clock::universal_time();
-            m_local = make_pin();
-            on_connect = handle;
-            m_jobs.emplace(packet::section::link_req, now);
-            m_pass = now;
-            m_status = state::linking;
-        }
+            if (m_status != state::initial)
+            {
+                boost::system::error_code ec = m_status == state::connecting ? 
+                    boost::asio::error::in_progress : m_status == state::linked ?
+                        boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-        void accept(const callback& handle)
-        {
+                m_io.post(boost::bind(handle, ec));
+                return false;
+            }
+
             m_local = make_pin();
             on_connect = handle;
+
             m_pass = boost::posix_time::microsec_clock::universal_time();
-            m_status = state::waiting;
+            m_status = state::connecting;
+
+            m_jobs.emplace(section::link_init, m_pass);
+            return true;
+        }
+
+        bool accept(const callback& handle)
+        {
+            if (m_status != state::initial)
+            {
+                boost::system::error_code ec = m_status == state::accepting ? 
+                    boost::asio::error::in_progress : m_status == state::linked ?
+                        boost::asio::error::already_connected : boost::asio::error::broken_pipe;
+
+                m_io.post(boost::bind(handle, ec));
+                return false;
+            }
+
+            m_local = make_pin();
+            on_connect = handle;
+
+            m_pass = boost::posix_time::microsec_clock::universal_time();
+            m_status = state::accepting;
+
+            return true;
         }
 
         bool deffered() const
@@ -273,7 +330,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         callback on_shutdown;
     };
 
-    struct ostream_handler
+    struct ostreamer
     {
         struct storage
         {
@@ -304,7 +361,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             const_buffer pop(size_t max)
             {
-                static const const_buffer zero(0);
+                static const const_buffer zero("");
                 
                 if (m_data.empty())
                     return zero;
@@ -344,7 +401,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             uint64_t m_tail = 0;
         };
 
-        ostream_handler(boost::asio::io_context& io) : m_io(io)
+        ostreamer(boost::asio::io_context& io) : m_io(io)
         {
         }
 
@@ -352,19 +409,22 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             auto total = m_store.milestone();
 
-            auto hit = m_handles.begin();
-            while (hit != m_handles.end())
+            auto iter = m_senders.begin();
+            while (iter != m_senders.end())
             {
-                uint64_t from = hit->first - hit->second.second;
-                uint64_t to = hit->first;
+                uint64_t head = iter->first - iter->second.second;
+                size_t sent = 0;
 
-                size_t sent = total > from && total <= to ? total - from : 0;
-                m_io.post(boost::bind(hit->second.first, ec, sent));
+                if (total > head && total < iter->first)
+                    sent = total - head;
+                else if (total >= head) 
+                    sent = iter->second.second;
 
-                ++hit;
+                m_io.post(boost::bind(iter->second.first, ec, sent));
+                ++iter;
             }
 
-            m_handles.clear();
+            m_senders.clear();
             m_flight.clear();
             m_store.clear();
         }
@@ -373,20 +433,20 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             auto sect = pack.payload();
 
-            while (sect.type() != packet::section::list_end)
+            while (sect.type() != section::list_stub)
             {
-                if (sect.type() == packet::section::push_ack)
+                if (sect.type() == section::data_ackn)
                 {
                     snippet snip(sect.value());
 
-                    m_store.forget(snip.pos(), snip.length());
-                    m_flight.erase(snip.pos());
+                    m_store.forget(snip.offset(), snip.length());
+                    m_flight.erase(snip);
 
-                    auto iter = m_handles.begin();
-                    while (iter != m_handles.end() && iter->first <= m_store.milestone())
+                    auto iter = m_senders.begin();
+                    while (iter != m_senders.end() && iter->first <= m_store.milestone())
                     {
                         m_io.post(boost::bind(iter->second.first, boost::system::error_code(), iter->second.second));
-                        iter = m_handles.erase(iter);
+                        iter = m_senders.erase(iter);
                     }
                 }
 
@@ -399,34 +459,34 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             auto now = boost::posix_time::microsec_clock::universal_time();
 
             auto sect = pack.useless();
-            while (sect.size() > snippet::header_size + packet::section::header_size)
+            while (sect.size() > snippet::header_size + section::header_size)
             {
                 auto iter = std::find_if(m_flight.begin(), m_flight.end(), [&sect, &now](const auto& item)
                 {
-                    return item.second.second < now && item.second.first.size() <= sect.size() - packet::section::header_size;
+                    return item.second < now && item.first.size() <= sect.size() - section::header_size;
                 });
 
                 if (iter == m_flight.end())
                     break;
 
-                iter->second.second = now + resend_timeout();
+                iter->second = now + resend_timeout();
 
-                sect.set(packet::section::push_req, iter->second.first.buffer());
+                sect.set(iter->first);
                 sect = sect.next();
             }
 
             while (m_flight.size() < snippet_flight())
             {
-                if (m_store.empty() || sect.size() <= packet::section::header_size + snippet::header_size)
+                if (m_store.empty() || sect.size() <= section::header_size + snippet::header_size)
                     break;
 
-                snippet snip(sect.value());
+                snippet snip(sect.slice(section::header_size, sect.size() - section::header_size));
                 snip.set(m_store.head(), m_store.pop(snip.size() - snippet::header_size));
                 
-                sect.type(packet::section::push_req);
+                sect.type(section::data_move);
                 sect.length(snip.size());
 
-                m_flight.emplace(snip.pos(), std::make_pair(snip, now + resend_timeout()));
+                m_flight.emplace(snip, now + resend_timeout());
 
                 sect = sect.next();
             }
@@ -434,7 +494,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         void append(const const_buffer& buffer, const io_callback& handle)
         {
-            m_handles.emplace(m_store.push(buffer), std::make_pair(handle, buffer.size()));
+            m_senders.emplace(m_store.push(buffer), std::make_pair(handle, buffer.size()));
         }
 
         bool deffered() const
@@ -446,11 +506,11 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         boost::asio::io_context& m_io;
         storage m_store;
-        std::map<uint64_t, std::pair<snippet, boost::posix_time::ptime>> m_flight;
-        std::map<uint64_t, std::pair<io_callback, uint64_t>> m_handles;
+        std::map<snippet, boost::posix_time::ptime> m_flight;
+        std::map<uint64_t, std::pair<io_callback, uint64_t>> m_senders;
     };
 
-    struct istream_handler
+    struct istreamer
     {
         struct storage
         {
@@ -461,7 +521,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             const_buffer pop(size_t max)
             {
-                static const const_buffer zero(0);
+                static const const_buffer zero("");
 
                 if (!available())
                     return zero;
@@ -495,7 +555,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             std::map<uint64_t, const_buffer> m_pool;
         };
 
-        istream_handler(boost::asio::io_context& io)
+        istreamer(boost::asio::io_context& io)
             : m_io(io)
         {}
 
@@ -517,12 +577,12 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             auto sect = pack.payload();
 
-            while (sect.type() != packet::section::list_end)
+            while (sect.type() != section::list_stub)
             {
-                if (sect.type() == packet::section::push_req)
+                if (sect.type() == section::data_move)
                 {
                     snippet snip(sect.value());
-                    m_store.emplace(snip.pos(), snip.data());
+                    m_store.emplace(snip.offset(), snip.scrap());
                     m_acks.emplace_back(snip.header());
                 }
 
@@ -537,9 +597,9 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             auto sect = pack.useless();
 
             auto iter = m_acks.begin();
-            while (iter != m_acks.end() && sect.size() >= packet::section::header_size)
+            while (iter != m_acks.end() && sect.size() >= section::header_size)
             {
-                sect.set(packet::section::push_ack, iter->buffer());
+                sect.set(*iter);
 
                 iter = m_acks.erase(iter);
                 sect = sect.next();
@@ -584,7 +644,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         boost::asio::io_context& m_io;
         storage m_store;
-        std::list<snippet::info> m_acks;
+        std::list<handle> m_acks;
         std::list<std::pair<mutable_buffer, io_callback>> m_handles;
     };
 
@@ -594,9 +654,9 @@ protected:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        m_coupler.error(ec);
-        m_istream.error(ec);
-        m_ostream.error(ec);
+        m_connector.error(ec);
+        m_istreamer.error(ec);
+        m_ostreamer.error(ec);
     }
 
     void feed(const mutable_buffer& buffer)
@@ -611,20 +671,20 @@ protected:
         if (m_mask)
             pack.make_opened(m_mask);
 
-        if (m_coupler.valid(pack))
+        if (m_connector.valid(pack))
         {
-            m_coupler.parse(pack);
+            m_connector.parse(pack);
             
-            if (m_coupler.status() == state::linked)
+            if (m_connector.status() == state::linked)
             {
-                m_istream.parse(pack);
-                m_ostream.parse(pack);
+                m_istreamer.parse(pack);
+                m_ostreamer.parse(pack);
             }
 
-            if (m_coupler.status() == state::tearing)
+            if (m_connector.status() == state::tearing || m_connector.status() == state::shutting)
             {
-                m_istream.error(boost::asio::error::connection_aborted);
-                m_ostream.error(boost::asio::error::connection_aborted);
+                m_istreamer.error(boost::asio::error::connection_aborted);
+                m_ostreamer.error(boost::asio::error::connection_aborted);
             }
         }
     }
@@ -633,26 +693,26 @@ protected:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_coupler.status() == state::finished)
+        if (m_connector.status() == state::initial || m_connector.status() == state::finished)
             return;
 
-        if (m_coupler.status() == state::linked && m_coupler.pingless())
+        if (m_connector.pingless())
         {
-            m_coupler.error(boost::asio::error::broken_pipe);
-            m_istream.error(boost::asio::error::broken_pipe);
-            m_ostream.error(boost::asio::error::broken_pipe);
+            m_connector.error(boost::asio::error::broken_pipe);
+            m_istreamer.error(boost::asio::error::broken_pipe);
+            m_ostreamer.error(boost::asio::error::broken_pipe);
             return;
         }
 
         std::weak_ptr<transport> weak = shared_from_this();
         packet pack(m_store->obtain(packet::max_packet_size));
 
-        m_coupler.imbue(pack);
-        
-        if (m_coupler.status() == state::linked)
+        m_connector.imbue(pack);
+
+        if (m_connector.status() == state::linked)
         {
-            m_istream.imbue(pack);
-            m_ostream.imbue(pack);
+            m_istreamer.imbue(pack);
+            m_ostreamer.imbue(pack);
         }
 
         pack.trim();
@@ -667,13 +727,13 @@ protected:
 
             if (err)
             {
-                m_coupler.error(err);
-                m_istream.error(err);
-                m_ostream.error(err);
+                m_connector.error(err);
+                m_istreamer.error(err);
+                m_ostreamer.error(err);
                 return;
             }
 
-            m_socket.async_send(pack.buffer(), [weak, pack](const boost::system::error_code& error, size_t size)
+            m_socket.async_send(pack, [weak, pack](const boost::system::error_code& error, size_t size)
             {
                 auto ptr = weak.lock();
                 if (ptr)
@@ -687,10 +747,10 @@ protected:
                 }
             });
         }
-        else if (m_coupler.status() == state::finished)
+        else if (m_connector.status() == state::finished)
         {
-            m_istream.error(boost::asio::error::connection_aborted);
-            m_ostream.error(boost::asio::error::connection_aborted);
+            m_istreamer.error(boost::asio::error::connection_aborted);
+            m_ostreamer.error(boost::asio::error::connection_aborted);
         }
         else
         {
@@ -713,7 +773,7 @@ protected:
                 }
             });
 
-            auto timeout = m_coupler.deffered() || m_istream.deffered() || m_ostream.deffered() ? resend_timeout() : ping_timeout();
+            auto timeout = m_connector.deffered() || m_istreamer.deffered() || m_ostreamer.deffered() ? resend_timeout() : ping_timeout();
             
             m_timer.expires_from_now(timeout);
             m_timer.async_wait([weak](const boost::system::error_code& error)
@@ -736,9 +796,9 @@ public:
         : m_reactor(novemus::reactor::shared_reactor())
         , m_socket(m_reactor->io(), bind.protocol())
         , m_timer(m_reactor->io())
-        , m_coupler(m_reactor->io())
-        , m_istream(m_reactor->io())
-        , m_ostream(m_reactor->io())
+        , m_connector(m_reactor->io())
+        , m_istreamer(m_reactor->io())
+        , m_ostreamer(m_reactor->io())
         , m_store(novemus::buffer_factory::shared_factory())
         , m_mask(mask)
     {
@@ -756,86 +816,77 @@ public:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_coupler.status() != state::linked)
+        if (m_connector.shutdown(handle))
         {
-            boost::system::error_code error = m_coupler.status() == state::tearing ? 
-                boost::asio::error::in_progress : boost::asio::error::broken_pipe;
-
-            m_reactor->io().post(boost::bind(handle, error));
-            return;
+            boost::system::error_code err;
+            m_timer.cancel(err);
         }
-
-        m_coupler.shutdown(handle);
-        boost::system::error_code err;
-        m_timer.cancel(err);
     }
 
     void connect(const callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_coupler.status() != state::initial)
+        if (m_connector.connect(handle))
         {
-            boost::system::error_code ec = m_coupler.status() == state::linking ? 
-                boost::asio::error::in_progress : m_coupler.status() == state::linked ?
-                    boost::asio::error::already_connected : boost::asio::error::broken_pipe;
-
-            m_reactor->io().post(boost::bind(handle, ec));
-            return;
+            std::weak_ptr<transport> weak = shared_from_this();
+            m_reactor->io().post([weak]()
+            {
+                auto ptr = weak.lock();
+                if (ptr)
+                    ptr->schedule();
+            });
         }
-
-        m_coupler.connect(handle);
-        schedule();
     }
 
     void accept(const callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_coupler.status() != state::initial)
+        if (m_connector.accept(handle))
         {
-            boost::system::error_code ec = m_coupler.status() == state::waiting ? 
-                boost::asio::error::in_progress : m_coupler.status() == state::linked ?
-                    boost::asio::error::already_connected : boost::asio::error::broken_pipe;
-
-            m_reactor->io().post(boost::bind(handle, ec));
-            return;
+            std::weak_ptr<transport> weak = shared_from_this();
+            m_reactor->io().post([weak]()
+            {
+                auto ptr = weak.lock();
+                if (ptr)
+                    ptr->schedule();
+            });
         }
-
-        m_coupler.accept(handle);
-        schedule();
     }
 
     void read(const mutable_buffer& buffer, const io_callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_coupler.status() != state::linked)
+        auto status = m_connector.status();
+        if (status != state::linked)
         {
-            boost::system::error_code ec = m_coupler.status() == state::tearing || m_coupler.status() == state::finished ? 
-                boost::asio::error::broken_pipe : boost::asio::error::not_connected;
+            boost::system::error_code ec = status == state::initial ? boost::asio::error::not_connected : 
+                status == state::connecting || state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
 
             m_reactor->io().post(boost::bind(handle, ec, 0));
             return;
         }
 
-        m_istream.append(buffer, handle);
+        m_istreamer.append(buffer, handle);
     }
 
     void write(const const_buffer& buffer, const io_callback& handle) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
-                
-        if (m_coupler.status() != state::linked)
+
+        auto status = m_connector.status();
+        if (status != state::linked)
         {
-            boost::system::error_code ec = m_coupler.status() == state::tearing || m_coupler.status() == state::finished ? 
-                boost::asio::error::broken_pipe : boost::asio::error::not_connected;
+            boost::system::error_code ec = status == state::initial ? boost::asio::error::not_connected : 
+                status == state::connecting || state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
 
             m_reactor->io().post(boost::bind(handle, ec, 0));
             return;
         }
 
-        m_ostream.append(buffer, handle);
+        m_ostreamer.append(buffer, handle);
         boost::system::error_code err;
         m_timer.cancel(err);
     }
@@ -845,9 +896,9 @@ private:
     std::shared_ptr<reactor> m_reactor;
     boost::asio::ip::udp::socket m_socket;
     boost::asio::deadline_timer m_timer;
-    connect_handler m_coupler;
-    istream_handler m_istream;
-    ostream_handler m_ostream;
+    connector m_connector;
+    istreamer m_istreamer;
+    ostreamer m_ostreamer;
     std::shared_ptr<buffer_factory> m_store;
     uint64_t m_mask;
     std::mutex m_mutex;
