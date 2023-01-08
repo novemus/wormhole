@@ -5,77 +5,54 @@
 
 namespace novemus { namespace tubus {
 
-struct handle : public mutable_buffer
+struct handle
 {
-    static constexpr uint16_t handle_size = sizeof(uint64_t) + sizeof(uint16_t);
+    static constexpr uint16_t size = sizeof(uint64_t) + sizeof(uint16_t);
 
-    explicit handle(const mutable_buffer& buf) : mutable_buffer(buf)
+    explicit handle(const mutable_buffer& buf)
+        : offset(le64toh(buf.get<uint64_t>(0)))
+        , length(ntohs(buf.get<uint16_t>(sizeof(uint64_t))))
     {
     }
 
-    void set(uint64_t pos, uint16_t len)
+    handle(uint64_t o, uint16_t l)
+        : offset(o)
+        , length(l)
     {
-        mutable_buffer::set<uint64_t>(0, htole64(pos));
-        mutable_buffer::set<uint16_t>(sizeof(uint64_t), htons(len));
-        truncate(handle_size);
-    }
-
-    uint64_t offset() const
-    {
-        return size() >= sizeof(uint64_t) ? le64toh(get<uint64_t>(0)) : 0;
-    }
-
-    uint16_t length() const
-    {
-        return size() >= handle_size ? ntohs(get<uint16_t>(sizeof(uint64_t))) : 0;
     }
 
     bool operator<(const handle& other) const
     {
-        return offset() < other.offset();
+        return offset < other.offset;
     }
+
+    uint64_t offset;
+    uint16_t length;
 };
 
-struct snippet : public mutable_buffer
+struct snippet
 {
-    static constexpr uint16_t header_size = sizeof(uint64_t) + sizeof(uint16_t);
+    static constexpr uint16_t header_size = sizeof(uint64_t);
 
-    explicit snippet(const mutable_buffer& buf) : mutable_buffer(buf)
+    explicit snippet(const mutable_buffer& buf)
+        : offset(le64toh(buf.get<uint64_t>(0)))
+        , piece(buf.slice(sizeof(uint64_t), buf.size() - sizeof(uint64_t)))
     {
     }
 
-    void set(uint64_t pos, const const_buffer& scrap)
+    snippet(uint64_t o, const const_buffer& p)
+        : offset(o)
+        , piece(p)
     {
-        mutable_buffer::set<uint64_t>(0, htole64(pos));
-        mutable_buffer::set<uint16_t>(sizeof(uint64_t), htons(scrap.size()));
-        mutable_buffer::fill(header_size, scrap.size(), scrap.data());
-        truncate(header_size + scrap.size());
-    }
-
-    uint64_t offset() const
-    {
-        return size() >= sizeof(uint64_t) ? le64toh(get<uint64_t>(0)) : 0;
-    }
-
-    uint16_t length() const
-    {
-        return size() >= header_size ? ntohs(get<uint16_t>(sizeof(uint64_t))) : 0;
-    }
-
-    handle header() const
-    {
-        return handle(slice(0, header_size));
-    }
-
-    mutable_buffer scrap() const
-    {
-        return slice(header_size, size() - header_size);
     }
 
     bool operator<(const snippet& other) const
     {
-        return offset() < other.offset();
+        return offset < other.offset;
     }
+
+    uint64_t offset;
+    const_buffer piece;
 };
 
 struct section : public mutable_buffer
@@ -97,7 +74,7 @@ struct section : public mutable_buffer
 
     section(const mutable_buffer& par, const mutable_buffer& buf) : mutable_buffer(buf), m_parent(par)
     {
-        if (type() != list_stub)
+        if (type() > list_stub && type() <= tear_ackn)
             truncate(header_size + length());
     }
 
@@ -111,17 +88,19 @@ struct section : public mutable_buffer
     void set(const handle& h)
     {
         mutable_buffer::set<uint16_t>(0, htons(kind::data_ackn));
-        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(handle::handle_size));
-        fill(header_size, h.size(), h.data());
-        truncate(header_size + handle::handle_size);
+        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(handle::size));
+        mutable_buffer::set<uint64_t>(header_size, htole64(h.offset));
+        mutable_buffer::set<uint16_t>(header_size + sizeof(uint64_t), htons(h.length));
+        truncate(header_size + handle::size);
     }
 
     void set(const snippet& s)
     {
         mutable_buffer::set<uint16_t>(0, htons(kind::data_move));
-        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(s.size()));
-        fill(header_size, s.size(), s.data());
-        truncate(header_size + s.size());
+        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(s.piece.size() + snippet::header_size));
+        mutable_buffer::set<uint64_t>(header_size, htole64(s.offset));
+        fill(header_size + snippet::header_size, s.piece.size(), s.piece.data());
+        truncate(header_size + snippet::header_size + s.piece.size());
     }
 
     uint16_t type() const
@@ -140,23 +119,6 @@ struct section : public mutable_buffer
             return slice(size(), 0);
 
         return slice(header_size, type() == list_stub ? size() - header_size : length());
-    }
-
-    void type(uint16_t t)
-    {
-        mutable_buffer::set<uint16_t>(0, htons(t));
-    }
-
-    void length(uint16_t l)
-    {
-        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(l));
-        truncate(header_size + l);
-    }
-
-    void value(const const_buffer& v)
-    {
-        length(v.size());
-        fill(header_size, v.size(), v.data());
     }
 
     section next() const

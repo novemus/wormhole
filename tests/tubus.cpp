@@ -78,7 +78,22 @@ public:
 
     std::future<void> async_write(const novemus::const_buffer& buffer)
     {
-        ASYNC_IO(m_channel, write, buffer, error);
+        return std::async([obj = m_channel, buffer]()
+        {
+            size_t total = 0;
+            do {
+                std::promise<size_t> promise;
+                std::future<size_t> future = promise.get_future();
+                obj->write(buffer.slice(total, buffer.size() - total), [&promise](const boost::system::error_code& error, size_t size)
+                {
+                    if (error)
+                        promise.set_exception(std::make_exception_ptr(boost::system::system_error(error)));
+                    else
+                        promise.set_value(size);
+                });
+                total += future.get();
+            } while (total < buffer.size());
+        });
     }
 
     std::future<void> async_read(const novemus::mutable_buffer& buffer)
@@ -92,8 +107,8 @@ BOOST_AUTO_TEST_CASE(tubus_core)
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    tubus_channel left(le, re, 123456789);
-    tubus_channel right(re, le, 123456789);
+    tubus_channel left(le, re, 0);
+    tubus_channel right(re, le, 0);
 
     uint8_t data[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
