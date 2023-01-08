@@ -293,6 +293,8 @@ public:
             ++iter;
         }
 
+        compress();
+
         iter = m_cache.emplace(size, mutable_buffer(size));
         return iter->second;
     }
