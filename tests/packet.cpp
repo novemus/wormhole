@@ -1,24 +1,6 @@
 #include "../packet.h"
 #include <boost/test/unit_test.hpp>
 
-BOOST_AUTO_TEST_CASE(handle)
-{
-    novemus::tubus::handle handle(0, 0);
-
-    BOOST_CHECK_EQUAL(handle.offset, 0);
-    BOOST_CHECK_EQUAL(handle.length, 0);
-    BOOST_CHECK_EQUAL(novemus::tubus::handle::size, sizeof(uint64_t) + sizeof(uint16_t));
-
-    novemus::mutable_buffer mb(1024);
-    mb.set<uint64_t>(0, htole64(123));
-    mb.set<uint16_t>(sizeof(uint64_t), htons(456));
-
-    handle = novemus::tubus::handle(mb);
-
-    BOOST_CHECK_EQUAL(handle.offset, 123);
-    BOOST_CHECK_EQUAL(handle.length, 456);
-}
-
 BOOST_AUTO_TEST_CASE(snippet)
 {
     novemus::mutable_buffer mb(1024);
@@ -26,15 +8,15 @@ BOOST_AUTO_TEST_CASE(snippet)
 
     novemus::tubus::snippet snip(mb);
 
-    BOOST_CHECK_EQUAL(snip.offset, 0);
-    BOOST_CHECK_EQUAL(snip.piece.size(), 1024 - novemus::tubus::snippet::header_size);
+    BOOST_CHECK_EQUAL(snip.handle(), 0);
+    BOOST_CHECK_EQUAL(snip.size(), 1024);
 
     novemus::const_buffer cb("hello, tubus");
-    snip = novemus::tubus::snippet(1024, cb);
+    snip.set(1024, cb);
 
-    BOOST_CHECK_EQUAL(snip.offset, 1024);
-    BOOST_CHECK_EQUAL(snip.piece.size(), cb.size());
-    BOOST_CHECK_EQUAL(std::memcmp(cb.data(), snip.piece.data(), cb.size()), 0);
+    BOOST_CHECK_EQUAL(snip.handle(), 1024);
+    BOOST_CHECK_EQUAL(snip.size(), cb.size() + novemus::tubus::snippet::handle_size);
+    BOOST_CHECK_EQUAL(std::memcmp(cb.data(), snip.fragment().data(), cb.size()), 0);
 }
 
 BOOST_AUTO_TEST_CASE(section)
@@ -66,23 +48,27 @@ BOOST_AUTO_TEST_CASE(section)
     BOOST_CHECK_EQUAL(more.size(), 1024 - novemus::tubus::section::header_size);
     BOOST_CHECK_EQUAL(vb.size(), 1024 - novemus::tubus::section::header_size * 2);
 
-    novemus::tubus::snippet snip(3, novemus::const_buffer("hello, tubus"));
-    more.set(snip);
+    novemus::tubus::snippet snip(more.value());
+    snip.set(3, novemus::const_buffer("hello, tubus"));
+    more.type(novemus::tubus::section::data_move);
+    more.length(snip.size());
 
     BOOST_CHECK_EQUAL(more.type(), novemus::tubus::section::data_move);
-    BOOST_CHECK_EQUAL(more.length(), snip.piece.size() + novemus::tubus::snippet::header_size);
-    BOOST_CHECK_EQUAL(more.size(), snip.piece.size() + novemus::tubus::snippet::header_size + novemus::tubus::section::header_size);
+    BOOST_CHECK_EQUAL(more.length(), snip.size());
+    BOOST_CHECK_EQUAL(more.size(), snip.size() + novemus::tubus::section::header_size);
 
     more = more.next();
 
-    novemus::tubus::handle handle(123, 456);
-    more.set(handle);
+    novemus::tubus::handle hand(more.value());
+    hand.value(123);
+
+    more.type(novemus::tubus::section::data_ackn);
+    more.length(novemus::tubus::handle::handle_size);
 
     BOOST_CHECK_EQUAL(more.type(), novemus::tubus::section::data_ackn);
-    BOOST_CHECK_EQUAL(more.length(), novemus::tubus::handle::size);
-    BOOST_CHECK_EQUAL(more.size(), novemus::tubus::section::header_size + novemus::tubus::handle::size);
-    BOOST_CHECK_EQUAL(handle.offset, 123);
-    BOOST_CHECK_EQUAL(handle.length, 456);
+    BOOST_CHECK_EQUAL(more.length(), sizeof(uint64_t));
+    BOOST_CHECK_EQUAL(more.size(), sizeof(uint64_t) + novemus::tubus::section::header_size);
+    BOOST_CHECK_EQUAL(more.value().get<uint64_t>(0), 123);
 
     more = more.next();
     more.set(novemus::tubus::section::link_ackn);
@@ -153,13 +139,15 @@ BOOST_AUTO_TEST_CASE(packet)
     BOOST_CHECK_EQUAL(sect.size(), pack.size() - novemus::tubus::packet::header_size);
 
     novemus::const_buffer cb("hello, tubus");
-    novemus::tubus::snippet snip(7, cb);
-    sect.set(snip);
+    novemus::tubus::snippet snip(sect.value());
+    snip.set(7, cb);
+    sect.type(novemus::tubus::section::data_move);
+    sect.length(snip.size());
 
     BOOST_CHECK_EQUAL(sect.type(), novemus::tubus::section::data_move);
-    BOOST_CHECK_EQUAL(sect.length(), snip.piece.size() + novemus::tubus::snippet::header_size);
-    BOOST_CHECK_EQUAL(sect.size(), snip.piece.size() + novemus::tubus::snippet::header_size + novemus::tubus::section::header_size);
-    BOOST_CHECK_EQUAL(std::memcmp(cb.data(), snip.piece.data(), cb.size()), 0);
+    BOOST_CHECK_EQUAL(sect.length(), snip.size());
+    BOOST_CHECK_EQUAL(sect.size(), snip.size() + novemus::tubus::section::header_size);
+    BOOST_CHECK_EQUAL(std::memcmp(cb.data(), snip.fragment().data(), cb.size()), 0);
 
     auto tail = sect.next();
     BOOST_CHECK_EQUAL(tail.type(), novemus::tubus::section::list_stub);
@@ -180,7 +168,7 @@ BOOST_AUTO_TEST_CASE(packet)
     BOOST_CHECK_EQUAL(pack.size(), sect.size() + novemus::tubus::packet::header_size);
 
     BOOST_CHECK_EQUAL(sect.type(), novemus::tubus::section::data_move);
-    BOOST_CHECK_EQUAL(sect.length(), snip.piece.size() + novemus::tubus::snippet::header_size);
-    BOOST_CHECK_EQUAL(sect.size(), snip.piece.size() + novemus::tubus::snippet::header_size + novemus::tubus::section::header_size);
-    BOOST_CHECK_EQUAL(std::memcmp(cb.data(), snip.piece.data(), cb.size()), 0);
+    BOOST_CHECK_EQUAL(sect.length(), snip.size());
+    BOOST_CHECK_EQUAL(sect.size(), snip.size() + novemus::tubus::section::header_size);
+    BOOST_CHECK_EQUAL(std::memcmp(cb.data(), snip.fragment().data(), cb.size()), 0);
 }

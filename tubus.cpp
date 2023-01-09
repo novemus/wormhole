@@ -136,7 +136,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                             m_remote = pack.pin();
 
                             m_jobs.erase(section::link_init);
-                            m_jobs.emplace(section::ping_shot, m_pass);
+                            m_jobs.emplace(section::ping_shot, m_pass + ping_timeout());
 
                             m_io.post(boost::bind(on_connect, boost::system::error_code()));
                             on_connect = 0;
@@ -323,7 +323,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         state m_status;
         uint32_t m_local;
         uint32_t m_remote;
-        std::map<uint16_t, boost::posix_time::ptime> m_jobs;
+        std::map<section::kind, boost::posix_time::ptime> m_jobs;
         boost::posix_time::ptime m_pass;
         boost::posix_time::ptime m_dead;
         callback on_connect;
@@ -332,98 +332,25 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
     struct ostreamer
     {
-        struct streambuf
-        {
-            bool available() const
-            {
-                return m_data.empty();
-            }
-
-            uint64_t cursor() const
-            {
-                return m_read.empty() ? m_head : m_read.begin()->offset;
-            }
-
-            bool passed(const snippet& snip)
-            {
-                return snip.offset + snip.piece.size() >= m_read.empty() ? m_head : m_read.begin()->offset;
-            }
-
-            snippet consume(size_t max)
-            {
-                static const const_buffer zero("");
-                
-                if (m_data.empty())
-                    return snippet(m_tail, zero);
-
-                auto iter = m_data.begin();
-                auto buffer = iter->pop_front(std::min(max, iter->size()));
-                
-                if (iter->size() == 0)
-                    m_data.erase(iter);
-
-                auto offset = m_head;
-
-                m_read.emplace(offset, buffer);
-                m_head += buffer.size();
-
-                return snippet(offset, buffer);
-            }
-
-            void commit(const snippet& snip)
-            {
-                m_read.erase(snip);
-            }
-
-            snippet push(const const_buffer& buffer)
-            {
-                m_data.push_back(buffer);
-                
-                auto offset = m_tail;
-                m_tail += buffer.size();
-
-                return snippet(offset, buffer);
-            }
-
-            void clear()
-            {
-                m_data.clear();
-                m_read.clear();
-                m_head = 0;
-                m_tail = 0;
-            }
-
-        private:
-
-            std::list<const_buffer> m_data;
-            std::set<snippet> m_read;
-            uint64_t m_head = 0;
-            uint64_t m_tail = 0;
-        };
-
         ostreamer(boost::asio::io_context& io) : m_io(io)
         {
         }
 
         void error(const boost::system::error_code& ec)
         {
-            auto total = m_buffer.cursor();
+            auto total = m_flight.empty() ? m_buffer.head() : m_flight.begin()->first;
 
             auto iter = m_callers.begin();
             while (iter != m_callers.end())
             {
-                auto size = iter->first.piece.size();
-                auto from = iter->first.offset;
-                auto to = from + size;
-
                 size_t sent = 0;
 
-                if (total > from && total < to)
-                    sent = to - total;
-                else if (total >= to) 
-                    sent = size;
+                if (total > iter->first - iter->second.second && total < iter->first)
+                    sent = iter->first - total;
+                else if (total >= iter->first) 
+                    sent = iter->second.second;
 
-                m_io.post(boost::bind(iter->second, ec, sent));
+                m_io.post(boost::bind(iter->second.first, ec, sent));
                 ++iter;
             }
 
@@ -440,15 +367,14 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             {
                 if (sect.type() == section::data_ackn)
                 {
-                    snippet snip(sect.value());
+                    handle hand(sect.value());
+                    m_flight.erase(hand.value());
 
-                    m_buffer.commit(snip);
-                    m_flight.erase(snip);
-
+                    auto total = m_flight.empty() ? m_buffer.head() : m_flight.begin()->first;
                     auto iter = m_callers.begin();
-                    while (iter != m_callers.end() && m_buffer.passed(iter->first))
+                    while (iter != m_callers.end() && iter->first <= total)
                     {
-                        m_io.post(boost::bind(iter->second, boost::system::error_code(), iter->first.piece.size()));
+                        m_io.post(boost::bind(iter->second.first, boost::system::error_code(), iter->second.second));
                         iter = m_callers.erase(iter);
                     }
                 }
@@ -462,38 +388,50 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             auto now = boost::posix_time::microsec_clock::universal_time();
 
             auto sect = pack.useless();
-            while (sect.size() > snippet::header_size + section::header_size)
+            while (sect.size() > snippet::handle_size + section::header_size)
             {
                 auto iter = std::find_if(m_flight.begin(), m_flight.end(), [&sect, &now](const auto& item)
                 {
-                    return item.second < now && item.first.piece.size() + snippet::header_size <= sect.size() - section::header_size;
+                    return item.second.second < now && item.second.first.size() + snippet::handle_size <= sect.size() - section::header_size;
                 });
 
                 if (iter == m_flight.end())
                     break;
 
-                iter->second = now + resend_timeout();
+                iter->second.second = now + resend_timeout();
 
-                sect.set(iter->first);
+                snippet snip(sect.value());
+                snip.set(iter->first, iter->second.first);
+
+                sect.type(section::data_move);
+                sect.length(snip.size());
+
                 sect = sect.next();
             }
 
             while (m_flight.size() < snippet_flight() && m_buffer.available())
             {
-                if (sect.size() <= section::header_size + snippet::header_size)
+                if (sect.size() <= section::header_size + snippet::handle_size)
                     break;
 
-                snippet snip = m_buffer.consume(sect.size() - section::header_size - snippet::header_size);
-                sect.set(snip);
+                snippet snip(sect.value());
 
-                m_flight.emplace(snip, now + resend_timeout());
+                auto handle = m_buffer.head();
+                auto fragment = m_buffer.pop(sect.size() - section::header_size - snippet::handle_size);
+                
+                snip.set(handle, fragment);
+
+                sect.type(section::data_move);
+                sect.length(snip.size());
+
+                m_flight.emplace(handle, std::make_pair(fragment, now + resend_timeout()));
                 sect = sect.next();
             }
         }
 
         void append(const const_buffer& buffer, const io_callback& caller)
         {
-            m_callers.emplace(m_buffer.push(buffer), caller);
+            m_callers.emplace(m_buffer.push(buffer), std::make_pair(caller, buffer.size()));
         }
 
         bool deffered() const
@@ -503,57 +441,74 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
     private:
 
-        boost::asio::io_context& m_io;
-        streambuf m_buffer;
-        std::map<snippet, boost::posix_time::ptime> m_flight;
-        std::map<snippet, io_callback> m_callers;
-    };
-
-    struct istreamer
-    {
         struct streambuf
         {
-            bool available() const
-            {
-                return !m_pool.empty() && m_cursor == m_pool.begin()->offset;
-            }
-
-            const_buffer consume(size_t max)
+            const_buffer pop(uint64_t max)
             {
                 static const const_buffer zero("");
 
-                if (!available())
+                if (m_data.empty())
                     return zero;
 
-                auto piece = m_pool.begin()->piece;
-                m_pool.erase(m_pool.begin());
+                auto top = m_data.front();
+                if (top.size() <= max)
+                {
+                    m_head += top.size();
+                    m_data.pop_front();
+                    return top;
+                }
 
-                auto buffer = piece.pop_front(std::min(max, piece.size()));
-                m_cursor += buffer.size();
-
-                if (piece.size() > 0)
-                    m_pool.emplace(m_cursor, piece);
-
-                return buffer;
+                m_head += max;
+                return m_data.front().pop_front(max);
             }
 
-            void commit(const snippet& snip)
+            uint64_t push(const const_buffer& buf)
             {
-                m_pool.emplace(snip.offset, snip.piece);
+                m_tail += buf.size();
+                m_data.push_back(buf);
+                return m_tail;
             }
 
             void clear()
             {
-                m_cursor = 0;
-                m_pool.clear();    
+                m_data.clear();
+                m_head = 0;
+                m_tail = 0;
+            }
+
+            uint64_t head() const
+            {
+                return m_head;
+            }
+
+            uint64_t tail() const
+            {
+                return m_tail;
+            }
+
+            bool available() const
+            {
+                return !m_data.empty();
             }
 
         private:
 
-            uint64_t m_cursor = 0;
-            std::set<snippet> m_pool;
+            uint64_t m_head = 0;
+            uint64_t m_tail = 0;
+            std::list<const_buffer> m_data;
         };
 
+        typedef std::pair<io_callback, size_t> handler;
+        typedef std::pair<const_buffer, boost::posix_time::ptime> fragment;
+
+        boost::asio::io_context& m_io;
+        streambuf m_buffer;
+        std::map<uint64_t, fragment> m_flight;
+        std::map<uint64_t, handler> m_callers;
+    };
+
+    struct istreamer
+    {
         istreamer(boost::asio::io_context& io)
             : m_io(io)
         {}
@@ -581,8 +536,9 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 if (sect.type() == section::data_move)
                 {
                     snippet snip(sect.value());
-                    m_buffer.commit(snip);
-                    m_acks.emplace_back(handle(snip.offset, snip.piece.size()));
+                    
+                    m_buffer.map(snip.handle(), snip.fragment());
+                    m_acks.emplace_back(snip.handle());
                 }
 
                 sect = sect.next();
@@ -596,9 +552,13 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             auto sect = pack.useless();
 
             auto iter = m_acks.begin();
-            while (iter != m_acks.end() && sect.size() >= section::header_size + handle::size)
+            while (iter != m_acks.end() && sect.size() >= section::header_size + handle::handle_size)
             {
-                sect.set(*iter);
+                handle hand(sect.value());
+                hand.value(*iter);
+
+                sect.type(section::data_ackn);
+                sect.length(handle::handle_size);
 
                 iter = m_acks.erase(iter);
                 sect = sect.next();
@@ -630,7 +590,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
                 while (m_buffer.available() && iter->first.size() > 0)
                 {
-                    auto buffer = m_buffer.consume(iter->first.size());
+                    auto buffer = m_buffer.pop(iter->first.size());
                     iter->first.fill(0, buffer.size(), buffer.data());
                     iter->first.crop(buffer.size());
                     read += buffer.size();
@@ -641,10 +601,60 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             }
         }
 
+        struct streambuf
+        {
+            const_buffer pop(uint64_t max)
+            {
+                static const const_buffer zero("");
+
+                if (!available())
+                    return zero;
+
+                auto top = m_data.begin()->second;
+                m_data.erase(m_data.begin());
+
+                if (top.size() <= max)
+                {
+                    m_head += top.size();
+                    return top;
+                }
+
+                m_head += max;
+
+                auto ret = top.pop_front(max);
+                m_data.emplace(m_head, top);
+
+                return ret;
+            }
+
+            void map(uint64_t handle, const const_buffer& buffer)
+            {
+                m_data.emplace(handle, buffer);
+            }
+
+            void clear()
+            {
+                m_data.clear();
+                m_head = 0;
+            }
+
+            bool available() const
+            {
+                return m_data.size() > 0 && m_data.begin()->first == m_head;
+            }
+
+        private:
+
+            uint64_t m_head = 0;
+            std::map<uint64_t, const_buffer> m_data;
+        };
+
+        typedef std::pair<mutable_buffer, io_callback> handler;
+        
         boost::asio::io_context& m_io;
         streambuf m_buffer;
-        std::list<handle> m_acks;
-        std::list<std::pair<mutable_buffer, io_callback>> m_callers;
+        std::list<uint64_t> m_acks;
+        std::list<handler> m_callers;
     };
 
 protected:
@@ -768,12 +778,12 @@ protected:
                     {
                         ptr->feed(buffer.slice(0, size));
                     }
-                    ptr->schedule();
+                    ptr->wakeup();
                 }
             });
 
             auto timeout = m_connector.deffered() || m_istreamer.deffered() || m_ostreamer.deffered() ? resend_timeout() : ping_timeout();
-            
+
             m_timer.expires_from_now(timeout);
             m_timer.async_wait([weak](const boost::system::error_code& error)
             {
@@ -787,6 +797,14 @@ protected:
                 }
             });
         }
+    }
+
+    void wakeup()
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        boost::system::error_code err;
+        m_timer.cancel(err);
     }
 
 public:

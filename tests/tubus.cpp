@@ -78,22 +78,7 @@ public:
 
     std::future<void> async_write(const novemus::const_buffer& buffer)
     {
-        return std::async([obj = m_channel, buffer]()
-        {
-            size_t total = 0;
-            do {
-                std::promise<size_t> promise;
-                std::future<size_t> future = promise.get_future();
-                obj->write(buffer.slice(total, buffer.size() - total), [&promise](const boost::system::error_code& error, size_t size)
-                {
-                    if (error)
-                        promise.set_exception(std::make_exception_ptr(boost::system::system_error(error)));
-                    else
-                        promise.set_value(size);
-                });
-                total += future.get();
-            } while (total < buffer.size());
-        });
+        ASYNC_IO(m_channel, write, buffer, error);
     }
 
     std::future<void> async_read(const novemus::mutable_buffer& buffer)
@@ -123,6 +108,9 @@ BOOST_AUTO_TEST_CASE(tubus_core)
 
     BOOST_REQUIRE_NO_THROW(la.get());
     BOOST_REQUIRE_NO_THROW(rc.get());
+
+    BOOST_REQUIRE_NO_THROW(left.async_write(lb.slice(0, 1)).get());
+    BOOST_REQUIRE_NO_THROW(right.async_write(rb.slice(0, 1)).get());
 
     for(size_t i = 0; i < sizeof(data); ++i)
     {
