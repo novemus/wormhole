@@ -296,6 +296,7 @@ public:
         compress();
 
         iter = m_cache.emplace(size, mutable_buffer(size));
+        std::memset(iter->second.data(), 0, iter->second.size());
         return iter->second;
     }
 

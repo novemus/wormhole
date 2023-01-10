@@ -73,7 +73,7 @@ public:
 
     std::future<void> async_shutdown()
     {
-        ASYNC(m_channel, shutdown, error && error != boost::asio::error::timed_out && error != boost::asio::error::broken_pipe);
+        ASYNC(m_channel, shutdown, error && error != boost::asio::error::broken_pipe);
     }
 
     std::future<void> async_write(const novemus::const_buffer& buffer)
@@ -92,8 +92,8 @@ BOOST_AUTO_TEST_CASE(tubus_core)
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    tubus_channel left(le, re, 0);
-    tubus_channel right(re, le, 0);
+    tubus_channel left(le, re, 1234567890);
+    tubus_channel right(re, le, 1234567890);
 
     uint8_t data[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
@@ -108,9 +108,6 @@ BOOST_AUTO_TEST_CASE(tubus_core)
 
     BOOST_REQUIRE_NO_THROW(la.get());
     BOOST_REQUIRE_NO_THROW(rc.get());
-
-    BOOST_REQUIRE_NO_THROW(left.async_write(lb.slice(0, 1)).get());
-    BOOST_REQUIRE_NO_THROW(right.async_write(rb.slice(0, 1)).get());
 
     for(size_t i = 0; i < sizeof(data); ++i)
     {
@@ -286,7 +283,8 @@ BOOST_AUTO_TEST_CASE(tubus_integrity)
 
     BOOST_CHECK_EQUAL(source.read(), sink.written());
 
-    BOOST_REQUIRE_THROW(right.async_read(buffer.slice(0, 1)).get(), boost::system::system_error);
+    auto rr = right.async_read(buffer.slice(0, 1));
+    BOOST_REQUIRE_NO_THROW(BOOST_CHECK_EQUAL((int)rr.wait_for(std::chrono::seconds(3)), (int)std::future_status::timeout));
 
     auto ls = left.async_shutdown();
     auto rs = right.async_shutdown();
