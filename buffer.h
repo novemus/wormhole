@@ -5,6 +5,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <vector>
+#include <iostream>
 #include <type_traits>
 #include <boost/asio.hpp>
 #include <boost/shared_array.hpp>
@@ -21,6 +22,12 @@ struct const_buffer
         : const_buffer(shared_array(new uint8_t[str.size()]), 0, str.size())
     {
         std::memcpy(m_array.get(), str.data(), str.size());
+    }
+
+    const_buffer(shared_array array, size_t size) noexcept(true)
+        : m_buffer(array.get(), size)
+        , m_array(array)
+    {
     }
 
     const_buffer(shared_array array, size_t offset, size_t size) noexcept(true)
@@ -131,6 +138,12 @@ struct mutable_buffer
         : mutable_buffer(shared_array(new uint8_t[str.size()]), 0, str.size())
     {
         std::memcpy(m_array.get(), str.data(), str.size());
+    }
+
+    mutable_buffer(shared_array array, size_t size) noexcept(true)
+        : m_buffer(array.get(), size)
+        , m_array(array)
+    {
     }
 
     mutable_buffer(shared_array array, size_t offset, size_t size) noexcept(true)
@@ -246,31 +259,23 @@ private:
     boost::shared_array<uint8_t> m_array;
 };
 
-class buffer_factory
+class buffer_factory : public std::enable_shared_from_this<buffer_factory>
 {
-    void compress()
+    void cache(uint8_t* ptr, size_t size)
     {
-        static const time_t cleanup_period = 30;
+        static const size_t max_cache_size = 64;
 
-        time_t now = std::time(0);
-        if (m_clean < now)
-        {
-            auto it = m_cache.begin();
-            while (it != m_cache.end())
-            {
-                if (it->second.unique())
-                    it = m_cache.erase(it);
-                else
-                    ++it;
-            }
+        std::unique_lock<std::mutex> lock(m_mutex);
 
-            m_clean = now + cleanup_period;
-        }
+        if (m_cache.size() == max_cache_size)
+            m_cache.erase(m_cache.begin());
+
+        m_cache.emplace(size, boost::shared_array<uint8_t>(ptr));
     }
 
 public:
 
-    buffer_factory() : m_clean(std::time(0))
+    buffer_factory()
     {
     }
 
@@ -279,33 +284,29 @@ public:
         std::unique_lock<std::mutex> lock(m_mutex);
 
         auto iter = m_cache.lower_bound(size);
-        while (iter != m_cache.end())
+        if (iter == m_cache.end())
         {
-            if (iter->second.unique())
+            auto array = boost::shared_array<uint8_t>(new uint8_t[size], [size, self = shared_from_this()](uint8_t* ptr)
             {
-                mutable_buffer buf = iter->second;
-                std::memset(buf.data(), 0, buf.size());
+                self->cache(ptr, size);
+            });
 
-                compress();
-
-                return buf;
-            }
-            ++iter;
+            std::memset(array.get(), 0, size);
+            return mutable_buffer(array, size);
         }
 
-        compress();
+        auto array = iter->second;
+        m_cache.erase(iter);
 
-        iter = m_cache.emplace(size, mutable_buffer(size));
-        std::memset(iter->second.data(), 0, iter->second.size());
-        return iter->second;
+        std::memset(array.get(), 0, size);
+        return mutable_buffer(array, size);
     }
 
     static std::shared_ptr<buffer_factory> shared_factory() noexcept(true);
 
 private:
 
-    time_t m_clean;
-    std::multimap<size_t, mutable_buffer> m_cache;
+    std::multimap<size_t, boost::shared_array<uint8_t>> m_cache;
     std::mutex m_mutex;
 };
 
