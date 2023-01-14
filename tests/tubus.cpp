@@ -331,70 +331,35 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    auto left = novemus::tubus::create_channel(le, re, 0);
-    auto right = novemus::tubus::create_channel(re, le, 0);
+    tubus_channel left(le, re, 0);
+    tubus_channel right(re, le, 0);
 
-    right->accept([=](const boost::system::error_code& error)
+    auto la = left.async_accept();
+    auto rc = right.async_connect();
+
+    BOOST_REQUIRE_NO_THROW(la.get());
+    BOOST_REQUIRE_NO_THROW(rc.get());
+
+    novemus::mutable_buffer wb(1024 * 100);
+    novemus::mutable_buffer rb(1024 * 100);
+
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": begin" << std::endl;
+
+    for (size_t i = 0; i < 1024; ++i)
     {
-        if (error)
-        {
-            std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
-            return;
-        }
+        auto lw = left.async_write(wb);
+        auto rr = right.async_read(rb);
+        BOOST_REQUIRE_NO_THROW(lw.get());
+        BOOST_REQUIRE_NO_THROW(rr.get());
+    }
 
-        std::cout << boost::posix_time::microsec_clock::local_time() << ": right accept" << std::endl;
-        right->read(novemus::mutable_buffer(1024 * 1024 * 100), [=](const boost::system::error_code& error, size_t size)
-        {
-            if (error)
-            {
-                std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
-                return;
-            }
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": end" << std::endl;
 
-            std::cout << boost::posix_time::microsec_clock::local_time() << ": right read" << std::endl;
-            right->read(novemus::mutable_buffer(1024 * 1024 * 100), [=](const boost::system::error_code& error, size_t size)
-            {
-                if (error)
-                {
-                    std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
-                    return;
-                }
+    auto ls = left.async_shutdown();
+    auto rs = right.async_shutdown();
 
-                std::cout << boost::posix_time::microsec_clock::local_time() << ": right shutdown" << std::endl;
-            });
-        });
-    });
-
-    left->connect([=](const boost::system::error_code& error)
-    {
-        if (error)
-        {
-            std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
-            return;
-        }
-
-        std::cout << boost::posix_time::microsec_clock::local_time() << ": left connect" << std::endl;
-        left->write(novemus::mutable_buffer(1024 * 1024 * 100), [=](const boost::system::error_code& error, size_t size)
-        {
-            if (error)
-            {
-                std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
-                return;
-            }
-
-            std::cout << boost::posix_time::microsec_clock::local_time() << ": left write" << std::endl;
-            left->write(novemus::mutable_buffer(1024 * 1024 * 100), [=](const boost::system::error_code& error, size_t size)
-            {
-                if (error)
-                {
-                    std::cout << boost::posix_time::microsec_clock::local_time() << ": " << error.message() << std::endl;
-                    return;
-                }
-
-                std::cout << boost::posix_time::microsec_clock::local_time() << ": left shutdown" << std::endl;
-            });
-        });
-    });
+    BOOST_REQUIRE_NO_THROW(ls.get());
+    BOOST_REQUIRE_NO_THROW(rs.get());
 }
 
 BOOST_AUTO_TEST_CASE(udp_speed)
@@ -422,13 +387,13 @@ BOOST_AUTO_TEST_CASE(udp_speed)
     left->bind(le);
     left->connect(re);
     
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": start" << std::endl;
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": begin" << std::endl;
 
     size_t recv = 0;
     size_t sent = 0;
 
     novemus::mutable_buffer data(9992);
-    for (size_t j = 0; j < 1000; ++j)
+    for (size_t j = 0; j < 1050; ++j)
     {
         for (size_t i = 0; i < 10; ++i)
         {
