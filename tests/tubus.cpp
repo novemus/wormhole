@@ -306,17 +306,17 @@ BOOST_AUTO_TEST_CASE(tubus_connectivity)
 
     tubus_channel right(re, le, 123456789);
     auto rc = right.async_connect();
-    BOOST_CHECK_EQUAL((int)rc.wait_for(std::chrono::seconds(3)), (int)std::future_status::timeout);
+    BOOST_REQUIRE_THROW(rc.get(), boost::system::system_error);
     BOOST_REQUIRE_NO_THROW(right.async_shutdown().get());
     
     BOOST_REQUIRE_NO_THROW(left.reset());
     BOOST_REQUIRE_NO_THROW(right.reset());
 
-    auto la = left.async_accept();
-    auto rc = right.async_connect();
+    auto a = left.async_accept();
+    auto c = right.async_connect();
 
-    BOOST_REQUIRE_NO_THROW(la.get());
-    BOOST_REQUIRE_NO_THROW(rc.get());
+    BOOST_REQUIRE_NO_THROW(a.get());
+    BOOST_REQUIRE_NO_THROW(c.get());
 
     BOOST_REQUIRE_NO_THROW(left.async_shutdown().get());
 

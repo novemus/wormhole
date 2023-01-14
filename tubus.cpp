@@ -93,6 +93,8 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         void error(const boost::system::error_code& err)
         {
+            std::cout << "[" << this << "] connector::error: " << err.message() << std::endl;
+
             if (on_connect)
             {
                 m_io.post(boost::bind(on_connect, err));
@@ -258,6 +260,8 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 boost::system::error_code error = m_status == state::shutting ? 
                     boost::asio::error::in_progress : boost::asio::error::broken_pipe;
 
+                std::cout << "[" << this << "] connector::shutdown: " << error.message() << std::endl;
+
                 m_io.post(boost::bind(caller, error));
                 return false;
             }
@@ -285,11 +289,13 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             if (m_status != state::initial)
             {
-                boost::system::error_code ec = m_status == state::connecting ? 
+                boost::system::error_code error = m_status == state::connecting ? 
                     boost::asio::error::in_progress : m_status == state::linked ?
                         boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-                m_io.post(boost::bind(caller, ec));
+                std::cout << "[" << this << "] connector::connect: " << error.message() << std::endl;
+
+                m_io.post(boost::bind(caller, error));
                 return false;
             }
 
@@ -307,11 +313,13 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             if (m_status != state::initial)
             {
-                boost::system::error_code ec = m_status == state::accepting ? 
+                boost::system::error_code error = m_status == state::accepting ? 
                     boost::asio::error::in_progress : m_status == state::linked ?
                         boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-                m_io.post(boost::bind(caller, ec));
+                std::cout << "[" << this << "] connector::accept: " << error.message() << std::endl;
+
+                m_io.post(boost::bind(caller, error));
                 return false;
             }
 
@@ -348,8 +356,10 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
         }
 
-        void error(const boost::system::error_code& ec)
+        void error(const boost::system::error_code& err)
         {
+            std::cout << "[" << this << "] ostreamer::error: " << err.message() << std::endl;
+
             auto total = m_flight.empty() ? m_buffer.head() : m_flight.begin()->first;
 
             auto iter = m_callers.begin();
@@ -362,7 +372,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 else if (total >= iter->first) 
                     sent = iter->second.second;
 
-                m_io.post(boost::bind(iter->second.first, ec, sent));
+                m_io.post(boost::bind(iter->second.first, err, sent));
                 ++iter;
             }
 
@@ -491,7 +501,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
                 if (m_tail - m_head >= send_buffer_size())
                 {
-                    std::cout << "send buffer is full" << std::endl;
+                    std::cout << "[" << this << "] ostreamer::streambuf::push: buffer is full" << std::endl;
                 }
 
                 return m_tail;
@@ -541,12 +551,14 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             : m_io(io)
         {}
 
-        void error(const boost::system::error_code& ec)
+        void error(const boost::system::error_code& err)
         {
+            std::cout << "[" << this << "] istreamer::error: " << err.message() << std::endl;
+
             auto iter = m_callers.begin();
             while (iter != m_callers.end())
             {
-                m_io.post(boost::bind(iter->second, ec, 0));
+                m_io.post(boost::bind(iter->second, err, 0));
                 ++iter;
             }
 
@@ -664,12 +676,15 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
                 if (handle >= m_head)
                 {
-                    m_data.emplace(handle, buffer);
-                    m_size += buffer.size();
-
-                    if (m_size >= receive_buffer_size())
+                    auto res = m_data.emplace(handle, buffer);
+                    if (res.second)
                     {
-                        std::cout << "receive buffer is full" << std::endl;
+                        m_size += buffer.size();
+
+                        if (m_size >= receive_buffer_size())
+                        {
+                            std::cout << "[" << this << "] istreamer::streambuf::map: buffer is full" << std::endl;
+                        }
                     }
                 }
 
@@ -747,13 +762,10 @@ protected:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (!m_socket.is_open())
-            return;
-
         if (m_connector.status() == state::initial || m_connector.status() == state::finished)
             return;
 
-        if (m_connector.pingless())
+        if (!m_socket.is_open() || m_connector.pingless())
         {
             m_connector.error(boost::asio::error::broken_pipe);
             m_istreamer.error(boost::asio::error::broken_pipe);
@@ -875,11 +887,20 @@ public:
         
         m_socket.bind(bind);
         m_socket.connect(peer);
+
+        std::cout << "[" << this << "] transport::transport" << std::endl;
+    }
+
+    ~transport()
+    {
+        std::cout << "[" << this << "] transport::~transport" << std::endl;
     }
 
     void close() noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
+
+        std::cout << "[" << this << "] transport::close " << std::endl;
 
         boost::system::error_code err;
         m_socket.close(err);
@@ -889,6 +910,8 @@ public:
     void shutdown(const callback& handler) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
+
+        std::cout << "[" << this << "] transport::shutdown" << std::endl;
 
         std::weak_ptr<transport> weak = shared_from_this();
         bool pended = m_connector.shutdown([weak, handler](const boost::system::error_code& error)
@@ -911,6 +934,8 @@ public:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
+        std::cout << "[" << this << "] transport::connect" << std::endl;
+
         if (m_connector.connect(handler))
         {
             std::weak_ptr<transport> weak = shared_from_this();
@@ -926,6 +951,8 @@ public:
     void accept(const callback& handler) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
+
+        std::cout << "[" << this << "] transport::accept" << std::endl;
 
         if (m_connector.accept(handler))
         {
@@ -949,6 +976,8 @@ public:
             boost::system::error_code ec = status == state::initial ? boost::asio::error::not_connected : 
                 status == state::connecting || state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
 
+            std::cout << "[" << this << "] transport::read: " << ec.message() << std::endl;
+
             m_reactor->io().post(boost::bind(handler, ec, 0));
             return;
         }
@@ -965,6 +994,8 @@ public:
         {
             boost::system::error_code ec = status == state::initial ? boost::asio::error::not_connected : 
                 status == state::connecting || state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
+
+            std::cout << "[" << this << "] transport::write: " << ec.message() << std::endl;
 
             m_reactor->io().post(boost::bind(handler, ec, 0));
             return;
