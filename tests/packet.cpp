@@ -1,6 +1,22 @@
 #include "../packet.h"
 #include <boost/test/unit_test.hpp>
 
+BOOST_AUTO_TEST_CASE(number)
+{
+    novemus::mutable_buffer mb(64);
+    std::memset(mb.data(), 0, mb.size());
+
+    novemus::tubus::number num(mb);
+
+    BOOST_CHECK_EQUAL(num.value(), 0);
+    BOOST_CHECK_EQUAL(num.size(), novemus::tubus::number::number_size);
+
+    num.value(1234567890);
+
+    BOOST_CHECK_EQUAL(num.value(), 1234567890);
+    BOOST_CHECK_EQUAL(num.size(), novemus::tubus::number::number_size);
+}
+
 BOOST_AUTO_TEST_CASE(snippet)
 {
     novemus::mutable_buffer mb(1024);
@@ -50,22 +66,21 @@ BOOST_AUTO_TEST_CASE(section)
 
     novemus::tubus::snippet snip(more.value());
     snip.set(3, novemus::const_buffer("hello, tubus"));
-    more.type(novemus::tubus::section::data_move);
+    more.type(novemus::tubus::section::move_data);
     more.length(snip.size());
 
-    BOOST_CHECK_EQUAL(more.type(), novemus::tubus::section::data_move);
+    BOOST_CHECK_EQUAL(more.type(), novemus::tubus::section::move_data);
     BOOST_CHECK_EQUAL(more.length(), snip.size());
     BOOST_CHECK_EQUAL(more.size(), snip.size() + novemus::tubus::section::header_size);
 
     more = more.next();
 
-    novemus::tubus::handle hand(more.value());
+    novemus::tubus::number hand(novemus::mutable_buffer(8));
     hand.value(123);
 
-    more.type(novemus::tubus::section::data_ackn);
-    more.length(novemus::tubus::handle::handle_size);
+    more.set(novemus::tubus::section::move_ackn, hand);
 
-    BOOST_CHECK_EQUAL(more.type(), novemus::tubus::section::data_ackn);
+    BOOST_CHECK_EQUAL(more.type(), novemus::tubus::section::move_ackn);
     BOOST_CHECK_EQUAL(more.length(), sizeof(uint64_t));
     BOOST_CHECK_EQUAL(more.size(), sizeof(uint64_t) + novemus::tubus::section::header_size);
     BOOST_CHECK_EQUAL(more.value().get<uint64_t>(0), 123);
@@ -99,11 +114,11 @@ BOOST_AUTO_TEST_CASE(section)
     BOOST_CHECK_EQUAL(head.type(), novemus::tubus::section::link_init);
 
     auto second = head.next();
-    BOOST_CHECK_EQUAL(second.type(), novemus::tubus::section::data_move);
+    BOOST_CHECK_EQUAL(second.type(), novemus::tubus::section::move_data);
     BOOST_CHECK_EQUAL(head.data() + head.size(), second.data());
 
     auto third = second.next();
-    BOOST_CHECK_EQUAL(third.type(), novemus::tubus::section::data_ackn);
+    BOOST_CHECK_EQUAL(third.type(), novemus::tubus::section::move_ackn);
     BOOST_CHECK_EQUAL(second.data() + second.size(), third.data());
 
     auto fourth = third.next();
@@ -141,10 +156,10 @@ BOOST_AUTO_TEST_CASE(packet)
     novemus::const_buffer cb("hello, tubus");
     novemus::tubus::snippet snip(sect.value());
     snip.set(7, cb);
-    sect.type(novemus::tubus::section::data_move);
+    sect.type(novemus::tubus::section::move_data);
     sect.length(snip.size());
 
-    BOOST_CHECK_EQUAL(sect.type(), novemus::tubus::section::data_move);
+    BOOST_CHECK_EQUAL(sect.type(), novemus::tubus::section::move_data);
     BOOST_CHECK_EQUAL(sect.length(), snip.size());
     BOOST_CHECK_EQUAL(sect.size(), snip.size() + novemus::tubus::section::header_size);
     BOOST_CHECK_EQUAL(std::memcmp(cb.data(), snip.fragment().data(), cb.size()), 0);
@@ -167,7 +182,7 @@ BOOST_AUTO_TEST_CASE(packet)
     BOOST_CHECK_EQUAL(pack.pin(), 456);
     BOOST_CHECK_EQUAL(pack.size(), sect.size() + novemus::tubus::packet::header_size);
 
-    BOOST_CHECK_EQUAL(sect.type(), novemus::tubus::section::data_move);
+    BOOST_CHECK_EQUAL(sect.type(), novemus::tubus::section::move_data);
     BOOST_CHECK_EQUAL(sect.length(), snip.size());
     BOOST_CHECK_EQUAL(sect.size(), snip.size() + novemus::tubus::section::header_size);
     BOOST_CHECK_EQUAL(std::memcmp(cb.data(), snip.fragment().data(), cb.size()), 0);

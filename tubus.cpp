@@ -387,9 +387,9 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             while (sect.type() != section::list_stub)
             {
-                if (sect.type() == section::data_ackn)
+                if (sect.type() == section::move_ackn)
                 {
-                    handle hand(sect.value());
+                    number hand(sect.value());
                     m_flight.erase(hand.value());
 
                     auto total = m_flight.empty() ? m_buffer.head() : m_flight.begin()->first;
@@ -425,7 +425,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 snippet snip(sect.value());
                 snip.set(iter->first, iter->second.first);
 
-                sect.type(section::data_move);
+                sect.type(section::move_data);
                 sect.length(snip.size());
 
                 sect = sect.next();
@@ -439,11 +439,11 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 snippet snip(sect.value());
 
                 auto handle = m_buffer.head();
-                auto fragment = m_buffer.pop(sect.size() - section::header_size - snippet::handle_size);
+                auto fragment = m_buffer.pull(sect.size() - section::header_size - snippet::handle_size);
                 
                 snip.set(handle, fragment);
 
-                sect.type(section::data_move);
+                sect.type(section::move_data);
                 sect.length(snip.size());
 
                 m_flight.emplace(handle, std::make_pair(fragment, now + resend_timeout()));
@@ -453,7 +453,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         void append(const const_buffer& buffer, const io_callback& caller)
         {
-            auto tail = m_buffer.push(buffer);
+            auto tail = m_buffer.add(buffer);
             if (tail == 0)
             {
                 m_io.post(boost::bind(caller, boost::asio::error::no_buffer_space, 0));
@@ -472,7 +472,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         struct streambuf
         {
-            const_buffer pop(uint64_t max)
+            const_buffer pull(uint64_t max)
             {
                 static const const_buffer zero("");
 
@@ -491,7 +491,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 return m_data.front().pop_front(max);
             }
 
-            uint64_t push(const const_buffer& buf)
+            uint64_t add(const const_buffer& buf)
             {
                 if (m_tail - m_head >= send_buffer_size())
                     return 0;
@@ -573,7 +573,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             while (sect.type() != section::list_stub)
             {
-                if (sect.type() == section::data_move)
+                if (sect.type() == section::move_data)
                 {
                     snippet snip(sect.value());
                     
@@ -592,13 +592,13 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             auto sect = pack.useless();
 
             auto iter = m_acks.begin();
-            while (iter != m_acks.end() && sect.size() >= section::header_size + handle::handle_size)
+            while (iter != m_acks.end() && sect.size() >= section::header_size + number::number_size)
             {
-                handle hand(sect.value());
+                number hand(sect.value());
                 hand.value(*iter);
 
-                sect.type(section::data_ackn);
-                sect.length(handle::handle_size);
+                sect.type(section::move_ackn);
+                sect.length(number::number_size);
 
                 iter = m_acks.erase(iter);
                 sect = sect.next();
@@ -630,7 +630,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
                 while (m_buffer.available() && iter->first.size() > 0)
                 {
-                    auto buffer = m_buffer.pop(iter->first.size());
+                    auto buffer = m_buffer.pull(iter->first.size());
                     iter->first.fill(0, buffer.size(), buffer.data());
                     iter->first.crop(buffer.size());
                     read += buffer.size();
@@ -643,7 +643,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         struct streambuf
         {
-            const_buffer pop(uint64_t max)
+            const_buffer pull(uint64_t max)
             {
                 static const const_buffer zero("");
 
@@ -688,6 +688,16 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 }
 
                 return true;
+            }
+            
+            uint64_t head() const
+            {
+                return m_head;
+            }
+
+            uint64_t tail() const
+            {
+                return m_tail;
             }
 
             void clear()

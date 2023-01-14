@@ -5,12 +5,13 @@
 
 namespace novemus { namespace tubus {
 
-struct handle : public mutable_buffer
+struct number : public mutable_buffer
 {
-    static constexpr uint16_t handle_size = sizeof(uint64_t);
+    static constexpr uint16_t number_size = sizeof(uint64_t);
     
-    explicit handle(const mutable_buffer& buf) : mutable_buffer(buf)
+    explicit number(const mutable_buffer& buf) : mutable_buffer(buf)
     {
+        truncate(number_size);
     }
 
     uint64_t value() const
@@ -18,10 +19,9 @@ struct handle : public mutable_buffer
         return le64toh(get<uint64_t>(0));
     }
 
-    void value(uint64_t handle)
+    void value(uint64_t number)
     {
-        mutable_buffer::set<uint64_t>(0, htole64(handle));
-        truncate(handle_size);
+        mutable_buffer::set<uint64_t>(0, htole64(number));
     }
 };
 
@@ -59,9 +59,11 @@ struct section : public mutable_buffer
     {
         list_stub = 0,
         link_init, link_ackn,
+        tear_init, tear_ackn,
         ping_shot, ping_ackn,
-        data_move, data_ackn,
-        tear_init, tear_ackn
+        buff_size, buff_ackn,
+        move_data, move_ackn,
+        pull_data, pull_ackn
     };
 
     section(const mutable_buffer& buf) : section(buf, buf)
@@ -74,27 +76,19 @@ struct section : public mutable_buffer
             truncate(header_size + length());
     }
 
-    void set(kind t)
+    void set(uint16_t t)
     {
         mutable_buffer::set<uint16_t>(0, htons(t));
         mutable_buffer::set<uint16_t>(sizeof(uint16_t), 0);
         truncate(header_size);
     }
 
-    void set(const handle& v)
+    void set(uint16_t t, const mutable_buffer& v)
     {
-        mutable_buffer::set<uint16_t>(0, htons(kind::data_ackn));
-        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(handle::handle_size));
-        mutable_buffer::set<uint64_t>(header_size, htole64(v.value()));
-        truncate(header_size + handle::handle_size);
-    }
-
-    void set(const snippet& v)
-    {
-        mutable_buffer::set<uint16_t>(0, htons(kind::data_move));
-        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(v.size() + snippet::handle_size));
-        fill(header_size + snippet::handle_size, v.size(), v.data());
-        truncate(header_size + snippet::handle_size + v.size());
+        mutable_buffer::set<uint16_t>(0, htons(t));
+        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(v.size()));
+        fill(header_size, v.size(), v.data());
+        truncate(header_size + v.size());
     }
 
     uint16_t type() const
