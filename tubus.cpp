@@ -60,6 +60,18 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         return s_flight;
     }
 
+    inline static size_t receive_buffer_size()
+    {
+        static size_t s_flight(getenv("TUBUS_RECEIVE_BUFFER_SIZE", 5 * 1024 * 1024));
+        return s_flight;
+    }
+
+    inline static size_t send_buffer_size()
+    {
+        static size_t s_flight(getenv("TUBUS_SEND_BUFFER_SIZE", 5 * 1024 * 1024));
+        return s_flight;
+    }
+
     struct connector
     {
         static uint16_t make_pin()
@@ -431,7 +443,14 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         void append(const const_buffer& buffer, const io_callback& caller)
         {
-            m_callers.emplace(m_buffer.push(buffer), std::make_pair(caller, buffer.size()));
+            auto tail = m_buffer.push(buffer);
+            if (tail == 0)
+            {
+                m_io.post(boost::bind(caller, boost::asio::error::no_buffer_space, 0));
+                return;
+            }
+
+            m_callers.emplace(tail, std::make_pair(caller, buffer.size()));
         }
 
         bool deffered() const
@@ -464,8 +483,17 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             uint64_t push(const const_buffer& buf)
             {
+                if (m_tail - m_head >= send_buffer_size())
+                    return 0;
+
                 m_tail += buf.size();
                 m_data.push_back(buf);
+
+                if (m_tail - m_head >= send_buffer_size())
+                {
+                    std::cout << "send buffer is full" << std::endl;
+                }
+
                 return m_tail;
             }
 
@@ -537,8 +565,8 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 {
                     snippet snip(sect.value());
                     
-                    m_buffer.map(snip.handle(), snip.fragment());
-                    m_acks.emplace_back(snip.handle());
+                    if (m_buffer.map(snip.handle(), snip.fragment()))
+                        m_acks.emplace_back(snip.handle());
                 }
 
                 sect = sect.next();
@@ -616,10 +644,12 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 if (top.size() <= max)
                 {
                     m_head += top.size();
+                    m_size -= top.size();
                     return top;
                 }
 
                 m_head += max;
+                m_size -= max;
 
                 auto ret = top.pop_front(max);
                 m_data.emplace(m_head, top);
@@ -627,9 +657,23 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 return ret;
             }
 
-            void map(uint64_t handle, const const_buffer& buffer)
+            bool map(uint64_t handle, const const_buffer& buffer)
             {
-                m_data.emplace(handle, buffer);
+                if (m_size >= receive_buffer_size())
+                    return false;
+
+                if (handle >= m_head)
+                {
+                    m_data.emplace(handle, buffer);
+                    m_size += buffer.size();
+
+                    if (m_size >= receive_buffer_size())
+                    {
+                        std::cout << "receive buffer is full" << std::endl;
+                    }
+                }
+
+                return true;
             }
 
             void clear()
@@ -646,6 +690,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         private:
 
             uint64_t m_head = 0;
+            uint64_t m_size = 0;
             std::map<uint64_t, const_buffer> m_data;
         };
 
@@ -701,6 +746,9 @@ protected:
     void schedule()
     {
         std::unique_lock<std::mutex> lock(m_mutex);
+
+        if (!m_socket.is_open())
+            return;
 
         if (m_connector.status() == state::initial || m_connector.status() == state::finished)
             return;
@@ -829,11 +877,30 @@ public:
         m_socket.connect(peer);
     }
 
+    void close() noexcept(true) override
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        boost::system::error_code err;
+        m_socket.close(err);
+        m_timer.cancel(err);
+    }
+
     void shutdown(const callback& handler) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_connector.shutdown(handler))
+        std::weak_ptr<transport> weak = shared_from_this();
+        bool pended = m_connector.shutdown([weak, handler](const boost::system::error_code& error)
+        {
+            auto ptr = weak.lock();
+            if (ptr)
+                ptr->close();
+
+            handler(error);
+        });
+
+        if (pended)
         {
             boost::system::error_code err;
             m_timer.cancel(err);

@@ -14,6 +14,7 @@ struct channel
     typedef std::function<void(const boost::system::error_code&, size_t)> io_callback;
 
     virtual ~channel() {}
+    virtual void close() noexcept(true) = 0;
     virtual void connect(const callback& handle) noexcept(true) = 0;
     virtual void accept(const callback& handle) noexcept(true) = 0;
     virtual void shutdown(const callback& handle) noexcept(true) = 0;

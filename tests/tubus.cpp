@@ -58,6 +58,7 @@ public:
 
     void reset()
     {
+        m_channel->close();
         m_channel = novemus::tubus::create_channel(m_bind, m_peer, m_secret);
     }
 
@@ -299,13 +300,17 @@ BOOST_AUTO_TEST_CASE(tubus_connectivity)
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
     tubus_channel left(le, re, 123456789);
+    auto la = left.async_accept();
+    BOOST_CHECK_EQUAL((int)la.wait_for(std::chrono::seconds(3)), (int)std::future_status::timeout);
+    BOOST_REQUIRE_NO_THROW(left.async_shutdown().get());
+
     tubus_channel right(re, le, 123456789);
-
-    BOOST_REQUIRE_THROW(left.async_accept().get(), boost::system::system_error);
-    BOOST_REQUIRE_THROW(right.async_connect().get(), boost::system::system_error);
-
-    left.reset();
-    right.reset();
+    auto rc = right.async_connect();
+    BOOST_CHECK_EQUAL((int)rc.wait_for(std::chrono::seconds(3)), (int)std::future_status::timeout);
+    BOOST_REQUIRE_NO_THROW(right.async_shutdown().get());
+    
+    BOOST_REQUIRE_NO_THROW(left.reset());
+    BOOST_REQUIRE_NO_THROW(right.reset());
 
     auto la = left.async_accept();
     auto rc = right.async_connect();
