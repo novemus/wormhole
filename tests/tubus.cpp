@@ -88,50 +88,6 @@ public:
     }
 };
 
-BOOST_AUTO_TEST_CASE(tubus_core)
-{
-    boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
-    boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
-
-    tubus_channel left(le, re, 1234567890);
-    tubus_channel right(re, le, 1234567890);
-
-    uint8_t data[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-
-    novemus::mutable_buffer lb(sizeof(data));
-    novemus::mutable_buffer rb(sizeof(data));
-
-    std::memcpy(lb.data(), data, lb.size());
-    std::memcpy(rb.data(), data, rb.size());
-
-    auto la = left.async_accept();
-    auto rc = right.async_connect();
-
-    BOOST_REQUIRE_NO_THROW(la.get());
-    BOOST_REQUIRE_NO_THROW(rc.get());
-
-    for(size_t i = 0; i < sizeof(data); ++i)
-    {
-        BOOST_REQUIRE_NO_THROW(left.async_write(lb.slice(i, 1)).get());
-        BOOST_REQUIRE_NO_THROW(right.async_write(rb.slice(i, 1)).get());
-    }
-
-    std::memset(lb.data(), 0, lb.size());
-    std::memset(rb.data(), 0, rb.size());
-
-    BOOST_REQUIRE_NO_THROW(left.async_read(lb).get());
-    BOOST_CHECK_EQUAL(std::memcmp(lb.data(), data, lb.size()), 0);
-
-    BOOST_REQUIRE_NO_THROW(right.async_read(rb).get());
-    BOOST_CHECK_EQUAL(std::memcmp(rb.data(), data, rb.size()), 0);
-
-    auto ls = left.async_shutdown();
-    auto rs = right.async_shutdown();
-
-    BOOST_REQUIRE_NO_THROW(ls.get());
-    BOOST_REQUIRE_NO_THROW(rs.get());
-}
-
 class mediator
 {
     std::shared_ptr<novemus::reactor> m_reactor;
@@ -246,6 +202,82 @@ public:
     }
 };
 
+BOOST_AUTO_TEST_CASE(tubus_core)
+{
+    boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
+    boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
+
+    tubus_channel left(le, re, 1234567890);
+    tubus_channel right(re, le, 1234567890);
+
+    uint8_t data[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+
+    novemus::mutable_buffer lb(sizeof(data));
+    novemus::mutable_buffer rb(sizeof(data));
+
+    std::memcpy(lb.data(), data, lb.size());
+    std::memcpy(rb.data(), data, rb.size());
+
+    auto la = left.async_accept();
+    auto rc = right.async_connect();
+
+    BOOST_REQUIRE_NO_THROW(la.get());
+    BOOST_REQUIRE_NO_THROW(rc.get());
+
+    for(size_t i = 0; i < sizeof(data); ++i)
+    {
+        BOOST_REQUIRE_NO_THROW(left.async_write(lb.slice(i, 1)).get());
+        BOOST_REQUIRE_NO_THROW(right.async_write(rb.slice(i, 1)).get());
+    }
+
+    std::memset(lb.data(), 0, lb.size());
+    std::memset(rb.data(), 0, rb.size());
+
+    BOOST_REQUIRE_NO_THROW(left.async_read(lb).get());
+    BOOST_CHECK_EQUAL(std::memcmp(lb.data(), data, lb.size()), 0);
+
+    BOOST_REQUIRE_NO_THROW(right.async_read(rb).get());
+    BOOST_CHECK_EQUAL(std::memcmp(rb.data(), data, rb.size()), 0);
+
+    auto ls = left.async_shutdown();
+    auto rs = right.async_shutdown();
+
+    BOOST_REQUIRE_NO_THROW(ls.get());
+    BOOST_REQUIRE_NO_THROW(rs.get());
+}
+
+BOOST_AUTO_TEST_CASE(tubus_connectivity)
+{
+    boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
+    boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
+
+    tubus_channel left(le, re, 123456789);
+    auto la = left.async_accept();
+    BOOST_CHECK_EQUAL((int)la.wait_for(std::chrono::seconds(3)), (int)std::future_status::timeout);
+    BOOST_REQUIRE_NO_THROW(left.async_shutdown().get());
+
+    tubus_channel right(re, le, 123456789);
+    auto rc = right.async_connect();
+    BOOST_REQUIRE_THROW(rc.get(), boost::system::system_error);
+    BOOST_REQUIRE_NO_THROW(right.async_shutdown().get());
+    
+    BOOST_REQUIRE_NO_THROW(left.reset());
+    BOOST_REQUIRE_NO_THROW(right.reset());
+
+    auto a = left.async_accept();
+    auto c = right.async_connect();
+
+    BOOST_REQUIRE_NO_THROW(a.get());
+    BOOST_REQUIRE_NO_THROW(c.get());
+
+    BOOST_REQUIRE_NO_THROW(left.async_shutdown().get());
+
+    BOOST_REQUIRE_THROW(left.async_read(novemus::mutable_buffer(1)).get(), boost::system::system_error);
+    BOOST_REQUIRE_THROW(right.async_write(novemus::mutable_buffer(1)).get(), boost::system::system_error);
+
+    BOOST_REQUIRE_NO_THROW(right.async_shutdown().get());
+}
+
 BOOST_AUTO_TEST_CASE(tubus_integrity)
 {
     boost::asio::ip::udp::endpoint pe(boost::asio::ip::address::from_string("127.0.0.1"), 3000);
@@ -294,38 +326,6 @@ BOOST_AUTO_TEST_CASE(tubus_integrity)
     BOOST_REQUIRE_NO_THROW(rs.get());
 }
 
-BOOST_AUTO_TEST_CASE(tubus_connectivity)
-{
-    boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
-    boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
-
-    tubus_channel left(le, re, 123456789);
-    auto la = left.async_accept();
-    BOOST_CHECK_EQUAL((int)la.wait_for(std::chrono::seconds(3)), (int)std::future_status::timeout);
-    BOOST_REQUIRE_NO_THROW(left.async_shutdown().get());
-
-    tubus_channel right(re, le, 123456789);
-    auto rc = right.async_connect();
-    BOOST_REQUIRE_THROW(rc.get(), boost::system::system_error);
-    BOOST_REQUIRE_NO_THROW(right.async_shutdown().get());
-    
-    BOOST_REQUIRE_NO_THROW(left.reset());
-    BOOST_REQUIRE_NO_THROW(right.reset());
-
-    auto a = left.async_accept();
-    auto c = right.async_connect();
-
-    BOOST_REQUIRE_NO_THROW(a.get());
-    BOOST_REQUIRE_NO_THROW(c.get());
-
-    BOOST_REQUIRE_NO_THROW(left.async_shutdown().get());
-
-    BOOST_REQUIRE_THROW(left.async_read(novemus::mutable_buffer(1)).get(), boost::system::system_error);
-    BOOST_REQUIRE_THROW(right.async_write(novemus::mutable_buffer(1)).get(), boost::system::system_error);
-
-    BOOST_REQUIRE_NO_THROW(right.async_shutdown().get());
-}
-
 BOOST_AUTO_TEST_CASE(tubus_speed)
 {
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
@@ -345,7 +345,7 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
 
     std::cout << boost::posix_time::microsec_clock::local_time() << ": begin" << std::endl;
 
-    for (size_t i = 0; i < 1024; ++i)
+    for (size_t i = 0; i < 10240; ++i)
     {
         auto lw = left.async_write(wb);
         auto rr = right.async_read(rb);
@@ -393,7 +393,7 @@ BOOST_AUTO_TEST_CASE(udp_speed)
     size_t sent = 0;
 
     novemus::mutable_buffer data(9992);
-    for (size_t j = 0; j < 1050; ++j)
+    for (size_t j = 0; j < 10500; ++j)
     {
         for (size_t i = 0; i < 10; ++i)
         {

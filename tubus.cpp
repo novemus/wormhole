@@ -755,10 +755,49 @@ protected:
                 m_istreamer.error(boost::asio::error::connection_aborted);
                 m_ostreamer.error(boost::asio::error::connection_aborted);
             }
+            
+            boost::system::error_code err;
+            m_timer.cancel(err);
         }
     }
 
-    void schedule()
+    void consume()
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        if (m_connector.status() == state::initial || m_connector.status() == state::finished)
+            return;
+
+        if (!m_socket.is_open() || m_connector.pingless())
+        {
+            m_connector.error(boost::asio::error::broken_pipe);
+            m_istreamer.error(boost::asio::error::broken_pipe);
+            m_ostreamer.error(boost::asio::error::broken_pipe);
+            return;
+        }
+
+        std::weak_ptr<transport> weak = shared_from_this();
+        novemus::mutable_buffer buffer = m_store->obtain(packet::max_packet_size);
+        m_socket.async_receive(buffer, [weak, buffer](const boost::system::error_code& error, size_t size)
+        {
+            auto ptr = weak.lock();
+            if (ptr)
+            {
+                if (error)
+                {
+                    if (error != boost::asio::error::operation_aborted)
+                        ptr->mistake(error);
+                }
+                else
+                {
+                    ptr->feed(buffer.slice(0, size));
+                }
+                ptr->consume();
+            }
+        });
+    }
+
+    void produce()
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -791,17 +830,6 @@ protected:
             if (m_secret)
                 pack.make_opaque(m_secret);
 
-            boost::system::error_code err;
-            m_socket.cancel(err);
-
-            if (err)
-            {
-                m_connector.error(err);
-                m_istreamer.error(err);
-                m_ostreamer.error(err);
-                return;
-            }
-
             m_socket.async_send(pack, [weak, pack](const boost::system::error_code& error, size_t size)
             {
                 auto ptr = weak.lock();
@@ -812,7 +840,7 @@ protected:
                     else if (pack.size() < size)
                         ptr->mistake(boost::asio::error::message_size);
                     else
-                        ptr->schedule();
+                        ptr->produce();
                 }
             });
         }
@@ -823,25 +851,6 @@ protected:
         }
         else
         {
-            novemus::mutable_buffer buffer = m_store->obtain(packet::max_packet_size);
-            m_socket.async_receive(buffer, [weak, buffer](const boost::system::error_code& error, size_t size)
-            {
-                auto ptr = weak.lock();
-                if (ptr)
-                {
-                    if (error)
-                    {
-                        if (error != boost::asio::error::operation_aborted)
-                            ptr->mistake(error);
-                    }
-                    else
-                    {
-                        ptr->feed(buffer.slice(0, size));
-                    }
-                    ptr->wakeup();
-                }
-            });
-
             auto timeout = m_connector.deffered() || m_istreamer.deffered() || m_ostreamer.deffered() ? resend_timeout() : ping_timeout();
 
             m_timer.expires_from_now(timeout);
@@ -853,18 +862,10 @@ protected:
                     if (error && error != boost::asio::error::operation_aborted)
                         ptr->mistake(error);
                     else
-                        ptr->schedule();
+                        ptr->produce();
                 }
             });
         }
-    }
-
-    void wakeup()
-    {
-        std::unique_lock<std::mutex> lock(m_mutex);
-
-        boost::system::error_code err;
-        m_timer.cancel(err);
     }
 
 public:
@@ -943,7 +944,10 @@ public:
             {
                 auto ptr = weak.lock();
                 if (ptr)
-                    ptr->schedule();
+                {
+                    ptr->produce();
+                    ptr->consume();
+                }
             });
         }
     }
@@ -961,7 +965,10 @@ public:
             {
                 auto ptr = weak.lock();
                 if (ptr)
-                    ptr->schedule();
+                {
+                    ptr->produce();
+                    ptr->consume();
+                }
             });
         }
     }
