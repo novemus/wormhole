@@ -656,12 +656,10 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 if (top.size() <= max)
                 {
                     m_head += top.size();
-                    m_size -= top.size();
                     return top;
                 }
 
                 m_head += max;
-                m_size -= max;
 
                 auto ret = top.pop_front(max);
                 m_data.emplace(m_head, top);
@@ -671,7 +669,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             bool map(uint64_t handle, const const_buffer& buffer)
             {
-                if (m_size >= receive_buffer_size())
+                if (m_tail - m_head >= receive_buffer_size() && handle > m_tail)
                     return false;
 
                 if (handle >= m_head)
@@ -679,9 +677,10 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     auto res = m_data.emplace(handle, buffer);
                     if (res.second)
                     {
-                        m_size += buffer.size();
+                        auto iter = m_data.rbegin();
+                        m_tail = iter->first + iter->second.size();
 
-                        if (m_size >= receive_buffer_size())
+                        if (m_tail - m_head >= receive_buffer_size())
                         {
                             std::cout << "[" << this << "] istreamer::streambuf::map: buffer is full" << std::endl;
                         }
@@ -705,7 +704,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         private:
 
             uint64_t m_head = 0;
-            uint64_t m_size = 0;
+            uint64_t m_tail = 0;
             std::map<uint64_t, const_buffer> m_data;
         };
 
