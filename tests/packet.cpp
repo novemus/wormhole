@@ -1,24 +1,28 @@
 #include "../packet.h"
 #include <boost/test/unit_test.hpp>
 
-BOOST_AUTO_TEST_CASE(number)
+BOOST_AUTO_TEST_CASE(cursor)
 {
+    std::cout << "cursor" << std::endl;
+
     novemus::mutable_buffer mb(64);
     std::memset(mb.data(), 0, mb.size());
 
-    novemus::tubus::number num(mb);
+    novemus::tubus::cursor handle(mb);
 
-    BOOST_CHECK_EQUAL(num.value(), 0);
-    BOOST_CHECK_EQUAL(num.size(), novemus::tubus::number::number_size);
+    BOOST_CHECK_EQUAL(handle.value(), 0);
+    BOOST_CHECK_EQUAL(handle.size(), novemus::tubus::cursor::cursor_size);
 
-    num.value(1234567890);
+    handle.value(1234567890);
 
-    BOOST_CHECK_EQUAL(num.value(), 1234567890);
-    BOOST_CHECK_EQUAL(num.size(), novemus::tubus::number::number_size);
+    BOOST_CHECK_EQUAL(handle.value(), 1234567890);
+    BOOST_CHECK_EQUAL(handle.size(), novemus::tubus::cursor::cursor_size);
 }
 
 BOOST_AUTO_TEST_CASE(snippet)
 {
+    std::cout << "snippet" << std::endl;
+
     novemus::mutable_buffer mb(1024);
     std::memset(mb.data(), 0, mb.size());
 
@@ -37,6 +41,8 @@ BOOST_AUTO_TEST_CASE(snippet)
 
 BOOST_AUTO_TEST_CASE(section)
 {
+    std::cout << "section" << std::endl;
+
     novemus::mutable_buffer mb(1024);
     std::memset(mb.data(), 0, mb.size());
 
@@ -75,10 +81,10 @@ BOOST_AUTO_TEST_CASE(section)
 
     more = more.next();
 
-    novemus::tubus::number hand(novemus::mutable_buffer(8));
-    hand.value(123);
+    novemus::tubus::cursor handle(novemus::mutable_buffer(8));
+    handle.value(123);
 
-    more.set(novemus::tubus::section::move_ackn, hand);
+    more.set(novemus::tubus::section::move_ackn, handle);
 
     BOOST_CHECK_EQUAL(more.type(), novemus::tubus::section::move_ackn);
     BOOST_CHECK_EQUAL(more.length(), sizeof(uint64_t));
@@ -133,6 +139,8 @@ BOOST_AUTO_TEST_CASE(section)
 
 BOOST_AUTO_TEST_CASE(packet)
 {
+    std::cout << "packet" << std::endl;
+
     novemus::mutable_buffer mb(novemus::tubus::packet::max_packet_size);
     std::memset(mb.data(), 0, mb.size());
 

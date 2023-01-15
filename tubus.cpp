@@ -11,7 +11,6 @@
 #include <boost/asio.hpp>
 #include <boost/bind/bind.hpp>
 #include <boost/lexical_cast.hpp>
-#include <boost/icl/interval_set.hpp>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
@@ -34,7 +33,7 @@ template<class var> var getenv(const std::string& name, const var& def)
 
 class transport : public novemus::tubus::channel, public std::enable_shared_from_this<transport>
 {
-    enum state { initial, accepting, connecting, linked, shutting, tearing, finished };
+    enum state { neither, initial, accepting, connecting, linked, shutting, tearing, finished };
 
     inline static boost::posix_time::time_duration ping_timeout()
     {
@@ -50,26 +49,26 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
     inline static boost::posix_time::time_duration shutdown_timeout()
     {
-        static boost::posix_time::milliseconds s_timeout(getenv("TUBUS_SHUTDOWN_TIMEOUT", 1000));
+        static boost::posix_time::milliseconds s_timeout(getenv("TUBUS_SHUTDOWN_TIMEOUT", 2000));
         return s_timeout;
     }
 
     inline static size_t snippet_flight()
     {
-        static size_t s_flight(getenv("TUBUS_SNIPPET_FLIGHT", 10));
+        static size_t s_flight(getenv("TUBUS_SNIPPET_FLIGHT", 20));
         return s_flight;
     }
 
     inline static size_t receive_buffer_size()
     {
-        static size_t s_flight(getenv("TUBUS_RECEIVE_BUFFER_SIZE", 5 * 1024 * 1024));
-        return s_flight;
+        static size_t s_size(getenv("TUBUS_RECEIVE_BUFFER_SIZE", 5 * 1024 * 1024));
+        return s_size;
     }
 
     inline static size_t send_buffer_size()
     {
-        static size_t s_flight(getenv("TUBUS_SEND_BUFFER_SIZE", 5 * 1024 * 1024));
-        return s_flight;
+        static size_t s_size(getenv("TUBUS_SEND_BUFFER_SIZE", 5 * 1024 * 1024));
+        return s_size;
     }
 
     struct connector
@@ -83,18 +82,22 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         connector(boost::asio::io_context& io)
             : m_io(io)
-            , m_status(state::initial)
+            , m_status(state::neither)
             , m_local(0)
             , m_remote(0)
-            , m_pass(boost::posix_time::max_date_time)
+            , m_seen(boost::posix_time::max_date_time)
             , m_dead(boost::posix_time::max_date_time)
         {
         }
 
+        void init(const callback& fallback)
+        {
+            on_error = fallback;
+            m_status = state::initial;
+        }
+
         void error(const boost::system::error_code& err)
         {
-            std::cout << "[" << this << "] connector::error: " << err.message() << std::endl;
-
             if (on_connect)
             {
                 m_io.post(boost::bind(on_connect, err));
@@ -109,7 +112,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             m_local = 0;
             m_remote = 0;
-            m_pass = boost::posix_time::max_date_time;
+            m_seen = boost::posix_time::max_date_time;
             m_dead = boost::posix_time::max_date_time;
             m_jobs.clear();
             m_status = state::finished;
@@ -125,7 +128,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             if (!valid(pack))
                 return;
 
-            m_pass = boost::posix_time::microsec_clock::universal_time();
+            m_seen = boost::posix_time::microsec_clock::universal_time();
 
             auto sect = pack.payload();
             auto type = sect.type();
@@ -136,7 +139,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 {
                     case section::link_init:
                     {
-                        m_jobs.emplace(section::link_ackn, m_pass);
+                        m_jobs.emplace(section::link_ackn, m_seen);
 
                         if (m_status == state::accepting)
                         {
@@ -152,7 +155,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                             m_remote = pack.pin();
 
                             m_jobs.erase(section::link_init);
-                            m_jobs.emplace(section::ping_shot, m_pass + ping_timeout());
+                            m_jobs.emplace(section::ping_shot, m_seen + ping_timeout());
 
                             m_io.post(boost::bind(on_connect, boost::system::error_code()));
                             on_connect = 0;
@@ -161,11 +164,12 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     }
                     case section::tear_init:
                     {
-                        m_jobs.emplace(section::tear_ackn, m_pass);
+                        m_jobs.emplace(section::tear_ackn, m_seen);
 
                         if (m_status == state::linked)
                         {
                             m_status = state::tearing;
+                            m_dead = m_seen + shutdown_timeout();
                         }
                         break;
                     }
@@ -183,13 +187,13 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     } 
                     case section::ping_shot:
                     {
-                        m_jobs.emplace(section::ping_ackn, m_pass);
+                        m_jobs.emplace(section::ping_ackn, m_seen);
                         break;
                     }
                     case section::ping_ackn:
                     {
                         m_jobs.erase(section::ping_shot);
-                        m_jobs.emplace(section::ping_shot, m_pass + ping_timeout());
+                        m_jobs.emplace(section::ping_shot, m_seen + ping_timeout());
                         break;
                     }
                     default: break;
@@ -207,6 +211,11 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             pack.pin(m_local);
 
             auto now = boost::posix_time::microsec_clock::universal_time();
+            if (now > m_dead || m_seen + ping_timeout() < now - boost::posix_time::seconds(5))
+            {
+                m_io.post(boost::bind(on_error, boost::asio::error::broken_pipe));
+                return;
+            }
 
             section sect = pack.useless();
             while (sect.size() >= section::header_size)
@@ -250,45 +259,30 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             return m_status;
         }
 
-        bool pingless() const
+        void shutdown(const callback& handler)
         {
-            auto now = boost::posix_time::microsec_clock::universal_time();
-            return now > m_dead || m_pass + ping_timeout() < now - boost::posix_time::seconds(5);
-        }
-
-        bool shutdown(const callback& caller)
-        {
-            if (m_status != state::linked && m_status != state::tearing)
+            if (m_status != state::linked)
             {
                 boost::system::error_code error = m_status == state::shutting ? 
                     boost::asio::error::in_progress : boost::asio::error::broken_pipe;
 
-                std::cout << "[" << this << "] connector::shutdown: " << error.message() << std::endl;
+                if (error == boost::asio::error::broken_pipe)
+                    m_io.post(boost::bind(on_error, boost::asio::error::broken_pipe));
 
-                m_io.post(boost::bind(caller, error));
-                return false;
-            }
-
-            if (m_status == state::tearing)
-            {
-                m_status = state::finished;
-                m_remote = 0;
-
-                m_io.post(boost::bind(caller, boost::system::error_code()));
-                return true;
+                m_io.post(boost::bind(handler, error));
+                return;
             }
 
             auto now = boost::posix_time::microsec_clock::universal_time();
-            on_shutdown = caller;
+            on_shutdown = handler;
 
             m_dead = now + shutdown_timeout();
             m_status = state::shutting;
 
-            m_jobs.emplace(section::ping_shot, now);
-            return true;
+            m_jobs.emplace(section::tear_init, now);
         }
 
-        bool connect(const callback& caller)
+        void connect(const callback& handler)
         {
             if (m_status != state::initial)
             {
@@ -296,23 +290,23 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     boost::asio::error::in_progress : m_status == state::linked ?
                         boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-                std::cout << "[" << this << "] connector::connect: " << error.message() << std::endl;
+                if (error == boost::asio::error::broken_pipe)
+                    m_io.post(boost::bind(on_error, boost::asio::error::broken_pipe));
 
-                m_io.post(boost::bind(caller, error));
-                return false;
+                m_io.post(boost::bind(handler, error));
+                return;
             }
 
             m_local = make_pin();
-            on_connect = caller;
+            on_connect = handler;
 
-            m_pass = boost::posix_time::microsec_clock::universal_time();
+            m_seen = boost::posix_time::microsec_clock::universal_time();
             m_status = state::connecting;
 
-            m_jobs.emplace(section::link_init, m_pass);
-            return true;
+            m_jobs.emplace(section::link_init, m_seen);
         }
 
-        bool accept(const callback& caller)
+        void accept(const callback& handler)
         {
             if (m_status != state::initial)
             {
@@ -320,19 +314,18 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     boost::asio::error::in_progress : m_status == state::linked ?
                         boost::asio::error::already_connected : boost::asio::error::broken_pipe;
 
-                std::cout << "[" << this << "] connector::accept: " << error.message() << std::endl;
+                if (error == boost::asio::error::broken_pipe)
+                    m_io.post(boost::bind(on_error, boost::asio::error::broken_pipe));
 
-                m_io.post(boost::bind(caller, error));
-                return false;
+                m_io.post(boost::bind(handler, error));
+                return;
             }
 
             m_local = make_pin();
-            on_connect = caller;
+            on_connect = handler;
 
-            m_pass = boost::posix_time::microsec_clock::universal_time();
+            m_seen = boost::posix_time::microsec_clock::universal_time();
             m_status = state::accepting;
-
-            return true;
         }
 
         bool deffered() const
@@ -347,38 +340,45 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         uint32_t m_local;
         uint32_t m_remote;
         std::map<section::kind, boost::posix_time::ptime> m_jobs;
-        boost::posix_time::ptime m_pass;
+        boost::posix_time::ptime m_seen;
         boost::posix_time::ptime m_dead;
+        callback on_error;
         callback on_connect;
         callback on_shutdown;
     };
 
     struct ostreamer
     {
-        ostreamer(boost::asio::io_context& io) : m_io(io), m_cursor(0), m_limit(0)
+        ostreamer(boost::asio::io_context& io) 
+            : m_io(io)
         {
+        }
+
+        void init(const callback& fallback)
+        {
+            on_error = fallback;
         }
 
         void error(const boost::system::error_code& err)
         {
-            std::cout << "[" << this << "] ostreamer::error: " << err.message() << std::endl;
+            auto cursor = m_moves.empty() ? m_buffer.head() : m_moves.begin()->first;
 
-            auto iter = m_callers.begin();
-            while (iter != m_callers.end())
+            auto iter = m_writers.begin();
+            while (iter != m_writers.end())
             {
                 size_t sent = 0;
 
-                if (m_cursor >= iter->hook + iter->size)
+                if (cursor >= iter->head + iter->size)
                     sent = iter->size;
-                else if (m_cursor > iter->hook) 
-                    sent = m_cursor - iter->hook;
+                else if (cursor > iter->head) 
+                    sent = cursor - iter->head;
 
                 m_io.post(boost::bind(iter->callback, err, sent));
                 ++iter;
             }
 
-            m_callers.clear();
-            m_jobs.clear();
+            m_writers.clear();
+            m_moves.clear();
             m_buffer.clear();
         }
 
@@ -391,31 +391,16 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             {
                 if (type == section::move_ackn)
                 {
-                    number hand(sect.value());
-                    m_jobs.erase(hand.value());
-                }
-                else if (type == section::buff_size)
-                {
-                    number num(sect.value());
+                    cursor handle(sect.value());
+                    m_moves.erase(handle.value());
 
-                    m_limit = num.value();
-                    m_acks.emplace(section::buff_ackn, num.value());
-                }
-                else if (type == section::pull_data)
-                {
-                    number num(sect.value());
+                    auto cursor = m_moves.empty() ? m_buffer.head() : m_moves.begin()->first;
 
-                    m_cursor = std::max(m_cursor, num.value());
-                    m_acks.emplace(section::pull_ackn, num.value());
-
-                    auto iter = m_callers.begin();
-                    while (iter != m_callers.end())
+                    auto iter = m_writers.begin();
+                    while (iter != m_writers.end() && iter->head + iter->size <= cursor)
                     {
-                        if (iter->hook + iter->size > m_cursor)
-                            break;
-
                         m_io.post(boost::bind(iter->callback, boost::system::error_code(), iter->size));
-                        iter = m_callers.erase(iter);
+                        iter = m_writers.erase(iter);
                     }
                 }
 
@@ -428,34 +413,21 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             auto sect = pack.useless();
 
-            auto iter = m_acks.begin();
-            while (iter != m_acks.end() && sect.size() >= section::header_size + number::number_size)
-            {
-                number num(sect.value());
-                num.value(iter->second);
-
-                sect.type(iter->first);
-                sect.length(number::number_size);
-
-                iter = m_acks.erase(iter);
-                sect = sect.next();
-            }
-
             auto now = boost::posix_time::microsec_clock::universal_time();
             while (sect.size() > section::header_size + snippet::handle_size)
             {
-                auto iter = std::find_if(m_jobs.begin(), m_jobs.end(), [&sect, &now](const auto& item)
+                auto iter = std::find_if(m_moves.begin(), m_moves.end(), [&sect, &now](const auto& item)
                 {
-                    return item.second.second < now && item.second.first.size() + snippet::handle_size <= sect.size() - section::header_size;
+                    return item.second.time < now && item.second.data.size() + snippet::handle_size <= sect.size() - section::header_size;
                 });
 
-                if (iter == m_jobs.end())
+                if (iter == m_moves.end())
                     break;
 
-                iter->second.second = now + resend_timeout();
+                iter->second.time = now + resend_timeout();
 
                 snippet snip(sect.value());
-                snip.set(iter->first, iter->second.first);
+                snip.set(iter->first, iter->second.data);
 
                 sect.type(section::move_data);
                 sect.length(snip.size());
@@ -463,10 +435,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 sect = sect.next();
             }
 
-            if (m_cursor + m_limit <= m_buffer.head())
-                return;
-
-            while (m_jobs.size() < snippet_flight() && m_buffer.available())
+            while (m_buffer.available() && m_moves.size() < snippet_flight())
             {
                 if (sect.size() <= section::header_size + snippet::handle_size)
                     break;
@@ -474,14 +443,14 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 snippet snip(sect.value());
 
                 auto handle = m_buffer.head();
-                auto fragment = m_buffer.pull(sect.size() - section::header_size - snippet::handle_size);
+                auto buffer = m_buffer.pull(sect.size() - section::header_size - snippet::handle_size);
                 
-                snip.set(handle, fragment);
+                snip.set(handle, buffer);
 
                 sect.type(section::move_data);
                 sect.length(snip.size());
 
-                m_jobs.emplace(handle, std::make_pair(fragment, now + resend_timeout()));
+                m_moves.emplace(handle, slice(buffer, now + resend_timeout()));
                 sect = sect.next();
             }
         }
@@ -492,15 +461,19 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             if (m_buffer.add(buffer) == tail)
             {
                 m_io.post(boost::bind(caller, boost::asio::error::no_buffer_space, 0));
+
+                if (on_error)
+                    m_io.post(boost::bind(on_error, boost::asio::error::no_buffer_space));
+
                 return;
             }
 
-            m_callers.emplace_back(tail, buffer.size(), caller);
+            m_writers.emplace_back(tail, buffer.size(), caller);
         }
 
         bool deffered() const
         {
-            return !m_acks.empty() || !m_jobs.empty() || m_buffer.available();
+            return !m_moves.empty() || m_buffer.available();
         }
 
     private:
@@ -528,16 +501,11 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             uint64_t add(const const_buffer& buf)
             {
-                if (m_tail - m_head >= send_buffer_size())
+                if (m_tail + buf.size() - m_head >= send_buffer_size())
                     return m_tail;
 
                 m_tail += buf.size();
                 m_data.push_back(buf);
-
-                if (m_tail - m_head >= send_buffer_size())
-                {
-                    std::cout << "[" << this << "] ostreamer::streambuf::push: buffer is full" << std::endl;
-                }
 
                 return m_tail;
             }
@@ -571,29 +539,37 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             std::list<const_buffer> m_data;
         };
 
-        struct handler
+        struct writer
         {
-            uint64_t hook;
+            uint64_t head;
             uint64_t size;
             io_callback callback;
 
-            handler(uint64_t h, uint64_t s, const io_callback& c)
-                : hook(h)
+            writer(uint64_t h, uint64_t s, const io_callback& c)
+                : head(h)
                 , size(s)
                 , callback(c)
             {
             }
         };
 
-        typedef std::pair<const_buffer, boost::posix_time::ptime> fragment;
+        struct slice
+        {
+            const_buffer data;
+            boost::posix_time::ptime time;
+
+            slice(const const_buffer& d, const boost::posix_time::ptime& t)
+                : data(d)
+                , time(t)
+            {
+            }
+        };
 
         boost::asio::io_context& m_io;
         streambuf m_buffer;
-        uint64_t m_cursor;
-        uint64_t m_limit;
-        std::map<section::kind, uint64_t> m_acks;
-        std::map<uint64_t, fragment> m_jobs;
-        std::list<handler> m_callers;
+        std::map<uint64_t, slice> m_moves;
+        std::list<writer> m_writers;
+        callback on_error;
     };
 
     struct istreamer
@@ -601,21 +577,23 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         istreamer(boost::asio::io_context& io)
             : m_io(io)
         {
-            m_jobs.emplace(section::buff_size, boost::posix_time::microsec_clock::universal_time());
+        }
+
+        void init(const callback& fallback)
+        {
+            on_error = fallback;
         }
 
         void error(const boost::system::error_code& err)
         {
-            std::cout << "[" << this << "] istreamer::error: " << err.message() << std::endl;
-
-            auto iter = m_callers.begin();
-            while (iter != m_callers.end())
+            auto iter = m_readers.begin();
+            while (iter != m_readers.end())
             {
-                m_io.post(boost::bind(iter->second, err, 0));
+                m_io.post(boost::bind(iter->callback, err, 0));
                 ++iter;
             }
 
-            m_callers.clear();
+            m_readers.clear();
             m_acks.clear();
             m_buffer.clear();
         }
@@ -632,19 +610,16 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     snippet snip(sect.value());
                     
                     if (m_buffer.map(snip.handle(), snip.fragment()))
+                    {
                         m_acks.emplace_back(snip.handle());
-                }
-                else if (type == section::buff_ackn)
-                {
-                    number num(sect.value());
-                    if (num.value() == receive_buffer_size())
-                        m_jobs.erase(section::buff_size);
-                }
-                else if (type == section::pull_ackn)
-                {
-                    number num(sect.value());
-                    if (num.value() == m_buffer.head())
-                        m_jobs.erase(section::pull_data);
+                    }
+                    else
+                    {
+                        if(on_error)
+                            m_io.post(boost::bind(on_error, boost::asio::error::no_buffer_space));
+
+                        break;
+                    }
                 }
 
                 sect = sect.next();
@@ -658,47 +633,29 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             auto sect = pack.useless();
 
-            auto ack = m_acks.begin();
-            while (ack != m_acks.end() && sect.size() >= section::header_size + number::number_size)
+            auto ackn = m_acks.begin();
+            while (ackn != m_acks.end() && sect.size() >= section::header_size + cursor::cursor_size)
             {
-                number hand(sect.value());
-                hand.value(*ack);
+                cursor handle(sect.value());
+                handle.value(*ackn);
 
                 sect.type(section::move_ackn);
-                sect.length(number::number_size);
+                sect.length(cursor::cursor_size);
 
-                ack = m_acks.erase(ack);
+                ackn = m_acks.erase(ackn);
                 sect = sect.next();
-            }
-
-            auto now = boost::posix_time::microsec_clock::universal_time();
-            auto job = m_jobs.begin();
-            while (job != m_jobs.end() && sect.size() >= section::header_size + number::number_size)
-            {
-                if (job->second <= now)
-                {
-                    number num(sect.value());
-                    num.value(job->first == section::buff_size ? receive_buffer_size() : m_buffer.head());
-
-                    sect.type(job->first);
-                    sect.length(number::number_size);
-
-                    job->second = now + resend_timeout();
-                    sect = sect.next();
-                }
-                ++job;
             }
         }
 
         void append(const mutable_buffer& buf, const io_callback& caller)
         {
-            m_callers.push_back(std::make_pair(buf, caller));
+            m_readers.emplace_back(buf, caller);
             transmit();
         }
-    
+
         bool deffered() const
         {
-            return !m_acks.empty() || !m_jobs.empty();
+            return !m_acks.empty();
         }
 
     private:
@@ -707,23 +664,21 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             while (m_buffer.available())
             {
-                auto iter = m_callers.begin();
-                if (iter == m_callers.end())
+                auto iter = m_readers.begin();
+                if (iter == m_readers.end())
                     break;
                 
                 size_t read = 0;
-
-                while (m_buffer.available() && iter->first.size() > 0)
+                while (m_buffer.available() && iter->buffer.size() > 0)
                 {
-                    auto buffer = m_buffer.pull(iter->first.size());
-                    iter->first.fill(0, buffer.size(), buffer.data());
-                    iter->first.crop(buffer.size());
+                    auto buffer = m_buffer.pull(iter->buffer.size());
+                    iter->buffer.fill(0, buffer.size(), buffer.data());
+                    iter->buffer.crop(buffer.size());
                     read += buffer.size();
                 }
 
-                m_jobs.emplace(section::pull_data, boost::posix_time::microsec_clock::universal_time());
-                m_io.post(boost::bind(iter->second, boost::system::error_code(), read));
-                m_callers.erase(iter);
+                m_io.post(boost::bind(iter->callback, boost::system::error_code(), read));
+                m_readers.erase(iter);
             }
         }
 
@@ -755,7 +710,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             bool map(uint64_t handle, const const_buffer& buffer)
             {
-                if (m_tail - m_head >= receive_buffer_size() && handle > m_tail)
+                if (handle >= m_tail && handle + buffer.size() - m_head > receive_buffer_size())
                     return false;
 
                 if (handle >= m_head)
@@ -765,11 +720,6 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     {
                         auto iter = m_data.rbegin();
                         m_tail = iter->first + iter->second.size();
-
-                        if (m_tail - m_head >= receive_buffer_size())
-                        {
-                            std::cout << "[" << this << "] istreamer::streambuf::map: buffer is full" << std::endl;
-                        }
                     }
                 }
 
@@ -804,13 +754,22 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             std::map<uint64_t, const_buffer> m_data;
         };
 
-        typedef std::pair<mutable_buffer, io_callback> handler;
+        struct reader
+        {
+            mutable_buffer buffer;
+            io_callback callback;
+
+            reader(const mutable_buffer& b, const io_callback& c)
+                : buffer(b)
+                , callback(c)
+            {}
+        };
         
         boost::asio::io_context& m_io;
         streambuf m_buffer;
         std::list<uint64_t> m_acks;
-        std::map<section::kind, boost::posix_time::ptime> m_jobs;
-        std::list<handler> m_callers;
+        std::list<reader> m_readers;
+        callback on_error;
     };
 
 protected:
@@ -822,6 +781,10 @@ protected:
         m_connector.error(ec);
         m_istreamer.error(ec);
         m_ostreamer.error(ec);
+
+        boost::system::error_code err;
+        m_socket.close(err);
+        m_timer.cancel(err);
     }
 
     void feed(const mutable_buffer& buffer)
@@ -848,10 +811,10 @@ protected:
 
             if (m_connector.status() == state::tearing || m_connector.status() == state::shutting)
             {
-                m_istreamer.error(boost::asio::error::connection_aborted);
-                m_ostreamer.error(boost::asio::error::connection_aborted);
+                m_istreamer.error(boost::asio::error::broken_pipe);
+                m_ostreamer.error(boost::asio::error::broken_pipe);
             }
-            
+
             boost::system::error_code err;
             m_timer.cancel(err);
         }
@@ -861,12 +824,8 @@ protected:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_connector.status() == state::initial || m_connector.status() == state::finished)
-            return;
-
-        if (!m_socket.is_open() || m_connector.pingless())
+        if (m_connector.status() == state::finished)
         {
-            m_connector.error(boost::asio::error::broken_pipe);
             m_istreamer.error(boost::asio::error::broken_pipe);
             m_ostreamer.error(boost::asio::error::broken_pipe);
             return;
@@ -897,14 +856,13 @@ protected:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_connector.status() == state::initial || m_connector.status() == state::finished)
-            return;
-
-        if (!m_socket.is_open() || m_connector.pingless())
+        if (m_connector.status() == state::finished)
         {
-            m_connector.error(boost::asio::error::broken_pipe);
             m_istreamer.error(boost::asio::error::broken_pipe);
             m_ostreamer.error(boost::asio::error::broken_pipe);
+            
+            boost::system::error_code err;
+            m_socket.close(err);
             return;
         }
 
@@ -940,11 +898,6 @@ protected:
                 }
             });
         }
-        else if (m_connector.status() == state::finished)
-        {
-            m_istreamer.error(boost::asio::error::connection_aborted);
-            m_ostreamer.error(boost::asio::error::connection_aborted);
-        }
         else
         {
             auto timeout = m_connector.deffered() || m_istreamer.deffered() || m_ostreamer.deffered() ? resend_timeout() : ping_timeout();
@@ -967,8 +920,10 @@ protected:
 public:
 
     transport(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t secret)
-        : m_reactor(novemus::reactor::shared_reactor())
-        , m_socket(m_reactor->io(), bind.protocol())
+        : m_bind(bind)
+        , m_peer(peer)
+        , m_reactor(novemus::reactor::shared_reactor())
+        , m_socket(m_reactor->io())
         , m_timer(m_reactor->io())
         , m_connector(m_reactor->io())
         , m_istreamer(m_reactor->io())
@@ -976,97 +931,76 @@ public:
         , m_store(novemus::buffer_factory::shared_factory())
         , m_secret(secret)
     {
+    }
+
+    void open() noexcept(false) override
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
         static const size_t SOCKET_BUFFER_SIZE = 1048576;
+
+        m_socket.open(m_bind.protocol());
 
         m_socket.set_option(boost::asio::socket_base::send_buffer_size(SOCKET_BUFFER_SIZE));
         m_socket.set_option(boost::asio::socket_base::receive_buffer_size(SOCKET_BUFFER_SIZE));
         m_socket.set_option(boost::asio::socket_base::reuse_address(true));
         
-        m_socket.bind(bind);
-        m_socket.connect(peer);
+        m_socket.bind(m_bind);
+        m_socket.connect(m_peer);
 
-        std::cout << "[" << this << "] transport::transport" << std::endl;
-    }
+        std::weak_ptr<transport> weak = shared_from_this();
+        
+        auto on_error = [weak](const boost::system::error_code& error)
+        {
+            auto ptr = weak.lock();
+            if (ptr)
+            {
+                ptr->mistake(error);
+            }
+        };
 
-    ~transport()
-    {
-        std::cout << "[" << this << "] transport::~transport" << std::endl;
+        m_connector.init(on_error);
+        m_istreamer.init(on_error);
+        m_ostreamer.init(on_error);
+
+        m_reactor->io().post([weak]()
+        {
+            auto ptr = weak.lock();
+            if (ptr)
+            {
+                ptr->produce();
+                ptr->consume();
+            }
+        });
     }
 
     void close() noexcept(true) override
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
-
-        std::cout << "[" << this << "] transport::close " << std::endl;
-
-        boost::system::error_code err;
-        m_socket.close(err);
-        m_timer.cancel(err);
+        mistake(boost::asio::error::connection_aborted);
     }
 
     void shutdown(const callback& handler) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        std::cout << "[" << this << "] transport::shutdown" << std::endl;
-
-        std::weak_ptr<transport> weak = shared_from_this();
-        bool pended = m_connector.shutdown([weak, handler](const boost::system::error_code& error)
-        {
-            auto ptr = weak.lock();
-            if (ptr)
-                ptr->close();
-
-            handler(error);
-        });
-
-        if (pended)
-        {
-            boost::system::error_code err;
-            m_timer.cancel(err);
-        }
+        m_connector.shutdown(handler);
+        boost::system::error_code err;
+        m_timer.cancel(err);
     }
 
     void connect(const callback& handler) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        std::cout << "[" << this << "] transport::connect" << std::endl;
-
-        if (m_connector.connect(handler))
-        {
-            std::weak_ptr<transport> weak = shared_from_this();
-            m_reactor->io().post([weak]()
-            {
-                auto ptr = weak.lock();
-                if (ptr)
-                {
-                    ptr->produce();
-                    ptr->consume();
-                }
-            });
-        }
+        m_connector.connect(handler);
+        boost::system::error_code err;
+        m_timer.cancel(err);
     }
 
     void accept(const callback& handler) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
-
-        std::cout << "[" << this << "] transport::accept" << std::endl;
-
-        if (m_connector.accept(handler))
-        {
-            std::weak_ptr<transport> weak = shared_from_this();
-            m_reactor->io().post([weak]()
-            {
-                auto ptr = weak.lock();
-                if (ptr)
-                {
-                    ptr->produce();
-                    ptr->consume();
-                }
-            });
-        }
+        m_connector.accept(handler);
     }
 
     void read(const mutable_buffer& buffer, const io_callback& handler) noexcept(true) override
@@ -1077,9 +1011,7 @@ public:
         if (status != state::linked)
         {
             boost::system::error_code ec = status == state::initial ? boost::asio::error::not_connected : 
-                status == state::connecting || state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
-
-            std::cout << "[" << this << "] transport::read: " << ec.message() << std::endl;
+                status == state::connecting || status == state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
 
             m_reactor->io().post(boost::bind(handler, ec, 0));
             return;
@@ -1096,9 +1028,7 @@ public:
         if (status != state::linked)
         {
             boost::system::error_code ec = status == state::initial ? boost::asio::error::not_connected : 
-                status == state::connecting || state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
-
-            std::cout << "[" << this << "] transport::write: " << ec.message() << std::endl;
+                status == state::connecting || status == state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
 
             m_reactor->io().post(boost::bind(handler, ec, 0));
             return;
@@ -1111,6 +1041,8 @@ public:
 
 private:
 
+    boost::asio::ip::udp::endpoint m_bind;
+    boost::asio::ip::udp::endpoint m_peer;
     std::shared_ptr<reactor> m_reactor;
     boost::asio::ip::udp::socket m_socket;
     boost::asio::deadline_timer m_timer;
@@ -1122,7 +1054,7 @@ private:
     std::mutex m_mutex;
 };
 
-std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t secret) noexcept(false)
+std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t secret) noexcept(true)
 {
     return std::make_shared<transport>(bind, peer, secret);
 }

@@ -5,13 +5,13 @@
 
 namespace novemus { namespace tubus {
 
-struct number : public mutable_buffer
+struct cursor : public mutable_buffer
 {
-    static constexpr uint16_t number_size = sizeof(uint64_t);
+    static constexpr uint16_t cursor_size = sizeof(uint64_t);
     
-    explicit number(const mutable_buffer& buf) : mutable_buffer(buf)
+    explicit cursor(const mutable_buffer& buf) : mutable_buffer(buf)
     {
-        truncate(number_size);
+        truncate(cursor_size);
     }
 
     uint64_t value() const
@@ -61,9 +61,7 @@ struct section : public mutable_buffer
         link_init, link_ackn,
         tear_init, tear_ackn,
         ping_shot, ping_ackn,
-        buff_size, buff_ackn,
-        move_data, move_ackn,
-        pull_data, pull_ackn
+        move_data, move_ackn
     };
 
     section(const mutable_buffer& buf) : section(buf, buf)
