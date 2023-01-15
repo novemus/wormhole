@@ -3,6 +3,7 @@
 #include "../tubus.h"
 #include <future>
 #include <functional>
+#include <boost/asio/ip/tcp.hpp>
 #include <boost/test/unit_test.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 
@@ -78,7 +79,7 @@ public:
 
     std::future<void> async_shutdown()
     {
-        ASYNC(m_channel, shutdown, error && error != boost::asio::error::broken_pipe);
+        ASYNC(m_channel, shutdown, error && error != boost::asio::error::broken_pipe && error != boost::asio::error::connection_refused);
     }
 
     std::future<void> async_write(const novemus::const_buffer& buffer)
@@ -418,12 +419,12 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     BOOST_REQUIRE_NO_THROW(la.get());
     BOOST_REQUIRE_NO_THROW(rc.get());
 
-    novemus::mutable_buffer wb(1024 * 100);
-    novemus::mutable_buffer rb(1024 * 100);
+    novemus::mutable_buffer wb(1024 * 1024);
+    novemus::mutable_buffer rb(1024 * 1024);
 
     std::cout << boost::posix_time::microsec_clock::local_time() << ": begin" << std::endl;
 
-    for (size_t i = 0; i < 10240; ++i)
+    for (size_t i = 0; i < 1024; ++i)
     {
         auto lw = left.async_write(wb);
         auto rr = right.async_read(rb);
@@ -472,22 +473,22 @@ BOOST_AUTO_TEST_CASE(udp_speed)
     size_t recv = 0;
     size_t sent = 0;
 
-    novemus::mutable_buffer data(9992);
+    novemus::mutable_buffer data(65507);
     novemus::mutable_buffer ackn(20);
-    for (size_t j = 0; j < 10500; ++j)
+    for (size_t j = 0; j < 3278; ++j)
     {
-        for (size_t i = 0; i < 10; ++i)
+        for (size_t i = 0; i < 5; ++i)
         {
             sent += left->send(data);
         }
 
-        for (size_t i = 0; i < 10; ++i)
+        for (size_t i = 0; i < 5; ++i)
         {
             recv += right->receive(data);
             right->send(ackn);
         }
 
-        for (size_t i = 0; i < 10; ++i)
+        for (size_t i = 0; i < 5; ++i)
         {
             left->receive(ackn);
         }
@@ -495,4 +496,55 @@ BOOST_AUTO_TEST_CASE(udp_speed)
 
     std::cout << boost::posix_time::microsec_clock::local_time() << ": sent " << sent << std::endl;
     std::cout << boost::posix_time::microsec_clock::local_time() << ": receive " << recv << std::endl;
+}
+
+BOOST_AUTO_TEST_CASE(tcp_speed)
+{
+    std::cout << "tcp_speed" << std::endl;
+
+    boost::asio::ip::tcp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
+    boost::asio::ip::tcp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
+
+    auto reactor = novemus::reactor::shared_reactor();
+
+    boost::asio::ip::tcp::socket right(reactor->io());
+    boost::asio::ip::tcp::socket left(reactor->io());
+
+    boost::asio::ip::tcp::acceptor acceptor(reactor->io(), le);
+    acceptor.async_accept(left, [&left](const boost::system::error_code& error)
+    {
+        std::cout << error.message() << std::endl;
+
+        if (error)
+            return;
+
+        size_t read = 0;
+        novemus::mutable_buffer rb(1024 * 1024);
+
+        std::cout << boost::posix_time::microsec_clock::local_time() << ": begin read" << std::endl;
+        while (read < 1024 * 1024 * 1024)
+        {
+            boost::system::error_code error;
+            read += left.read_some(rb, error);
+        }
+
+        std::cout << boost::posix_time::microsec_clock::local_time() << ": read " << read << std::endl;
+    });
+
+    right.open(re.protocol());
+    right.bind(re);
+    right.connect(le);
+
+    size_t sent = 0;
+    novemus::mutable_buffer wb(1024 * 1024);
+
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": begin send" << std::endl;
+    while (sent < 1024 * 1024 * 1024)
+    {
+        boost::system::error_code error;
+        sent += right.write_some(wb, error);
+    }
+
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": sent " << sent << std::endl;
+    std::cin.get();
 }

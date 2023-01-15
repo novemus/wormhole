@@ -55,7 +55,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
     inline static size_t snippet_flight()
     {
-        static size_t s_flight(getenv("TUBUS_SNIPPET_FLIGHT", 20));
+        static size_t s_flight(getenv("TUBUS_SNIPPET_FLIGHT", 5));
         return s_flight;
     }
 
@@ -860,7 +860,7 @@ protected:
         {
             m_istreamer.error(boost::asio::error::broken_pipe);
             m_ostreamer.error(boost::asio::error::broken_pipe);
-            
+
             boost::system::error_code err;
             m_socket.close(err);
             return;

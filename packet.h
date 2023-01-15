@@ -154,7 +154,7 @@ struct packet : public mutable_buffer
     static constexpr uint16_t packet_sign = 0x0909;
     static constexpr uint16_t packet_version = 0x0100;
     static constexpr uint16_t header_size = 16;
-    static constexpr uint16_t max_packet_size = 9992;
+    static constexpr uint16_t max_packet_size = 65507;
     static constexpr uint16_t max_payload_size = max_packet_size - header_size;
 
     explicit packet(const mutable_buffer& buf) : mutable_buffer(buf)
