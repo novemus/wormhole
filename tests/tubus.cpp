@@ -145,7 +145,7 @@ public:
         , m_le(l)
         , m_re(r)
         , m_bs(m_reactor->io(), b.protocol())
-        , m_rb(10000)
+        , m_rb(65507)
     {
         m_bs.set_option(boost::asio::socket_base::reuse_address(true));
         m_bs.bind(b);
@@ -494,8 +494,7 @@ BOOST_AUTO_TEST_CASE(udp_speed)
         }
     }
 
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": sent " << sent << std::endl;
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": receive " << recv << std::endl;
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": end " << std::endl;
 }
 
 BOOST_AUTO_TEST_CASE(tcp_speed)
@@ -510,25 +509,28 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
     boost::asio::ip::tcp::socket right(reactor->io());
     boost::asio::ip::tcp::socket left(reactor->io());
 
-    boost::asio::ip::tcp::acceptor acceptor(reactor->io(), le);
-    acceptor.async_accept(left, [&left](const boost::system::error_code& error)
-    {
-        std::cout << error.message() << std::endl;
+    std::promise<void> promise;
+    std::future<void> future = promise.get_future();
 
+    boost::asio::ip::tcp::acceptor acceptor(reactor->io(), le);
+    acceptor.async_accept(left, [&left, &promise](const boost::system::error_code& error)
+    {
         if (error)
+        {
+            std::cout << error.message() << std::endl;
             return;
+        }
 
         size_t read = 0;
         novemus::mutable_buffer rb(1024 * 1024);
 
-        std::cout << boost::posix_time::microsec_clock::local_time() << ": begin read" << std::endl;
         while (read < 1024 * 1024 * 1024)
         {
             boost::system::error_code error;
             read += left.read_some(rb, error);
         }
 
-        std::cout << boost::posix_time::microsec_clock::local_time() << ": read " << read << std::endl;
+        promise.set_value();
     });
 
     right.open(re.protocol());
@@ -538,13 +540,14 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
     size_t sent = 0;
     novemus::mutable_buffer wb(1024 * 1024);
 
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": begin send" << std::endl;
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": begin" << std::endl;
     while (sent < 1024 * 1024 * 1024)
     {
         boost::system::error_code error;
         sent += right.write_some(wb, error);
     }
 
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": sent " << sent << std::endl;
-    std::cin.get();
+    future.get();
+    
+    std::cout << boost::posix_time::microsec_clock::local_time() << ": end" << std::endl;
 }

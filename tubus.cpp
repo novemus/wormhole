@@ -811,8 +811,8 @@ protected:
 
             if (m_connector.status() == state::tearing || m_connector.status() == state::shutting)
             {
-                m_istreamer.error(boost::asio::error::broken_pipe);
-                m_ostreamer.error(boost::asio::error::broken_pipe);
+                m_istreamer.error(boost::asio::error::interrupted);
+                m_ostreamer.error(boost::asio::error::interrupted);
             }
 
             boost::system::error_code err;
@@ -826,8 +826,8 @@ protected:
 
         if (m_connector.status() == state::finished)
         {
-            m_istreamer.error(boost::asio::error::broken_pipe);
-            m_ostreamer.error(boost::asio::error::broken_pipe);
+            m_istreamer.error(boost::asio::error::interrupted);
+            m_ostreamer.error(boost::asio::error::interrupted);
             return;
         }
 
@@ -858,8 +858,8 @@ protected:
 
         if (m_connector.status() == state::finished)
         {
-            m_istreamer.error(boost::asio::error::broken_pipe);
-            m_ostreamer.error(boost::asio::error::broken_pipe);
+            m_istreamer.error(boost::asio::error::interrupted);
+            m_ostreamer.error(boost::asio::error::interrupted);
 
             boost::system::error_code err;
             m_socket.close(err);
