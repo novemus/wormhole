@@ -243,19 +243,17 @@ BOOST_AUTO_TEST_CASE(buffer_factory)
 {
     std::cout << "buffer_factory" << std::endl;
 
-    auto factory = novemus::buffer_factory::shared_factory();
-
     {
-        auto buf1 = factory->obtain(16384);
-        auto buf2 = factory->obtain(8192);
-        auto buf3 = factory->obtain(4096);
+        auto buf1 = novemus::mutable_buffer::create(16384);
+        auto buf2 = novemus::mutable_buffer::create(8192);
+        auto buf3 = novemus::mutable_buffer::create(4096);
 
         BOOST_CHECK(buf1.data() != buf2.data() && buf2.data() != buf3.data() && buf1.data() != buf3.data());
     }
 
-    auto buf1 = factory->obtain(512);
-    auto buf2 = factory->obtain(1024);
-    auto buf3 = factory->obtain(2048);
+    auto buf1 = novemus::mutable_buffer::create(512);
+    auto buf2 = novemus::mutable_buffer::create(1024);
+    auto buf3 = novemus::mutable_buffer::create(2048);
 
     BOOST_CHECK(buf1.data() != buf2.data() && buf2.data() != buf3.data() && buf1.data() != buf3.data());
 }

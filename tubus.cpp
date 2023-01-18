@@ -832,7 +832,7 @@ protected:
         }
 
         std::weak_ptr<transport> weak = shared_from_this();
-        novemus::mutable_buffer buffer = m_store->obtain(packet::max_packet_size);
+        auto buffer = mutable_buffer::create(packet::max_packet_size);
         m_socket.async_receive(buffer, [weak, buffer](const boost::system::error_code& error, size_t size)
         {
             auto ptr = weak.lock();
@@ -867,7 +867,7 @@ protected:
         }
 
         std::weak_ptr<transport> weak = shared_from_this();
-        packet pack(m_store->obtain(packet::max_packet_size));
+        packet pack(mutable_buffer::create(packet::max_packet_size));
 
         m_connector.imbue(pack);
 
@@ -928,7 +928,6 @@ public:
         , m_connector(m_reactor->io())
         , m_istreamer(m_reactor->io())
         , m_ostreamer(m_reactor->io())
-        , m_store(novemus::buffer_factory::shared_factory())
         , m_secret(secret)
     {
     }
@@ -1049,7 +1048,6 @@ private:
     connector m_connector;
     istreamer m_istreamer;
     ostreamer m_ostreamer;
-    std::shared_ptr<buffer_factory> m_store;
     uint64_t m_secret;
     std::mutex m_mutex;
 };

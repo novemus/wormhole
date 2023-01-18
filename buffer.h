@@ -271,6 +271,8 @@ struct mutable_buffer
         return *this;
     }
 
+    static mutable_buffer create(size_t size) noexcept(true);
+
 private:
 
     boost::shared_array<uint8_t> m_array;
@@ -304,9 +306,14 @@ public:
         auto iter = m_cache.lower_bound(size);
         if (iter == m_cache.end())
         {
-            auto array = boost::shared_array<uint8_t>(new uint8_t[size], [size, self = shared_from_this()](uint8_t* ptr)
+            std::weak_ptr<buffer_factory> weak = shared_from_this();
+            auto array = boost::shared_array<uint8_t>(new uint8_t[size], [size, weak](uint8_t* ptr)
             {
-                self->cache(ptr, size);
+                auto self = weak.lock();
+                if (self)
+                    self->cache(ptr, size);
+                else
+                    delete[] ptr;
             });
 
             std::memset(array.get(), 0, size);
@@ -319,8 +326,6 @@ public:
         std::memset(array.get(), 0, size);
         return mutable_buffer(array, size);
     }
-
-    static std::shared_ptr<buffer_factory> shared_factory() noexcept(true);
 
 private:
 

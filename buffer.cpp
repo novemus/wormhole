@@ -3,21 +3,10 @@
 
 namespace novemus {
 
-std::shared_ptr<buffer_factory> buffer_factory::shared_factory() noexcept(true)
+mutable_buffer mutable_buffer::create(size_t size) noexcept(true)
 {
-    static std::weak_ptr<buffer_factory> s_factory;
-    static std::mutex s_mutex;
-
-    std::unique_lock<std::mutex> lock(s_mutex);
-    auto ptr = s_factory.lock();
-
-    if (!ptr)
-    {
-        ptr = std::make_shared<buffer_factory>();
-        s_factory = ptr;
-    }
-
-    return ptr;
+    static std::shared_ptr<buffer_factory> s_factory = std::make_shared<buffer_factory>();
+    return s_factory->obtain(size);
 }
 
 }

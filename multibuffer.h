@@ -98,9 +98,9 @@ struct multibuffer
         return m_chain.rend();
     }
 
-    mutable_buffer merge() const
+    mutable_buffer unite() const
     {
-        mutable_buffer buffer(size());
+        mutable_buffer buffer = mutable_buffer::create(size());
         
         size_t offset = 0;
         std::for_each(m_chain.begin(), m_chain.end(), [&offset, &buffer](const const_buffer& item)
@@ -123,12 +123,12 @@ struct cursor : public multibuffer
     
     explicit cursor(uint64_t number)
     {
-        mutable_buffer buffer(cursor_size);
+        mutable_buffer buffer = mutable_buffer::create(cursor_size);
         buffer.set<uint64_t>(0, htole64(number));
         push_back(buffer);
     }
 
-    explicit cursor(const mutable_buffer& buffer)
+    explicit cursor(const const_buffer& buffer)
     {
         if (buffer.size() < cursor_size)
             throw std::runtime_error("cursor: bad buffer");
@@ -146,7 +146,7 @@ struct snippet : public multibuffer
 {
     static constexpr uint16_t header_size = sizeof(uint64_t);
 
-    explicit snippet(const mutable_buffer& buffer)
+    explicit snippet(const const_buffer& buffer)
     {
         if (buffer.size() < header_size)
             throw std::runtime_error("snippet: bad buffer");
@@ -157,11 +157,9 @@ struct snippet : public multibuffer
 
     explicit snippet(const multibuffer& buffer) : multibuffer(buffer)
     {
-        count(2);
-    }
+        if (at(0).size() != header_size || count() < 2)
+            throw std::runtime_error("snippet: bad buffer");
 
-    snippet(const_iterator beg, const_iterator end) : multibuffer(beg, end)
-    {
         count(2);
     }
 
@@ -194,7 +192,7 @@ struct section : public multibuffer
         move_data, move_ackn
     };
 
-    explicit section(const mutable_buffer& buffer)
+    explicit section(const const_buffer& buffer)
     {
         push_back(buffer.slice(0, header_size));
             
@@ -214,7 +212,7 @@ struct section : public multibuffer
 
     section(uint16_t type, const const_buffer& value)
     {
-        mutable_buffer header(header_size);
+        mutable_buffer header = mutable_buffer::create(header_size);
         header.set<uint16_t>(0, htons(type));
         header.set<uint16_t>(sizeof(uint16_t), htons(value.size()));
         push_back(header);
@@ -276,13 +274,10 @@ struct packet : public multibuffer
     static constexpr uint16_t max_packet_size = 65507;
     static constexpr uint16_t max_payload_size = max_packet_size - header_size;
 
-    explicit packet(const mutable_buffer& buffer, uint64_t secret)
+    explicit packet(const const_buffer& buffer)
     {
         if (buffer.size() < header_size)
             return;
-
-        if (secret != 0)
-            invert(secret, le64toh(buffer.get<uint64_t>(0)) ^ secret, buffer);
 
         push_back(buffer.slice(0, header_size));
         
@@ -301,7 +296,7 @@ struct packet : public multibuffer
 
     explicit packet(uint32_t pin)
     {
-        mutable_buffer header(header_size);
+        mutable_buffer header = mutable_buffer::create(header_size);
         header.set<uint16_t>(0, 0);
         header.set<uint16_t>(sizeof(uint64_t), htons(packet_sign));
         header.set<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t), htons(packet_version));
@@ -344,14 +339,14 @@ struct packet : public multibuffer
         push_back(sect);
     }
 
-    mutable_buffer opaque(uint64_t secret)
+    static mutable_buffer make_opaque(uint64_t secret, const mutable_buffer& packet)
     {
-        std::random_device dev;
-        std::mt19937_64 gen(dev());
-        uint64_t s = static_cast<uint64_t>(gen());
+        return invert(true, secret, packet);
+    }
 
-        mutable_buffer result = merge();
-        invert(secret, s ^ secret, result);
+    static mutable_buffer make_opened(uint64_t secret, const mutable_buffer& packet)
+    {
+        return invert(false, secret, packet);
     }
 
 public:
@@ -363,16 +358,28 @@ public:
         return ((base >> shift) | (base << (64 - shift))) ^ salt;
     }
 
-    static void invert(uint64_t secret, uint64_t salt, const mutable_buffer& buffer)
+    static mutable_buffer invert(bool opaque, uint64_t secret, const mutable_buffer& packet)
     {
-        uint64_t inverter = make_inverter(secret, salt);
+        uint8_t* ptr = packet.data();
+        uint8_t* end = packet.data() + packet.size();
 
-        uint8_t* ptr = buffer.data();
-        uint8_t* end = buffer.data() + buffer.size();
+        uint64_t salt = le64toh(*(uint64_t*)ptr);
+        if (opaque)
+        {
+            std::random_device dev;
+            std::mt19937_64 gen(dev());
+            salt = static_cast<uint64_t>(gen()) ^ secret;
+            *(uint64_t*)ptr = salt;
+        }
+        else
+        {
+            salt ^= secret;
+            *(uint64_t*)ptr = 0;
+        }
 
-        *(uint64_t*)ptr = salt;
         ptr += sizeof(uint64_t);
 
+        uint64_t inverter = make_inverter(secret, salt);
         while (ptr + sizeof(uint64_t) <= end)
         {
             *(uint64_t*)ptr ^= inverter;
@@ -387,6 +394,8 @@ public:
             ++ptr;
             ++inv;
         }
+
+        return packet;
     }
 };
 
