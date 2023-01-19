@@ -11,7 +11,6 @@ struct multibuffer
 {
     typedef const_buffer value_type;
     typedef std::deque<const_buffer>::const_iterator const_iterator;
-    typedef std::deque<const_buffer>::const_reverse_iterator const_reverse_iterator;
 
     multibuffer()
     {
@@ -42,17 +41,22 @@ struct multibuffer
 
     void push_front(const multibuffer& chain)
     {
-        std::copy(chain.rbegin(), chain.rend(), std::front_inserter(m_chain));
+        std::copy(chain.m_chain.rbegin(), chain.m_chain.rend(), std::front_inserter(m_chain));
     }
 
-    void pop_front(size_t count = 0)
+    void pop_front(size_t count = 1)
     {
-        m_chain.pop_front();
+        m_chain.erase(m_chain.begin(), m_chain.begin() + count);
     }
 
-    void pop_back(size_t count = 0)
+    void pop_back(size_t count = 1)
     {
-        m_chain.pop_back();
+        m_chain.erase(m_chain.begin() + (m_chain.size() - count), m_chain.end());
+    }
+
+    multibuffer slice(size_t pos, size_t count) const
+    {
+        return multibuffer(m_chain.begin() + pos, m_chain.begin() + pos + count);
     }
 
     void count(size_t size)
@@ -67,9 +71,9 @@ struct multibuffer
 
     size_t size() const
     {
-        return std::accumulate(m_chain.begin(), m_chain.end(), 0, [](const const_buffer& buffer)
+        return std::accumulate(m_chain.begin(), m_chain.end(), 0, [](size_t sum, const const_buffer& buffer)
         {
-            return buffer.size();
+            return sum + buffer.size();
         });
     }
 
@@ -86,16 +90,6 @@ struct multibuffer
     const_iterator end() const
     {
         return m_chain.end();
-    }
-
-    const_reverse_iterator rbegin() const
-    {
-        return m_chain.rbegin();
-    }
-
-    const_reverse_iterator rend() const
-    {
-        return m_chain.rend();
     }
 
     mutable_buffer unite() const
@@ -119,7 +113,7 @@ private:
 
 struct cursor : public multibuffer
 {
-    static constexpr uint16_t cursor_size = sizeof(uint64_t);
+    static constexpr size_t cursor_size = sizeof(uint64_t);
     
     explicit cursor(uint64_t number)
     {
@@ -136,6 +130,12 @@ struct cursor : public multibuffer
         push_back(buffer.slice(0, cursor_size));
     }
 
+    explicit cursor(const multibuffer& buffer) : multibuffer(buffer)
+    {
+        if (at(0).size() != cursor_size || count() != 1)
+            throw std::runtime_error("cursor: bad buffer");
+    }
+
     uint64_t value() const
     {
         return le64toh(at(0).get<uint64_t>(0));
@@ -144,7 +144,7 @@ struct cursor : public multibuffer
 
 struct snippet : public multibuffer
 {
-    static constexpr uint16_t header_size = sizeof(uint64_t);
+    static constexpr size_t header_size = sizeof(uint64_t);
 
     explicit snippet(const const_buffer& buffer)
     {
@@ -157,10 +157,8 @@ struct snippet : public multibuffer
 
     explicit snippet(const multibuffer& buffer) : multibuffer(buffer)
     {
-        if (at(0).size() != header_size || count() < 2)
+        if (at(0).size() != header_size || count() != 2)
             throw std::runtime_error("snippet: bad buffer");
-
-        count(2);
     }
 
     snippet(uint64_t handle, const const_buffer& fragment) : multibuffer(cursor(handle))
@@ -181,7 +179,7 @@ struct snippet : public multibuffer
 
 struct section : public multibuffer
 {
-    static constexpr uint16_t header_size = sizeof(uint16_t) * 2;
+    static constexpr size_t header_size = sizeof(uint16_t) * 2;
 
     enum kind
     {
@@ -210,30 +208,42 @@ struct section : public multibuffer
         }
     }
 
-    section(uint16_t type, const const_buffer& value)
+    explicit section(const multibuffer& buffer) : multibuffer(buffer)
     {
-        mutable_buffer header = mutable_buffer::create(header_size);
-        header.set<uint16_t>(0, htons(type));
-        header.set<uint16_t>(sizeof(uint16_t), htons(value.size()));
-        push_back(header);
+        if (type() == move_data && count() != 3)
+            throw std::runtime_error("section: bad data buffer");
 
-        if (type == move_data)
-        {
-            snippet data(value);
-            std::copy(data.begin(), data.end(), std::back_inserter(*this));
-        }
-        else if (value.size() > 0)
-        {
-            push_back(value);
-        }
-    }
-
-    section(const_iterator beg, const_iterator end) : multibuffer(beg, end)
-    {
-        count(type() == list_stub ? 0 : type() == move_data ? 3 : 1);
+        if (type() == move_ackn && count() != 2)
+            throw std::runtime_error("section: bad cursor buffer");
 
         if (type() != list_stub && size() != header_size + length())
             throw std::runtime_error("section: bad buffer");
+    }
+
+    explicit section(kind type)
+    {
+        mutable_buffer header = mutable_buffer::create(header_size);
+        header.set<uint16_t>(0, htons(type));
+        header.set<uint16_t>(sizeof(uint16_t), 0);
+        push_back(header);
+    }
+
+    explicit section(const cursor& value)
+    {
+        mutable_buffer header = mutable_buffer::create(header_size);
+        header.set<uint16_t>(0, htons(move_ackn));
+        header.set<uint16_t>(sizeof(uint16_t), htons(value.size()));
+        push_back(header);
+        push_back(value);
+    }
+
+    explicit section(const snippet& value)
+    {
+        mutable_buffer header = mutable_buffer::create(header_size);
+        header.set<uint16_t>(0, htons(move_data));
+        header.set<uint16_t>(sizeof(uint16_t), htons(value.size()));
+        push_back(header);
+        push_back(value);
     }
 
     uint16_t type() const
@@ -260,19 +270,36 @@ struct payload : public multibuffer
 
     section advance()
     {
-        section sect(begin(), end());
-        pop_front(sect.count());
+        auto type = ntohs(at(0).get<uint16_t>(0));
+        size_t span = 0;
+        
+        if (type == section::move_data)
+        {
+            span = 3;
+        }
+        else if (type == section::move_ackn)
+        {
+            span = 2;
+        }
+        else if (count() > 0)
+        {
+            span = 1;
+        }
+
+        section sect(slice(0, span));
+        pop_front(span);
+
         return sect;
     }
 };
 
 struct packet : public multibuffer
 {
-    static constexpr uint16_t packet_sign = 0x0909;
-    static constexpr uint16_t packet_version = 0x0100;
-    static constexpr uint16_t header_size = 16;
-    static constexpr uint16_t max_packet_size = 65507;
-    static constexpr uint16_t max_payload_size = max_packet_size - header_size;
+    static constexpr size_t packet_sign = 0x0909;
+    static constexpr size_t packet_version = 0x0100;
+    static constexpr size_t header_size = 16;
+    static constexpr size_t max_packet_size = 65507;
+    static constexpr size_t max_payload_size = max_packet_size - header_size;
 
     explicit packet(const const_buffer& buffer)
     {

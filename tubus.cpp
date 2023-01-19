@@ -482,7 +482,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             const_buffer pull(uint64_t max)
             {
-                static const const_buffer zero("");
+                static const const_buffer zero;
 
                 if (m_data.empty())
                     return zero;
@@ -686,7 +686,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             const_buffer pull(uint64_t max)
             {
-                static const const_buffer zero("");
+                static const const_buffer zero;
 
                 if (!available())
                     return zero;

@@ -17,6 +17,10 @@ struct const_buffer
     typedef boost::asio::const_buffer value_type;
     typedef const boost::asio::const_buffer* const_iterator;
 
+    const_buffer() noexcept(true) 
+    {
+    }
+
     const_buffer(const std::string& str) noexcept(true) 
         : m_array(new uint8_t[str.size()])
         , m_frame(m_array.get(), str.size())
@@ -132,6 +136,10 @@ struct mutable_buffer
 {
     typedef boost::asio::mutable_buffer value_type;
     typedef const boost::asio::mutable_buffer* const_iterator;
+
+    mutable_buffer() noexcept(true)
+    {
+    }
 
     mutable_buffer(size_t size) noexcept(true) 
         : m_array(new uint8_t[size])

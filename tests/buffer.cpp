@@ -7,8 +7,8 @@ BOOST_AUTO_TEST_CASE(mutable_buffer)
 {
     std::cout << "mutable_buffer" << std::endl;
 
-    BOOST_REQUIRE_NO_THROW(novemus::mutable_buffer(0));
-    BOOST_CHECK_EQUAL(novemus::mutable_buffer(0).size(), 0);
+    BOOST_REQUIRE_NO_THROW(novemus::mutable_buffer());
+    BOOST_CHECK_EQUAL(novemus::mutable_buffer().size(), 0);
 
     const char* greet = "hello, tubus";
     const char* hello = "hello";
@@ -134,8 +134,8 @@ BOOST_AUTO_TEST_CASE(const_buffer)
 {
     std::cout << "const_buffer" << std::endl;
 
-    BOOST_REQUIRE_NO_THROW(novemus::mutable_buffer(""));
-    BOOST_CHECK_EQUAL(novemus::mutable_buffer("").size(), 0);
+    BOOST_REQUIRE_NO_THROW(novemus::const_buffer());
+    BOOST_CHECK_EQUAL(novemus::const_buffer().size(), 0);
 
     const char* greet = "hello, tubus";
 
@@ -165,7 +165,7 @@ BOOST_AUTO_TEST_CASE(const_buffer)
     BOOST_REQUIRE_THROW(cb.get<uint8_t>(12), std::runtime_error);
     BOOST_REQUIRE_THROW(cb.get<uint32_t>(10), std::runtime_error);
 
-    sb = novemus::const_buffer("");
+    sb = novemus::const_buffer();
 
     // slice
     cb = cb.slice(0, 5);
