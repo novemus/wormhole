@@ -184,7 +184,7 @@ BOOST_AUTO_TEST_CASE(packet)
     pack.make_opaque(1234567890);
     pack.make_opened(1234567890);
 
-    BOOST_CHECK_NE(pack.salt(), 0);
+    BOOST_CHECK_EQUAL(pack.salt(), 0);
     BOOST_CHECK_EQUAL(pack.sign(), novemus::tubus::packet::packet_sign);
     BOOST_CHECK_EQUAL(pack.version(), novemus::tubus::packet::packet_version);
     BOOST_CHECK_EQUAL(pack.pin(), 456);

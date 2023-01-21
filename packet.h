@@ -233,7 +233,7 @@ struct packet : public mutable_buffer
     {
         uint64_t s = salt() ^ secret;
 
-        salt(s);
+        salt(0);
         invert(secret, s);
     }
 

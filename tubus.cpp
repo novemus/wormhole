@@ -16,12 +16,12 @@
 
 namespace novemus { namespace tubus {
 
-template<class var> var getenv(const std::string& name, const var& def)
+template<class value_type> value_type getenv(const std::string& name, const value_type& def)
 {
     try
     {
         const char *env = std::getenv(name.c_str());
-        return env ? boost::lexical_cast<var>(env) : def;
+        return env ? boost::lexical_cast<value_type>(env) : def;
     }
     catch (const boost::bad_lexical_cast& ex)
     {

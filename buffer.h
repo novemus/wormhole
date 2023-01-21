@@ -21,6 +21,13 @@ struct const_buffer
     {
     }
 
+    const_buffer(const void* data, size_t size) noexcept(true) 
+        : m_array(new uint8_t[size])
+        , m_frame(m_array.get(), size)
+    {
+        std::memcpy(m_array.get(), data, size);
+    }
+
     const_buffer(const std::string& str) noexcept(true) 
         : m_array(new uint8_t[str.size()])
         , m_frame(m_array.get(), str.size())
@@ -120,10 +127,20 @@ struct const_buffer
         m_frame += len;
     }
 
+    template<class value> static const_buffer create(const value& data) noexcept(true)
+    {
+        return const_buffer(&data, sizeof(value));
+    }
+
     const_buffer& operator+=(size_t len) noexcept(true)
     {
         m_frame += len;
         return *this;
+    }
+
+    operator const boost::asio::const_buffer&() const noexcept(true)
+    {
+        return m_frame;
     }
 
 private:
@@ -220,11 +237,6 @@ struct mutable_buffer
         return mutable_buffer(m_array, data() - m_array.get() + size(), len);
     }
 
-    operator const_buffer() const noexcept(true)
-    {
-        return const_buffer(m_array, data() - m_array.get(), size());
-    }
-
     template<class type> type get(size_t pos) const noexcept(false)
     {
         if (pos + sizeof(type) > size())
@@ -279,6 +291,16 @@ struct mutable_buffer
         return *this;
     }
 
+    operator const const_buffer&() const noexcept(true)
+    {
+        return reinterpret_cast<const const_buffer&>(*this);
+    }
+
+    operator const boost::asio::mutable_buffer&() const noexcept(true)
+    {
+        return m_frame;
+    }
+
     static mutable_buffer create(size_t size) noexcept(true);
 
 private:
@@ -291,11 +313,9 @@ class buffer_factory : public std::enable_shared_from_this<buffer_factory>
 {
     void cache(uint8_t* ptr, size_t size)
     {
-        static const size_t max_cache_size = 64;
-
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_cache.size() == max_cache_size)
+        if (m_cache.size() == m_limit)
             m_cache.erase(m_cache.begin());
 
         m_cache.emplace(size, boost::shared_array<uint8_t>(ptr));
@@ -303,7 +323,7 @@ class buffer_factory : public std::enable_shared_from_this<buffer_factory>
 
 public:
 
-    buffer_factory()
+    buffer_factory(size_t max_cache_size) : m_limit(max_cache_size)
     {
     }
 
@@ -337,6 +357,7 @@ public:
 
 private:
 
+    size_t m_limit;
     std::multimap<size_t, boost::shared_array<uint8_t>> m_cache;
     std::mutex m_mutex;
 };
