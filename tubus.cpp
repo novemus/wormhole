@@ -210,6 +210,8 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             pack.version(packet::packet_version);
             pack.pin(m_local);
 
+            std::memset(pack.data() + packet::header_size, 0, section::header_size);
+
             auto now = boost::posix_time::microsec_clock::universal_time();
             if (now > m_dead || m_seen + ping_timeout() < now - boost::posix_time::seconds(5))
             {
@@ -252,6 +254,8 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
                 sect = sect.next();
             }
+
+            std::memset(sect.data(), 0, std::min<size_t>(section::header_size, sect.size()));
         }
 
         state status() const
@@ -453,6 +457,8 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 m_moves.emplace(handle, slice(buffer, now + resend_timeout()));
                 sect = sect.next();
             }
+
+            std::memset(sect.data(), 0, std::min<size_t>(section::header_size, sect.size()));
         }
 
         void append(const const_buffer& buffer, const io_callback& caller)
@@ -645,6 +651,8 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 ackn = m_acks.erase(ackn);
                 sect = sect.next();
             }
+
+            std::memset(sect.data(), 0, std::min<size_t>(section::header_size, sect.size()));
         }
 
         void append(const mutable_buffer& buf, const io_callback& caller)

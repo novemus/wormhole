@@ -4,7 +4,7 @@
 #include <ctime>
 #include <cstring>
 #include <stdexcept>
-#include <vector>
+#include <deque>
 #include <iostream>
 #include <type_traits>
 #include <boost/asio.hpp>
@@ -311,54 +311,70 @@ private:
 
 class buffer_factory : public std::enable_shared_from_this<buffer_factory>
 {
-    void cache(uint8_t* ptr, size_t size)
+    typedef std::weak_ptr<buffer_factory> weak_ptr;
+    typedef std::shared_ptr<buffer_factory> self_ptr;
+
+    static void destroy(weak_ptr weak, uint8_t* ptr)
+    {
+        self_ptr self = weak.lock();
+        if (self)
+        {
+            if (self->cache(ptr))
+                return;
+        }
+        delete[] ptr;
+    }
+
+    bool cache(uint8_t* ptr)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_cache.size() == m_limit)
-            m_cache.erase(m_cache.begin());
+        static const size_t s_max_cache_size = 16;
 
-        m_cache.emplace(size, boost::shared_array<uint8_t>(ptr));
+        if (m_cache.size() < s_max_cache_size)
+        {
+            m_cache.emplace_back(ptr,
+                std::bind(&buffer_factory::destroy, shared_from_this(), std::placeholders::_1)
+                );
+            return true;
+        }
+
+        return false;
     }
 
 public:
 
-    buffer_factory(size_t max_cache_size) : m_limit(max_cache_size)
+    buffer_factory(size_t size) : m_size(size)
     {
     }
 
-    mutable_buffer obtain(size_t size) noexcept(true)
+    mutable_buffer obtain() noexcept(true)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        auto iter = m_cache.lower_bound(size);
+        boost::shared_array<uint8_t> array;
+
+        auto iter = m_cache.begin();
         if (iter == m_cache.end())
         {
-            std::weak_ptr<buffer_factory> weak = shared_from_this();
-            auto array = boost::shared_array<uint8_t>(new uint8_t[size], [size, weak](uint8_t* ptr)
-            {
-                auto self = weak.lock();
-                if (self)
-                    self->cache(ptr, size);
-                else
-                    delete[] ptr;
-            });
-
-            std::memset(array.get(), 0, size);
-            return mutable_buffer(array, size);
+            array.reset(
+                new uint8_t[m_size],
+                std::bind(&buffer_factory::destroy, shared_from_this(), std::placeholders::_1)
+                );
+        }
+        else
+        {
+            array = *iter;
+            m_cache.erase(iter);
         }
 
-        auto array = iter->second;
-        m_cache.erase(iter);
-
-        std::memset(array.get(), 0, size);
-        return mutable_buffer(array, size);
+        return mutable_buffer(array, m_size);
     }
 
 private:
 
-    size_t m_limit;
-    std::multimap<size_t, boost::shared_array<uint8_t>> m_cache;
+    size_t m_size;
+    std::deque<boost::shared_array<uint8_t>> m_cache;
     std::mutex m_mutex;
 };
 
