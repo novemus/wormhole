@@ -362,7 +362,7 @@ struct packet : public multibuffer<const_buffer>
     packet(uint32_t pin)
     {
         mutable_buffer header = mutable_buffer::create(header_size);
-        header.set<uint16_t>(0, 0);
+        header.set<uint64_t>(0, 0);
         header.set<uint16_t>(sizeof(uint64_t), htons(packet_sign));
         header.set<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t), htons(packet_version));
         header.set<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2, htonl(pin));

@@ -76,9 +76,18 @@ struct section : public mutable_buffer
 
     void set(uint16_t t)
     {
-        mutable_buffer::set<uint16_t>(0, htons(t));
-        mutable_buffer::set<uint16_t>(sizeof(uint16_t), 0);
-        truncate(header_size);
+        if (t == list_stub)
+        {
+            size_t span = std::min<size_t>(size(), header_size);
+            std::memset(data(), 0, span);
+            truncate(span);
+        }
+        else
+        {
+            mutable_buffer::set<uint16_t>(0, htons(t));
+            mutable_buffer::set<uint16_t>(sizeof(uint16_t), 0);
+            truncate(header_size);
+        }
     }
 
     void set(uint16_t t, const mutable_buffer& v)

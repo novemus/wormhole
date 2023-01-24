@@ -206,11 +206,10 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         void imbue(packet& pack)
         {
+            pack.salt(0);
             pack.sign(packet::packet_sign);
             pack.version(packet::packet_version);
             pack.pin(m_local);
-
-            std::memset(pack.data() + packet::header_size, 0, section::header_size);
 
             auto now = boost::posix_time::microsec_clock::universal_time();
             if (now > m_dead || m_seen + ping_timeout() < now - boost::posix_time::seconds(5))
@@ -219,7 +218,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 return;
             }
 
-            section sect = pack.useless();
+            section sect = pack.payload();
             while (sect.size() >= section::header_size)
             {
                 auto iter = std::find_if(m_jobs.begin(), m_jobs.end(), [now](const auto& item)
@@ -228,7 +227,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 });
 
                 if (iter == m_jobs.end())
-                    return;
+                    break;
  
                 sect.set(iter->first);
                 
@@ -255,7 +254,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 sect = sect.next();
             }
 
-            std::memset(sect.data(), 0, std::min<size_t>(section::header_size, sect.size()));
+            sect.set(section::list_stub);
         }
 
         state status() const
@@ -458,7 +457,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 sect = sect.next();
             }
 
-            std::memset(sect.data(), 0, std::min<size_t>(section::header_size, sect.size()));
+            sect.set(section::list_stub);
         }
 
         void append(const const_buffer& buffer, const io_callback& caller)
@@ -652,7 +651,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 sect = sect.next();
             }
 
-            std::memset(sect.data(), 0, std::min<size_t>(section::header_size, sect.size()));
+            sect.set(section::list_stub);
         }
 
         void append(const mutable_buffer& buf, const io_callback& caller)
