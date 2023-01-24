@@ -257,3 +257,60 @@ BOOST_AUTO_TEST_CASE(buffer_factory)
 
     BOOST_CHECK(buf1.data() != buf2.data() && buf2.data() != buf3.data() && buf1.data() != buf3.data());
 }
+
+BOOST_AUTO_TEST_CASE(multibuffer)
+{
+    std::cout << "multibuffer" << std::endl;
+
+    novemus::const_buffer hello("hello");
+    novemus::const_buffer multibuffer("multibuffer");
+    
+    novemus::multibuffer<novemus::const_buffer> mb1;
+
+    mb1.push_back(hello);
+    mb1.push_back(multibuffer);
+
+    BOOST_CHECK_EQUAL(mb1.count(), 2);
+    BOOST_CHECK_EQUAL(mb1.size(), 16);
+
+    BOOST_CHECK_EQUAL(mb1.at(0).data(), hello.data());
+    BOOST_CHECK_EQUAL(mb1.at(1).data(), multibuffer.data());
+
+    auto merge = mb1.unite();
+    BOOST_CHECK_EQUAL(std::memcmp(merge.data(), "hellomultibuffer", merge.size()), 0);
+
+    mb1.count(1);
+    mb1.push_front(multibuffer);
+
+    BOOST_CHECK_EQUAL(mb1.count(), 2);
+    BOOST_CHECK_EQUAL(mb1.size(), 16);
+
+    BOOST_CHECK_EQUAL(mb1.at(0).data(), multibuffer.data());
+    BOOST_CHECK_EQUAL(mb1.at(1).data(), hello.data());
+
+    novemus::multibuffer<novemus::const_buffer> mb2(mb1);
+
+    mb2.push_front(hello);
+    mb2.push_back(multibuffer);
+    mb2.push_back(mb1);
+
+    BOOST_CHECK_EQUAL(mb2.count(), 6);
+    BOOST_CHECK_EQUAL(mb2.size(), 48);
+
+    BOOST_CHECK_EQUAL(mb2.at(0).data(), hello.data());
+    BOOST_CHECK_EQUAL(mb2.at(1).data(), multibuffer.data());
+    BOOST_CHECK_EQUAL(mb2.at(2).data(), hello.data());
+    BOOST_CHECK_EQUAL(mb2.at(3).data(), multibuffer.data());
+    BOOST_CHECK_EQUAL(mb2.at(4).data(), multibuffer.data());
+    BOOST_CHECK_EQUAL(mb2.at(5).data(), hello.data());
+
+    mb2.count(4);
+    mb2.pop_front();
+    mb2.pop_back();
+
+    BOOST_CHECK_EQUAL(mb2.count(), 2);
+    BOOST_CHECK_EQUAL(mb2.size(), 16);
+
+    BOOST_CHECK_EQUAL(mb2.at(0).data(), multibuffer.data());
+    BOOST_CHECK_EQUAL(mb2.at(1).data(), hello.data());
+}

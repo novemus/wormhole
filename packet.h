@@ -1,277 +1,321 @@
 #pragma once
 
 #include "buffer.h"
+#include <deque>
 #include <random>
+#include <numeric>
 
 namespace novemus { namespace tubus {
 
-struct cursor : public mutable_buffer
+struct cursor : public multibuffer<const_buffer>
 {
-    static constexpr uint16_t cursor_size = sizeof(uint64_t);
+    static constexpr size_t cursor_size = sizeof(uint64_t);
     
-    explicit cursor(const mutable_buffer& buf) : mutable_buffer(buf)
-    {
-        truncate(cursor_size);
-    }
-
-    uint64_t value() const
-    {
-        return le64toh(get<uint64_t>(0));
-    }
-
-    void value(uint64_t number)
-    {
-        mutable_buffer::set<uint64_t>(0, htole64(number));
-    }
-};
-
-struct snippet : public mutable_buffer
-{
-    static constexpr uint16_t handle_size = sizeof(uint64_t);
-
-    explicit snippet(const mutable_buffer& buf) : mutable_buffer(buf)
+    cursor()
     {
     }
 
-    void set(uint64_t handle, const const_buffer& scrap)
+    cursor(const multibuffer& buffer) : multibuffer(buffer)
     {
-        mutable_buffer::set<uint64_t>(0, htole64(handle));
-        mutable_buffer::fill(handle_size, scrap.size(), scrap.data());
-        truncate(handle_size + scrap.size());
     }
 
-    uint64_t handle() const
+    cursor(const const_buffer& buffer) : multibuffer(buffer.slice(0, std::min(cursor::cursor_size, buffer.size())))
     {
-        return le64toh(get<uint64_t>(0));
     }
 
-    mutable_buffer fragment() const
+    cursor(uint64_t number) : multibuffer(const_buffer::create(htole64(number)))
     {
-        return slice(handle_size, size() - handle_size);
+    }
+
+    inline uint64_t value() const
+    {
+        return le64toh(at(0).get<uint64_t>(0));
+    }
+
+    inline bool valid() const
+    {
+        return count() == 1 && at(0).size() == cursor_size;
     }
 };
 
-struct section : public mutable_buffer
+struct snippet : public multibuffer<const_buffer>
 {
-    static constexpr uint16_t header_size = sizeof(uint16_t) * 2;
+    static constexpr size_t header_size = sizeof(uint64_t);
 
-    enum kind
+    snippet()
     {
-        list_stub = 0,
-        link_init, link_ackn,
-        tear_init, tear_ackn,
-        ping_shot, ping_ackn,
-        move_data, move_ackn
+    }
+
+    snippet(const const_buffer& buffer)
+    {
+        if (buffer.size() > snippet::header_size)
+        {
+            push_back(buffer.slice(0, snippet::header_size));
+            push_back(buffer.slice(snippet::header_size, buffer.size() - snippet::header_size));
+        }
+    }
+
+    snippet(const multibuffer& buffer) : multibuffer(buffer)
+    {
+    }
+
+    snippet(uint64_t handle, const const_buffer& fragment)
+    {
+        push_back(const_buffer::create(htole64(handle)));
+        push_back(fragment);
+    }
+
+    inline uint64_t handle() const
+    {
+        return le64toh(at(0).get<uint64_t>(0));
+    }
+
+    inline const_buffer fragment() const
+    {
+        return at(1);
+    }
+
+    inline bool valid() const
+    {
+        return count() == 2 && at(0).size() == header_size;
+    }
+};
+
+struct section : public multibuffer<const_buffer>
+{
+    static constexpr size_t header_size = sizeof(uint16_t) * 2;
+
+    enum flag
+    {
+        echo = 0x1,
+        link = 0x2,
+        tear = 0x4,
+        ping = 0x6,
+        data = 0x8
     };
 
-    section(const mutable_buffer& buf) : section(buf, buf)
+    section(const const_buffer& buffer)
     {
-    }
+        if(buffer.size() < section::header_size)
+            return;
 
-    section(const mutable_buffer& par, const mutable_buffer& buf) : mutable_buffer(buf), m_parent(par)
-    {
-        if (type() != list_stub)
-            truncate(header_size + length());
-    }
+        push_back(buffer.slice(0, section::header_size));
 
-    void set(uint16_t t)
-    {
-        if (t == list_stub)
+        auto typ = type();
+        auto len = length();
+
+        if (buffer.size() < section::header_size + len)
+            return;
+
+        if (typ == flag::data)
         {
-            size_t span = std::min<size_t>(size(), header_size);
-            std::memset(data(), 0, span);
-            truncate(span);
+            push_back(snippet(buffer.slice(section::header_size, len)));
         }
-        else
+        else if (typ == (flag::data | flag::echo))
         {
-            mutable_buffer::set<uint16_t>(0, htons(t));
-            mutable_buffer::set<uint16_t>(sizeof(uint16_t), 0);
-            truncate(header_size);
+            push_back(cursor(buffer.slice(section::header_size, len)));
         }
     }
 
-    void set(uint16_t t, const mutable_buffer& v)
-    {
-        mutable_buffer::set<uint16_t>(0, htons(t));
-        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(v.size()));
-        fill(header_size, v.size(), v.data());
-        truncate(header_size + v.size());
-    }
-
-    uint16_t type() const
-    {
-        return size() >= sizeof(uint16_t) ? ntohs(get<uint16_t>(0)) : 0;
-    }
-
-    uint16_t length() const
-    {
-        return size() >= header_size ? ntohs(get<uint16_t>(sizeof(uint16_t))) : 0;
-    }
-
-    mutable_buffer value() const
-    {
-        if (size() <= header_size)
-            return slice(size(), 0);
-
-        return slice(header_size, type() == list_stub ? size() - header_size : length());
-    }
-
-    void type(kind t)
-    {
-        mutable_buffer::set<uint16_t>(0, htons(t));
-    }
-
-    void length(uint16_t l)
-    {
-        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(l));
-        truncate(header_size + l);
-    }
-
-    void value(const const_buffer& v)
-    {
-        fill(header_size, v.size(), v.data());
-        mutable_buffer::set<uint16_t>(sizeof(uint16_t), htons(v.size()));
-        truncate(header_size + v.size());
-    }
-
-    section next() const
-    {
-        auto shift = data() - m_parent.data() + size();
-        return section(m_parent, m_parent.slice(shift, m_parent.size() - shift));
-    }
-
-    section head() const
-    {
-        return section(m_parent, m_parent);
-    }
-
-    section tail() const
-    {
-        if (type() == list_stub)
-            return *this;
-
-        return next().tail();
-    }
-
-private:
-
-    mutable_buffer m_parent;
-};
-
-struct packet : public mutable_buffer
-{
-    static constexpr uint16_t packet_sign = 0x0909;
-    static constexpr uint16_t packet_version = 0x0100;
-    static constexpr uint16_t header_size = 16;
-    static constexpr uint16_t max_packet_size = 65507;
-    static constexpr uint16_t max_payload_size = max_packet_size - header_size;
-
-    explicit packet(const mutable_buffer& buf) : mutable_buffer(buf)
+    section()
     {
     }
 
-    uint64_t salt() const
+    section(const multibuffer& buffer) : multibuffer(buffer)
     {
-        return le64toh(get<uint64_t>(0));
     }
 
-    uint16_t sign() const
+    section(uint16_t type)
     {
-        return ntohs(get<uint16_t>(sizeof(uint64_t)));
+        mutable_buffer header = mutable_buffer::create(header_size);
+        header.set<uint16_t>(0, htons(type));
+        header.set<uint16_t>(sizeof(uint16_t), 0);
+        push_back(header);
     }
 
-    uint16_t version() const
+    section(const cursor& value)
     {
-        return ntohs(get<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t)));
+        mutable_buffer header = mutable_buffer::create(header_size);
+        header.set<uint16_t>(0, htons(flag::data | flag::echo));
+        header.set<uint16_t>(sizeof(uint16_t), htons(value.size()));
+        push_back(header);
+        push_back(value);
     }
 
-    uint32_t pin() const
+    section(const snippet& value)
     {
-        return ntohl(get<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2));
+        mutable_buffer header = mutable_buffer::create(header_size);
+        header.set<uint16_t>(0, htons(flag::data));
+        header.set<uint16_t>(sizeof(uint16_t), htons(value.size()));
+        push_back(header);
+        push_back(value);
+    }
+
+    inline uint16_t type() const
+    {
+        return ntohs(at(0).get<uint16_t>(0));
+    }
+
+    inline uint16_t length() const
+    {
+        return ntohs(at(0).get<uint16_t>(sizeof(uint16_t)));
+    }
+
+    inline multibuffer value() const
+    {
+        return slice(1, count() - 1);
     }
 
     bool valid() const
     {
-        return size() >= packet::header_size + section::header_size 
-            && sign() == packet::packet_sign && version() == packet::packet_version;
+        if (count() == 0 || at(0).size() != section::header_size)
+            return false;
+
+        switch (type())
+        {
+            case flag::data:
+                return count() == 3 && at(1).size() == snippet::header_size && at(2).size() == length() - snippet::header_size;
+            case flag::data | flag::echo:
+                return count() == 2 && at(1).size() == snippet::header_size;
+            default:
+                break;
+        }
+        return count() == 1;
+    }
+};
+
+struct payload : public multibuffer<const_buffer>
+{
+    payload()
+    {
     }
 
-    void salt(uint64_t s)
+    payload(const const_buffer& buffer)
     {
-        set<uint64_t>(0, htole64(s));
+        const_buffer rest = buffer;
+
+        section sect(rest);
+        while (sect.valid())
+        {
+            push_back(sect);
+            rest.crop(sect.size());
+            sect = section(rest);
+        }
     }
 
-    void sign(uint16_t s)
+    payload(const multibuffer& buffer) : multibuffer(buffer)
     {
-        set<uint16_t>(sizeof(uint64_t), htons(s));
     }
 
-    void version(uint16_t v)
+    section advance()
     {
-        set<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t), htons(v));
+        if (count() == 0 || at(0).size() < section::header_size)
+            return section();
+
+        section top(*this);
+        auto type = top.type();
+
+        if (type == section::data)
+        {
+            top.count(3);
+        }
+        else if (type == (section::data | section::echo))
+        {
+            top.count(2);
+        }
+        else
+        {
+            top.count(1);
+        }
+
+        pop_front(top.count());
+
+        return top;
+    }
+};
+
+struct packet : public multibuffer<const_buffer>
+{
+    static constexpr size_t packet_sign = 0x0909;
+    static constexpr size_t packet_version = 0x0100;
+    static constexpr size_t header_size = 16;
+    static constexpr size_t max_packet_size = 65507;
+    static constexpr size_t max_payload_size = max_packet_size - header_size;
+
+    packet(const const_buffer& buffer)
+    {
+        if (buffer.size() < header_size)
+            return;
+
+        push_back(buffer.slice(0, header_size));
+        push_back(payload(buffer.slice(header_size, buffer.size() - header_size)));
     }
 
-    void pin(uint32_t p)
+    packet(uint32_t pin)
     {
-        set<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2, htonl(p));
+        mutable_buffer header = mutable_buffer::create(header_size);
+        header.set<uint64_t>(0, 0);
+        header.set<uint16_t>(sizeof(uint64_t), htons(packet_sign));
+        header.set<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t), htons(packet_version));
+        header.set<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2, htonl(pin));
+        push_back(header);
     }
 
-    section payload() const
+    inline bool valid() const
     {
-        auto body = slice(packet::header_size, size() - packet::header_size);
-        return section(body, body);
+        return count() > 0 && at(0).size() == packet::header_size;
     }
 
-    section useless() const
+    inline uint64_t salt() const
     {
-        section head = payload();
-
-        if (head.type() != section::list_stub)
-            return head.tail();
-
-        return head;
+        return le64toh(at(0).get<uint64_t>(0));
     }
 
-    void trim()
+    inline uint16_t sign() const
     {
-        section tail = useless();
-        truncate(tail.data() - data());
+        return ntohs(at(0).get<uint16_t>(sizeof(uint64_t)));
     }
 
-    void make_opened(uint64_t secret)
+    inline uint16_t version() const
     {
-        uint64_t s = salt() ^ secret;
-
-        salt(0);
-        invert(secret, s);
+        return ntohs(at(0).get<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t)));
     }
 
-    void make_opaque(uint64_t secret)
+    inline uint32_t pin() const
     {
-        std::random_device dev;
-        std::mt19937_64 gen(dev());
-        uint64_t s = static_cast<uint64_t>(gen());
-
-        salt(s ^ secret);
-        invert(secret, s);
+        return ntohl(at(0).get<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2));
     }
 
-private:
-
-    inline uint64_t make_inverter(uint64_t secret, uint64_t salt)
+    inline payload data() const
     {
-        uint64_t base = secret + salt;
-        uint64_t shift = (base & 0x3F) | 0x01;
-        return ((base >> shift) | (base << (64 - shift))) ^ salt;
+        return payload(slice(1, count() - 1));
     }
+};
 
-    void invert(uint64_t secret, uint64_t salt)
+struct dimmer
+{
+    static mutable_buffer invert(uint64_t secret, const mutable_buffer& buffer)
     {
+        uint8_t* ptr = buffer.data();
+        uint8_t* end = buffer.data() + buffer.size();
+
+        uint64_t salt = le64toh(*(uint64_t*)ptr);
+        if (salt == 0)
+        {
+            std::random_device dev;
+            std::mt19937_64 gen(dev());
+            salt = static_cast<uint64_t>(gen());
+            *(uint64_t*)ptr = salt ^ secret;
+        }
+        else
+        {
+            salt ^= secret;
+            *(uint64_t*)ptr = 0;
+        }
+
+        ptr += sizeof(uint64_t);
+
         uint64_t inverter = make_inverter(secret, salt);
-
-        uint8_t* ptr = data() + sizeof(uint64_t);
-        uint8_t* end = data() + size();
-
         while (ptr + sizeof(uint64_t) <= end)
         {
             *(uint64_t*)ptr ^= inverter;
@@ -286,6 +330,17 @@ private:
             ++ptr;
             ++inv;
         }
+
+        return buffer;
+    }
+
+private:
+
+    static inline uint64_t make_inverter(uint64_t secret, uint64_t salt)
+    {
+        uint64_t base = secret + salt;
+        uint64_t shift = (base & 0x3F) | 0x01;
+        return ((base >> shift) | (base << (64 - shift))) ^ salt;
     }
 };
 

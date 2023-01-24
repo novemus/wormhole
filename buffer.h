@@ -5,6 +5,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <deque>
+#include <numeric>
 #include <iostream>
 #include <type_traits>
 #include <boost/asio.hpp>
@@ -46,26 +47,26 @@ struct const_buffer
     {
     }
 
-    const uint8_t* data() const noexcept(true)
+    inline const uint8_t* data() const noexcept(true)
     {
         return (const uint8_t*)m_frame.data();
     }
 
-    size_t size() const noexcept(true)
+    inline size_t size() const noexcept(true)
     {
         return m_frame.size();
     }
 
-    const_iterator begin() const { return &m_frame; }
+    inline const_iterator begin() const { return &m_frame; }
 
-    const_iterator end() const { return &m_frame + 1; }
+    inline const_iterator end() const { return &m_frame + 1; }
 
-    bool unique() const noexcept(true)
+    inline bool unique() const noexcept(true)
     {
         return m_array.unique();
     }
 
-    const_buffer slice(size_t pos, size_t len) const noexcept(false)
+    inline const_buffer slice(size_t pos, size_t len) const noexcept(false)
     {
         if (pos > size() || pos + len > size())
             throw std::runtime_error("const_buffer::slice: out of range");
@@ -74,7 +75,7 @@ struct const_buffer
         return const_buffer(m_array, offset + pos, len);
     }
 
-    const_buffer pop_front(size_t len) noexcept(false)
+    inline const_buffer pop_front(size_t len) noexcept(false)
     {
         if (len > size())
             throw std::runtime_error("const_buffer::pop_front: out of range");
@@ -85,7 +86,7 @@ struct const_buffer
         return const_buffer(m_array, offset, len);
     }
 
-    const_buffer pop_back(size_t len) noexcept(false)
+    inline const_buffer pop_back(size_t len) noexcept(false)
     {
         if (len > size())
             throw std::runtime_error("const_buffer::pop_back: out of range");
@@ -103,7 +104,7 @@ struct const_buffer
         return *(const type*)(data() + pos);
     }
 
-    void copy(size_t pos, size_t len, uint8_t* dst) const noexcept(false)
+    inline void copy(size_t pos, size_t len, uint8_t* dst) const noexcept(false)
     {
         if (pos + len > size())
             throw std::runtime_error("const_buffer::copy: out of range");
@@ -111,7 +112,7 @@ struct const_buffer
         std::memcpy(dst, data() + pos, len);
     }
 
-    void truncate(size_t len) noexcept(false)
+    inline void truncate(size_t len) noexcept(false)
     {
         if (len > size())
             throw std::runtime_error("const_buffer::truncate: out of range");
@@ -119,7 +120,7 @@ struct const_buffer
         m_frame = boost::asio::const_buffer(data(), len);
     }
 
-    void crop(size_t len) noexcept(false)
+    inline void crop(size_t len) noexcept(false)
     {
         if (len > size())
             throw std::runtime_error("const_buffer::crop: out of range");
@@ -132,13 +133,13 @@ struct const_buffer
         return const_buffer(&data, sizeof(value));
     }
 
-    const_buffer& operator+=(size_t len) noexcept(true)
+    inline const_buffer& operator+=(size_t len) noexcept(true)
     {
         m_frame += len;
         return *this;
     }
 
-    operator const boost::asio::const_buffer&() const noexcept(true)
+    inline operator const boost::asio::const_buffer&() const noexcept(true)
     {
         return m_frame;
     }
@@ -189,26 +190,26 @@ struct mutable_buffer
     {
     }
 
-    uint8_t* data() const noexcept(true)
+    inline uint8_t* data() const noexcept(true)
     {
         return (uint8_t*)m_frame.data();
     }
     
-    size_t size() const noexcept(true)
+    inline size_t size() const noexcept(true)
     {
         return m_frame.size();
     }
 
-    const_iterator begin() const { return &m_frame; }
+    inline const_iterator begin() const { return &m_frame; }
 
-    const_iterator end() const { return &m_frame + 1; }
+    inline const_iterator end() const { return &m_frame + 1; }
 
-    bool unique() const noexcept(true)
+    inline bool unique() const noexcept(true)
     {
         return m_array.unique();
     }
 
-    mutable_buffer slice(size_t pos, size_t len) const noexcept(false)
+    inline mutable_buffer slice(size_t pos, size_t len) const noexcept(false)
     {
         if (pos > size() || pos + len > size())
             throw std::runtime_error("mutable_buffer::slice: out of range");
@@ -216,7 +217,7 @@ struct mutable_buffer
         return mutable_buffer(m_array, data() - m_array.get() + pos, len);
     }
 
-    mutable_buffer pop_front(size_t len) noexcept(false)
+    inline mutable_buffer pop_front(size_t len) noexcept(false)
     {
         if (len > size())
             throw std::runtime_error("mutable_buffer::pop_front: out of range");
@@ -227,7 +228,7 @@ struct mutable_buffer
         return mutable_buffer(m_array, offset, len);
     }
 
-    mutable_buffer pop_back(size_t len) noexcept(false)
+    inline mutable_buffer pop_back(size_t len) noexcept(false)
     {
         if (len > size())
             throw std::runtime_error("mutable_buffer::pop_back: out of range");
@@ -253,7 +254,7 @@ struct mutable_buffer
         *(type*)(data() + pos) = val;
     }
 
-    void fill(size_t pos, size_t len, const uint8_t* src) noexcept(false)
+    inline void fill(size_t pos, size_t len, const uint8_t* src) noexcept(false)
     {
         if (pos + len > size())
             throw std::runtime_error("mutable_buffer::fill: out of range");
@@ -261,7 +262,7 @@ struct mutable_buffer
         std::memcpy(data() + pos, src, len);
     }
 
-    void copy(size_t pos, size_t len, uint8_t* dst) const noexcept(false)
+    inline void copy(size_t pos, size_t len, uint8_t* dst) const noexcept(false)
     {
         if (pos + len > size())
             throw std::runtime_error("mutable_buffer::copy: out of range");
@@ -269,7 +270,7 @@ struct mutable_buffer
         std::memcpy(dst, data() + pos, len);
     }
 
-    void crop(size_t len) noexcept(false)
+    inline void crop(size_t len) noexcept(false)
     {
         if (len > size())
             throw std::runtime_error("mutable_buffer::crop: out of range");
@@ -277,7 +278,7 @@ struct mutable_buffer
         m_frame += len;
     }
 
-    void truncate(size_t len) noexcept(false)
+    inline void truncate(size_t len) noexcept(false)
     {
         if (len > size())
             throw std::runtime_error("mutable_buffer::truncate: out of range");
@@ -285,18 +286,18 @@ struct mutable_buffer
         m_frame = boost::asio::mutable_buffer(data(), len);
     }
 
-    mutable_buffer& operator+=(size_t len) noexcept(true)
+    inline mutable_buffer& operator+=(size_t len) noexcept(true)
     {
         m_frame += len;
         return *this;
     }
 
-    operator const const_buffer&() const noexcept(true)
+    inline operator const const_buffer&() const noexcept(true)
     {
         return reinterpret_cast<const const_buffer&>(*this);
     }
 
-    operator const boost::asio::mutable_buffer&() const noexcept(true)
+    inline operator const boost::asio::mutable_buffer&() const noexcept(true)
     {
         return m_frame;
     }
@@ -376,6 +377,114 @@ private:
     size_t m_size;
     std::deque<boost::shared_array<uint8_t>> m_cache;
     std::mutex m_mutex;
+};
+
+template<class buffer_type> struct multibuffer
+{
+    typedef buffer_type value_type;
+    typedef typename std::deque<value_type>::const_iterator const_iterator;
+
+    multibuffer()
+    {
+    }
+
+    multibuffer(const value_type& buffer) : m_chain(1, buffer)
+    {
+    }
+
+    multibuffer(const multibuffer& chain) : m_chain(chain.begin(), chain.end())
+    {
+    }
+
+    multibuffer(const const_iterator& beg, const const_iterator& end) : m_chain(beg, end)
+    {
+    }
+
+    inline void push_back(const value_type& buffer)
+    {
+        m_chain.push_back(buffer);
+    }
+
+    inline void push_front(const value_type& buffer)
+    {
+        m_chain.push_front(buffer);
+    }
+
+    inline void push_back(const multibuffer& chain)
+    {
+        std::copy(chain.begin(), chain.end(), std::back_inserter(m_chain));
+    }
+
+    inline void push_front(const multibuffer& chain)
+    {
+        std::copy(chain.m_chain.rbegin(), chain.m_chain.rend(), std::front_inserter(m_chain));
+    }
+
+    inline void pop_front(size_t count = 1)
+    {
+        m_chain.erase(m_chain.begin(), m_chain.begin() + count);
+    }
+
+    inline void pop_back(size_t count = 1)
+    {
+        m_chain.erase(m_chain.begin() + (m_chain.size() - count), m_chain.end());
+    }
+
+    inline multibuffer slice(size_t pos, size_t count) const
+    {
+        return multibuffer(m_chain.begin() + pos, m_chain.begin() + pos + count);
+    }
+
+    inline void count(size_t size)
+    {
+        m_chain.resize(size);
+    }
+
+    inline size_t count() const
+    {
+        return m_chain.size();
+    }
+
+    inline size_t size() const
+    {
+        return std::accumulate(m_chain.begin(), m_chain.end(), 0, [](size_t sum, const value_type& buffer)
+        {
+            return sum + buffer.size();
+        });
+    }
+
+    inline const value_type& at(size_t pos) const
+    {
+        return m_chain.at(pos);
+    }
+
+    inline const_iterator begin() const
+    {
+        return m_chain.begin();
+    }
+
+    inline const_iterator end() const
+    {
+        return m_chain.end();
+    }
+
+    mutable_buffer unite() const
+    {
+        mutable_buffer buffer = mutable_buffer::create(size());
+        
+        size_t offset = 0;
+        std::for_each(m_chain.begin(), m_chain.end(), [&offset, &buffer](const value_type& item)
+        {
+            std::memcpy(buffer.data() + offset, item.data(), item.size());
+            offset += item.size();
+        });
+
+        return buffer;
+    }
+
+private:
+
+    std::deque<value_type> m_chain;
 };
 
 }
