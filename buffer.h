@@ -1,10 +1,10 @@
 #pragma once
 
 #include <list>
+#include <deque>
 #include <ctime>
 #include <cstring>
 #include <stdexcept>
-#include <deque>
 #include <numeric>
 #include <iostream>
 #include <type_traits>
@@ -354,9 +354,7 @@ public:
         std::unique_lock<std::mutex> lock(m_mutex);
 
         boost::shared_array<uint8_t> array;
-
-        auto iter = m_cache.begin();
-        if (iter == m_cache.end())
+        if (m_cache.empty())
         {
             array.reset(
                 new uint8_t[m_size],
@@ -365,8 +363,8 @@ public:
         }
         else
         {
-            array = *iter;
-            m_cache.erase(iter);
+            array = m_cache.front();
+            m_cache.pop_front();
         }
 
         return mutable_buffer(array, m_size);
@@ -375,7 +373,7 @@ public:
 private:
 
     size_t m_size;
-    std::deque<boost::shared_array<uint8_t>> m_cache;
+    std::list<boost::shared_array<uint8_t>> m_cache;
     std::mutex m_mutex;
 };
 
@@ -392,12 +390,28 @@ template<class buffer_type> struct multibuffer
     {
     }
 
-    multibuffer(const multibuffer& chain) : m_chain(chain.begin(), chain.end())
+    multibuffer(multibuffer&& buffer) : m_chain(std::move(buffer.m_chain))
+    {
+    }
+
+    multibuffer(const multibuffer& buffer) : m_chain(buffer.begin(), buffer.end())
     {
     }
 
     multibuffer(const const_iterator& beg, const const_iterator& end) : m_chain(beg, end)
     {
+    }
+
+    multibuffer& operator=(const multibuffer& buffer)
+    {
+        m_chain = buffer.m_chain;
+        return *this;
+    }
+
+    multibuffer& operator=(multibuffer&& buffer)
+    {
+        m_chain = buffer.m_chain;
+        return *this;
     }
 
     inline void push_back(const value_type& buffer)
@@ -422,12 +436,14 @@ template<class buffer_type> struct multibuffer
 
     inline void pop_front(size_t count = 1)
     {
-        m_chain.erase(m_chain.begin(), m_chain.begin() + count);
+        while (count--)
+            m_chain.pop_front();
     }
 
     inline void pop_back(size_t count = 1)
     {
-        m_chain.erase(m_chain.begin() + (m_chain.size() - count), m_chain.end());
+        while (count--)
+            m_chain.pop_back();
     }
 
     inline multibuffer slice(size_t pos, size_t count) const

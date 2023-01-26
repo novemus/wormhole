@@ -94,6 +94,10 @@ struct section : public multibuffer<const_buffer>
         data = 0x8
     };
 
+    section()
+    {
+    }
+
     section(const const_buffer& buffer)
     {
         if(buffer.size() < section::header_size)
@@ -117,7 +121,7 @@ struct section : public multibuffer<const_buffer>
         }
     }
 
-    section()
+    section(multibuffer&& buffer) : multibuffer(buffer)
     {
     }
 
@@ -212,25 +216,22 @@ struct payload : public multibuffer<const_buffer>
         if (count() == 0 || at(0).size() < section::header_size)
             return section();
 
-        section top(*this);
-        auto type = top.type();
+        auto type = ntohs(at(0).get<uint16_t>(0));
+        size_t count = 1;
 
         if (type == section::data)
         {
-            top.count(3);
+            count = 3;
         }
         else if (type == (section::data | section::echo))
         {
-            top.count(2);
-        }
-        else
-        {
-            top.count(1);
+            count = 2;
         }
 
-        pop_front(top.count());
+        auto buffer = slice(0, count);
+        pop_front(count);
 
-        return top;
+        return section(std::move(buffer));
     }
 };
 

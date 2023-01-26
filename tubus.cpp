@@ -227,7 +227,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
  
                 pack.push_back(novemus::tubus::section(iter->first));
                 
-                if (iter->first == section::link)
+                if (iter->first == (section::link | section::echo))
                 {
                     m_jobs.erase(iter);
 
@@ -850,7 +850,7 @@ protected:
         if (pack.size() > packet::header_size)
         {
             auto buffer = m_secret == 0 ? pack : multibuffer<const_buffer>(dimmer::invert(m_secret, pack.unite()));
-            m_socket.async_send(pack, [weak, buffer](const boost::system::error_code& error, size_t size)
+            m_socket.async_send(buffer, [weak, buffer](const boost::system::error_code& error, size_t size)
             {
                 auto ptr = weak.lock();
                 if (ptr)
