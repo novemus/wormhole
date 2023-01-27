@@ -164,8 +164,8 @@ public:
     {
         novemus::mutable_buffer chank(1024 * 1024);
 
-        uint8_t* ptr = chank.data();
-        uint8_t* end = chank.data() + chank.size();
+        uint8_t* ptr = (uint8_t*)chank.data();
+        uint8_t* end = ptr + chank.size();
 
         while (ptr < end)
         {
@@ -190,8 +190,8 @@ public:
 
     void write_some(const novemus::const_buffer& chank)
     {
-        const uint8_t* ptr = chank.data();
-        const uint8_t* end = chank.data() + chank.size();
+        const uint8_t* ptr = (const uint8_t*)chank.data();
+        const uint8_t* end = ptr + chank.size();
 
         while (ptr < end)
         {

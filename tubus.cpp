@@ -120,7 +120,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         bool valid(const packet& pack)
         {
-            return pack.valid() && m_local != 0 && (m_remote == 0 || m_remote == pack.pin());
+            return pack.size() > packet::header_size && m_local != 0 && (m_remote == 0 || m_remote == pack.pin());
         }
 
         void parse(const packet& pack)
@@ -130,12 +130,11 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
             m_seen = boost::posix_time::microsec_clock::universal_time();
 
-            auto payload = pack.data();
-            auto section = payload.advance();
+            auto sect = pack.body();
+            auto type = sect.type();
 
-            while (section.valid())
+            while (type != 0)
             {
-                auto type = section.type();
                 switch (type)
                 {
                     case section::link:
@@ -191,7 +190,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                         m_jobs.emplace(section::ping | section::echo, m_seen);
                         break;
                     }
-                    case section::ping | section::echo:
+                    case section::flag::ping | section::flag::echo:
                     {
                         m_jobs.erase(section::ping);
                         m_jobs.emplace(section::ping, m_seen + ping_timeout());
@@ -200,22 +199,28 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     default: break;
                 }
 
-                section = payload.advance();
+                sect.advance();
+                type = sect.type();
             }
         }
 
-        packet imbue()
+        void imbue(packet& pack)
         {
-            packet pack(m_local);
+            pack.set<uint64_t>(0, 0);
+            pack.set<uint16_t>(sizeof(uint64_t), htons(packet::packet_sign));
+            pack.set<uint16_t>(sizeof(uint64_t) + sizeof(uint16_t), htons(packet::packet_version));
+            pack.set<uint32_t>(sizeof(uint64_t) + sizeof(uint16_t) * 2, htonl(m_local));
+            pack.set<uint32_t>(packet::header_size, 0);
 
             auto now = boost::posix_time::microsec_clock::universal_time();
             if (now > m_dead || m_seen + ping_timeout() < now - boost::posix_time::seconds(5))
             {
                 m_io.post(boost::bind(on_error, boost::asio::error::broken_pipe));
-                return pack;
+                return;
             }
 
-            while (packet::max_packet_size - pack.size() >= section::header_size)
+            section sect = pack.stub();
+            while (sect.size() >= section::header_size)
             {
                 auto iter = std::find_if(m_jobs.begin(), m_jobs.end(), [now](const auto& item)
                 {
@@ -225,7 +230,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 if (iter == m_jobs.end())
                     break;
  
-                pack.push_back(novemus::tubus::section(iter->first));
+                sect.simple(iter->first);
                 
                 if (iter->first == (section::link | section::echo))
                 {
@@ -246,9 +251,11 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 {
                     iter->second = now + resend_timeout();
                 }
+
+                sect.advance();
             }
 
-            return pack;
+            sect.stub();
         }
 
         state status() const
@@ -381,16 +388,15 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         void parse(const packet& pack)
         {
-            auto payload = pack.data();
-            auto section = payload.advance();
+            auto sect = pack.body();
+            auto type = sect.type();
 
-            while (section.valid())
+            while (type != 0)
             {
-                auto type = section.type();
-                if (type == (section::data | section::echo))
+                if (type == (section::move | section::echo))
                 {
-                    cursor handle(section.value());
-                    m_moves.erase(handle.value());
+                    cursor curs(sect.value());
+                    m_moves.erase(curs.handle());
 
                     auto cursor = m_moves.empty() ? m_buffer.head() : m_moves.begin()->first;
 
@@ -402,18 +408,22 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     }
                 }
 
-                section = payload.advance();
+                sect.advance();
+                type = sect.type();
             }
         }
 
         void imbue(packet& pack)
         {
             auto now = boost::posix_time::microsec_clock::universal_time();
-            while (packet::max_packet_size - pack.size() > section::header_size + snippet::header_size)
+
+            section sect = pack.stub();
+            while (sect.size() > section::header_size + snippet::handle_size)
             {
-                auto iter = std::find_if(m_moves.begin(), m_moves.end(), [&pack, &now](const auto& item)
+                auto max = sect.size() - section::header_size - snippet::handle_size;
+                auto iter = std::find_if(m_moves.begin(), m_moves.end(), [max, &now](const auto& item)
                 {
-                    return item.second.time < now && item.second.data.size() <= packet::max_packet_size - pack.size();
+                    return item.second.time < now && item.second.data.size() <= max;
                 });
 
                 if (iter == m_moves.end())
@@ -421,22 +431,25 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
                 iter->second.time = now + resend_timeout();
 
-                pack.push_back(iter->second.data);
+                sect.snippet(iter->first, iter->second.data);
+                sect.advance();
             }
 
             while (m_buffer.available() && m_moves.size() < snippet_flight())
             {
-                auto rest = packet::max_packet_size - pack.size();
-                if (rest <= section::header_size + snippet::header_size)
+                if (sect.size() <= section::header_size + snippet::handle_size)
                     break;
 
                 auto handle = m_buffer.head();
-                auto buffer = m_buffer.pull(rest - section::header_size - snippet::header_size);
+                auto buffer = m_buffer.pull(sect.size() - section::header_size - snippet::handle_size);
                 
-                section sect(snippet(handle, buffer));
-                pack.push_back(sect);
-                m_moves.emplace(handle, flight(sect, now + resend_timeout()));
+                sect.snippet(handle, buffer);
+                sect.advance();
+
+                m_moves.emplace(handle, flight(buffer, now + resend_timeout()));
             }
+
+            sect.stub();
         }
 
         void append(const const_buffer& buffer, const io_callback& caller)
@@ -539,10 +552,10 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         struct flight
         {
-            section data;
+            const_buffer data;
             boost::posix_time::ptime time;
 
-            flight(const section& s, const boost::posix_time::ptime& t)
+            flight(const const_buffer& s, const boost::posix_time::ptime& t)
                 : data(s)
                 , time(t)
             {
@@ -584,14 +597,14 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         void parse(const packet& pack)
         {
-            auto payload = pack.data();
-            auto section = payload.advance();
+            auto sect = pack.body();
+            auto type = sect.type();
 
-            while (section.valid())
+            while (type != 0)
             {
-                if (section.type() == section::data)
+                if (type == section::move)
                 {
-                    snippet snip(section.value());
+                    snippet snip(sect.value());
                     
                     if (m_buffer.map(snip.handle(), snip.fragment()))
                     {
@@ -606,7 +619,8 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                     }
                 }
 
-                section = payload.advance();
+                sect.advance();
+                type = sect.type();
             }
 
             transmit();
@@ -614,12 +628,18 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         void imbue(packet& pack)
         {
-            auto ackn = m_acks.begin();
-            while (ackn != m_acks.end() && packet::max_packet_size - pack.size() >= section::header_size + cursor::cursor_size)
+            section sect = pack.stub();
+
+            auto iter = m_acks.begin();
+            while (iter != m_acks.end() && sect.size() >= section::header_size + cursor::handle_size)
             {
-                pack.push_back(section(cursor(*ackn)));
-                ackn = m_acks.erase(ackn);
+                sect.cursor(*iter);
+                sect.advance();
+
+                iter = m_acks.erase(iter);
             }
+            
+            sect.stub();
         }
 
         void append(const mutable_buffer& buf, const io_callback& caller)
@@ -839,17 +859,21 @@ protected:
         }
 
         std::weak_ptr<transport> weak = shared_from_this();
-        packet pack = m_connector.imbue();
 
+        packet pack(mutable_buffer::create(packet::max_packet_size));
+        
+        m_connector.imbue(pack);
         if (m_connector.status() == state::linked)
         {
             m_istreamer.imbue(pack);
             m_ostreamer.imbue(pack);
         }
 
+        pack.trim();
+
         if (pack.size() > packet::header_size)
         {
-            auto buffer = m_secret == 0 ? pack : multibuffer<const_buffer>(dimmer::invert(m_secret, pack.unite()));
+            auto buffer = m_secret == 0 ? pack : dimmer::invert(m_secret, pack);
             m_socket.async_send(buffer, [weak, buffer](const boost::system::error_code& error, size_t size)
             {
                 auto ptr = weak.lock();
