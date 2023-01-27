@@ -407,38 +407,116 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    tubus_channel left(le, re, 0);
-    tubus_channel right(re, le, 0);
-
-    BOOST_REQUIRE_NO_THROW(left.open());
-    BOOST_REQUIRE_NO_THROW(right.open());
-
-    auto la = left.async_accept();
-    auto rc = right.async_connect();
-
-    BOOST_REQUIRE_NO_THROW(la.get());
-    BOOST_REQUIRE_NO_THROW(rc.get());
+    auto left = novemus::tubus::create_channel(le, re, 0);
+    auto right = novemus::tubus::create_channel(re, le, 0);
 
     novemus::mutable_buffer wb(1024 * 1024);
     novemus::mutable_buffer rb(1024 * 1024);
 
+    const size_t TRAFFIC = 1024 * 1024 * 1024;
+
+    size_t written = 0;
+
+    std::promise<void> wp;
+    std::future<void> wf = wp.get_future();
+
+    novemus::tubus::channel::io_callback on_write = [&](const boost::system::error_code& err, size_t size)
+    {
+        if (err)
+        {
+            std::cout << "on_write: " << err.message() << std::endl;
+            wp.set_exception(std::make_exception_ptr(boost::system::system_error(err)));
+            return;
+        }
+
+        written += size;
+
+        if (written < TRAFFIC)
+        {
+            auto rest = TRAFFIC - written;
+            left->write(wb.size() > rest ? wb.slice(0, rest) : wb, on_write);
+        }
+        else
+        {
+            wp.set_value();
+        }
+    };
+
+    novemus::tubus::channel::callback on_connect = [&](const boost::system::error_code& err)
+    {
+        if (err)
+        {
+            std::cout << "on_connect: " << err.message() << std::endl;
+            wp.set_exception(std::make_exception_ptr(boost::system::system_error(err)));
+            return;
+        }
+
+        left->write(wb, on_write);
+    };
+
+    size_t read = 0;
+
+    std::promise<void> rp;
+    std::future<void> rf = rp.get_future();
+
+    novemus::tubus::channel::io_callback on_read = [&](const boost::system::error_code& err, size_t size)
+    {
+        if (err)
+        {
+            std::cout << "on_read: " << err.message() << std::endl;
+            rp.set_exception(std::make_exception_ptr(boost::system::system_error(err)));
+            return;
+        }
+
+        read += size;
+
+        if (read < TRAFFIC)
+        {
+            auto rest = TRAFFIC - read;
+            right->read(rb.size() > rest ? rb.slice(0, rest) : rb, on_read);
+        }
+        else
+        {
+            rp.set_value();
+        }
+    };
+
+    novemus::tubus::channel::callback on_accept = [&](const boost::system::error_code& err)
+    {
+        if (err)
+        {
+            std::cout << "on_accept: " << err.message() << std::endl;
+            rp.set_exception(std::make_exception_ptr(boost::system::system_error(err)));
+            return;
+        }
+
+        right->read(rb, on_read);
+    };
+
+    right->open();
+    left->open();
+
+    right->accept(on_accept);
+    left->connect(on_connect);
+
     std::cout << boost::posix_time::microsec_clock::local_time() << ": begin" << std::endl;
 
-    for (size_t i = 0; i < 1024; ++i)
-    {
-        auto lw = left.async_write(wb);
-        auto rr = right.async_read(rb);
-        BOOST_REQUIRE_NO_THROW(lw.get());
-        BOOST_REQUIRE_NO_THROW(rr.get());
-    }
+    wf.get();
+    rf.get();
 
     std::cout << boost::posix_time::microsec_clock::local_time() << ": end" << std::endl;
 
-    auto ls = left.async_shutdown();
-    auto rs = right.async_shutdown();
+    novemus::tubus::channel::callback on_shutdown = [&](const boost::system::error_code& err)
+    {
+        if (err)
+        {
+            std::cout << "on_shutdown: " << err.message() << std::endl;
+            return;
+        }
+    };
 
-    BOOST_REQUIRE_NO_THROW(ls.get());
-    BOOST_REQUIRE_NO_THROW(rs.get());
+    right->shutdown(on_shutdown);
+    left->shutdown(on_shutdown);
 }
 
 BOOST_AUTO_TEST_CASE(udp_speed)
