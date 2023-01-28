@@ -586,7 +586,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             auto iter = m_readers.begin();
             while (iter != m_readers.end())
             {
-                m_io.post(boost::bind(iter->callback, err, 0));
+                m_io.post(boost::bind(iter->callback, err, iter->read));
                 ++iter;
             }
 
@@ -663,17 +663,18 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 if (iter == m_readers.end())
                     break;
                 
-                size_t read = 0;
-                while (m_buffer.available() && iter->buffer.size() > 0)
+                while (m_buffer.available() && iter->buffer.size() > iter->read)
                 {
-                    auto buffer = m_buffer.pull(iter->buffer.size());
-                    iter->buffer.fill(0, buffer.size(), buffer.data());
-                    iter->buffer.crop(buffer.size());
-                    read += buffer.size();
+                    auto buffer = m_buffer.pull(iter->buffer.size() - iter->read);
+                    iter->buffer.fill(iter->read, buffer.size(), buffer.data());
+                    iter->read += buffer.size();
                 }
 
-                m_io.post(boost::bind(iter->callback, boost::system::error_code(), read));
-                m_readers.erase(iter);
+                if (iter->buffer.size() == iter->read)
+                {
+                    m_io.post(boost::bind(iter->callback, boost::system::error_code(), iter->read));
+                    m_readers.erase(iter);
+                }
             }
         }
 
@@ -751,6 +752,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         struct reader
         {
+            uint64_t read = 0;
             mutable_buffer buffer;
             io_callback callback;
 

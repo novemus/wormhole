@@ -10,19 +10,16 @@
 #define ASYNC_IO(object, method, buffer, filter) \
 return std::async([obj = object, buffer]() \
 { \
-    size_t total = 0; \
-    do { \
-        std::promise<size_t> promise; \
-        std::future<size_t> future = promise.get_future(); \
-        obj->method(buffer.slice(total, buffer.size() - total), [&promise](const boost::system::error_code& error, size_t size) \
-        { \
-            if (filter) \
-                promise.set_exception(std::make_exception_ptr(boost::system::system_error(error))); \
-            else \
-                promise.set_value(size); \
-        }); \
-        total += future.get(); \
-    } while (total < buffer.size()); \
+    std::promise<void> promise; \
+    std::future<void> future = promise.get_future(); \
+    obj->method(buffer, [&promise](const boost::system::error_code& error, size_t size) \
+    { \
+        if (filter) \
+            promise.set_exception(std::make_exception_ptr(boost::system::system_error(error))); \
+        else \
+            promise.set_value(); \
+    }); \
+    future.get(); \
 }) \
 
 #define ASYNC(object, method, filter) \
