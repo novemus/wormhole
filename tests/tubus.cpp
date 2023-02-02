@@ -55,7 +55,7 @@ public:
 
     void open()
     {
-        m_channel = novemus::tubus::create_channel(m_bind, m_peer, m_secret);
+        m_channel = novemus::tubus::create_channel(novemus::shared_reactor(), m_bind, m_peer, m_secret);
         m_channel->open();
     }
 
@@ -92,7 +92,7 @@ public:
 
 class mediator
 {
-    std::shared_ptr<novemus::reactor> m_reactor;
+    novemus::reactor_ptr m_reactor;
     boost::asio::ip::udp::endpoint m_le;
     boost::asio::ip::udp::endpoint m_re;
     boost::asio::ip::udp::socket m_bs;
@@ -138,7 +138,7 @@ class mediator
 public:
 
     mediator(const boost::asio::ip::udp::endpoint& b, const boost::asio::ip::udp::endpoint& l, const boost::asio::ip::udp::endpoint& r)
-        : m_reactor(novemus::reactor::shared_reactor())
+        : m_reactor(novemus::shared_reactor())
         , m_le(l)
         , m_re(r)
         , m_bs(m_reactor->io(), b.protocol())
@@ -404,8 +404,8 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    auto left = novemus::tubus::create_channel(le, re, 0);
-    auto right = novemus::tubus::create_channel(re, le, 0);
+    auto left = novemus::tubus::create_channel(novemus::shared_reactor(), le, re, 0);
+    auto right = novemus::tubus::create_channel(novemus::shared_reactor(), re, le, 0);
 
     novemus::mutable_buffer wb(1024 * 1024);
     novemus::mutable_buffer rb(1024 * 1024);
@@ -417,7 +417,7 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     std::promise<void> wp;
     std::future<void> wf = wp.get_future();
 
-    novemus::tubus::channel::io_callback on_write = [&](const boost::system::error_code& err, size_t size)
+    novemus::tubus::io_callback on_write = [&](const boost::system::error_code& err, size_t size)
     {
         if (err)
         {
@@ -439,7 +439,7 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
         }
     };
 
-    novemus::tubus::channel::callback on_connect = [&](const boost::system::error_code& err)
+    novemus::tubus::callback on_connect = [&](const boost::system::error_code& err)
     {
         if (err)
         {
@@ -456,7 +456,7 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     std::promise<void> rp;
     std::future<void> rf = rp.get_future();
 
-    novemus::tubus::channel::io_callback on_read = [&](const boost::system::error_code& err, size_t size)
+    novemus::tubus::io_callback on_read = [&](const boost::system::error_code& err, size_t size)
     {
         if (err)
         {
@@ -478,7 +478,7 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
         }
     };
 
-    novemus::tubus::channel::callback on_accept = [&](const boost::system::error_code& err)
+    novemus::tubus::callback on_accept = [&](const boost::system::error_code& err)
     {
         if (err)
         {
@@ -503,7 +503,7 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
 
     std::cout << boost::posix_time::microsec_clock::local_time() << ": end" << std::endl;
 
-    novemus::tubus::channel::callback on_shutdown = [&](const boost::system::error_code& err)
+    novemus::tubus::callback on_shutdown = [&](const boost::system::error_code& err)
     {
         if (err)
         {
@@ -523,7 +523,7 @@ BOOST_AUTO_TEST_CASE(udp_speed)
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    auto reactor = novemus::reactor::shared_reactor();
+    auto reactor = novemus::shared_reactor();
 
     auto right = std::make_shared<boost::asio::ip::udp::socket>(reactor->io(), re.protocol());
 
@@ -579,7 +579,7 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
     boost::asio::ip::tcp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::tcp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    auto reactor = novemus::reactor::shared_reactor();
+    auto reactor = novemus::shared_reactor();
 
     boost::asio::ip::tcp::socket right(reactor->io());
     boost::asio::ip::tcp::socket left(reactor->io());

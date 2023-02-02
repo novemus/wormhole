@@ -14,7 +14,7 @@ class client : public std::enable_shared_from_this<client>
     typedef std::function<void(const boost::system::error_code&)> callback;
     typedef std::function<void(const boost::system::error_code&, size_t)> io_callback;
 
-    std::shared_ptr<novemus::reactor> m_reactor;
+    novemus::reactor_ptr m_reactor;
     boost::asio::ip::tcp::socket m_socket;
     std::list<std::pair<mutable_buffer, io_callback>> m_rq;
     std::list<std::pair<const_buffer, io_callback>> m_wq;
@@ -83,13 +83,15 @@ class client : public std::enable_shared_from_this<client>
 
 public:
 
-    client() : m_reactor(novemus::reactor::shared_reactor()), m_socket(m_reactor->io())
+    client(novemus::reactor_ptr reactor) : m_reactor(reactor), m_socket(m_reactor->io())
     {
     }
 
     ~client()
     {
         error(boost::asio::error::operation_aborted);
+        boost::system::error_code ec;
+        m_socket.close(ec);
     }
 
     void async_connect(const boost::asio::ip::tcp::endpoint& ep, const callback& handler)
@@ -151,6 +153,8 @@ public:
     }
 };
 
+typedef std::shared_ptr<client> client_ptr;
+
 class router : public std::enable_shared_from_this<router>
 {
     struct packet : public novemus::mutable_buffer
@@ -193,15 +197,15 @@ class router : public std::enable_shared_from_this<router>
         }
     };
 
-    std::shared_ptr<novemus::reactor> m_reactor;
-    std::shared_ptr<novemus::tubus::channel> m_tunnel;
-    std::map<uint32_t, std::shared_ptr<client>> m_bunch;
+    novemus::reactor_ptr m_reactor;
+    novemus::tubus::channel_ptr m_tunnel;
+    std::map<uint32_t, client_ptr> m_bunch;
     std::mutex m_mutex;
 
     friend class importer;
     friend class exporter;
 
-    void listen()
+    void listen_tunnel()
     {
         packet pack;
         std::weak_ptr<router> weak = shared_from_this();
@@ -210,17 +214,17 @@ class router : public std::enable_shared_from_this<router>
             auto ptr = weak.lock();
             if (error)
             {
-                if (ptr)
-                    ptr->error(error);
-
                 std::cout << "listen_tunnel: " << error.message() << std::endl;
+                
+                if (ptr)
+                    ptr->cancel();
             }
             else if (size < pack.size())
             {
-                if (ptr)
-                    ptr->error(boost::asio::error::message_size);
-                    
                 std::cout << "listen_tunnel: can't read tunnel" << std::endl;
+                
+                if (ptr)
+                    ptr->cancel();
             }
             else if (ptr)
             {
@@ -228,12 +232,12 @@ class router : public std::enable_shared_from_this<router>
                 if (id != std::numeric_limits<uint32_t>::max())
                 {
                     if (pack.length() == 0)
-                        ptr->route(id);
+                        ptr->notify_client(id);
                     else
                         ptr->read_tunnel(id, pack.length());
                 }
 
-                ptr->listen();
+                ptr->listen_tunnel();
             }
         });
     }
@@ -254,10 +258,10 @@ class router : public std::enable_shared_from_this<router>
             auto ptr = weak.lock();
             if (error)
             {
-                if (ptr)
-                    ptr->error(id, error);
-
                 std::cout << "read_client " << id << ": " << error.message() << std::endl;
+                
+                if (ptr)
+                    ptr->remove_client(id);
             }
             else if (ptr)
             {
@@ -283,11 +287,11 @@ class router : public std::enable_shared_from_this<router>
         {
             if (error && error != boost::asio::error::operation_aborted)
             {
+                std::cout << "write_client " << id << ": " << error.message() << std::endl;
+                
                 auto ptr = weak.lock();
                 if (ptr)
-                    ptr->error(id, error);
-
-                std::cout << "write_client " << id << ": " << error.message() << std::endl;
+                    ptr->remove_client(id);
             }
         });
     }
@@ -303,18 +307,18 @@ class router : public std::enable_shared_from_this<router>
             {
                 if (error != boost::asio::error::operation_aborted)
                 {
-                    if (ptr)
-                        ptr->error(error);
-
                     std::cout << "write_tunnel " << pack.id() << ": " << error.message() << std::endl;
+                    
+                    if (ptr)
+                        ptr->cancel();
                 }
             }
             else if (size < pack.size())
             {
-                if (ptr)
-                    ptr->error(pack.id(), boost::asio::error::message_size);
-
                 std::cout << "write_tunnel " << pack.id() << ": can't write packet" << std::endl;
+                
+                if (ptr)
+                    ptr->cancel();
             }
         });
     }
@@ -330,18 +334,18 @@ class router : public std::enable_shared_from_this<router>
             {
                 if (error != boost::asio::error::operation_aborted)
                 {
-                    if (ptr)
-                        ptr->error(error);
-
                     std::cout << "read_tunnel " << id << ": " << error.message() << std::endl;
+                    
+                    if (ptr)
+                        ptr->cancel();
                 }
             }
             else if (size < data.size())
             {
-                if (ptr)
-                    ptr->error(id, boost::asio::error::message_size);
-
                 std::cout << "read_tunnel " << id << ": can't read data" << std::endl;
+                
+                if (ptr)
+                    ptr->cancel();
             }
             else if (ptr)
             {
@@ -350,42 +354,54 @@ class router : public std::enable_shared_from_this<router>
         });
     }
 
-    void error(uint32_t id, const boost::system::error_code& error)
-    {
-        write_tunnel(id, novemus::const_buffer());
-
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_bunch.erase(id);
-    }
-
-    void error(const boost::system::error_code& error)
-    {
-        m_tunnel->close();
-
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_bunch.clear();
-    }
-
-    std::shared_ptr<client> fetch_client(uint32_t id)
+    client_ptr fetch_client(uint32_t id)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
         auto iter = m_bunch.find(id);
-        return iter != m_bunch.end() ? iter->second : std::shared_ptr<client>();
+        return iter != m_bunch.end() ? iter->second : client_ptr();
     }
 
-    virtual void route(uint32_t id = std::numeric_limits<uint32_t>::max()) = 0;
+    void remove_client(uint32_t id)
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_bunch.erase(id);
+    }
+
+    void notify_tunnel(uint32_t id)
+    {
+        write_tunnel(id, novemus::const_buffer());
+    }
+
+    virtual void notify_client(uint32_t id) = 0;
 
 public:
 
-    router(std::shared_ptr<novemus::tubus::channel> tunnel)
-        : m_reactor(novemus::reactor::shared_reactor())
-        , m_tunnel(tunnel)
+    router(const boost::asio::ip::udp::endpoint& gateway, const boost::asio::ip::udp::endpoint& faraway, uint64_t secret)
+        : m_reactor(std::make_shared<novemus::reactor>())
+        , m_tunnel(novemus::tubus::create_channel(m_reactor, gateway, faraway, secret))
     {
     }
 
-    virtual void start() = 0;
+    virtual void employ()    
+    {
+        m_reactor->execute();
+    }
+    
+    virtual void launch()
+    {
+        m_reactor->activate();
+    }
+    
+    virtual void cancel()
+    {
+        m_bunch.clear();
+        m_tunnel->close();
+        m_reactor->terminate();
+    }
 };
+
+typedef std::shared_ptr<novemus::wormhole::router> router_ptr;
 
 class importer : public router
 {
@@ -393,76 +409,93 @@ class importer : public router
 
 public:
 
-    static std::shared_ptr<novemus::wormhole::router> create(std::shared_ptr<novemus::tubus::channel> tunnel, const boost::asio::ip::tcp::endpoint& server)
-    {
-        return std::make_shared<novemus::wormhole::importer>(tunnel, server);
-    }
-
-    importer(std::shared_ptr<novemus::tubus::channel> tunnel, const boost::asio::ip::tcp::endpoint& server)
-        : router(tunnel)
+    importer(const boost::asio::ip::tcp::endpoint& server, const boost::asio::ip::udp::endpoint& gateway, const boost::asio::ip::udp::endpoint& faraway, uint64_t secret)
+        : router(gateway, faraway, secret)
         , m_server(m_reactor->io(), server)
     {
         m_server.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
     }
 
-    void start() override
+    void employ() override
     {
-        std::weak_ptr<router> weak = shared_from_this();
+        connect_tunnel();
+        router::employ();
+    }
+
+    void launch() override
+    {
+        connect_tunnel();
+        router::launch();
+    }
+
+    void cancel() override
+    {
+        boost::system::error_code ec;
+        m_server.cancel(ec);
+        router::cancel();
+    }
+
+private:
+
+    void connect_tunnel()
+    {
+        std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(shared_from_this());
         m_tunnel->accept([weak](const boost::system::error_code& error)
         {
             auto ptr = weak.lock();
             if (error)
             {
+                std::cout << "connect_tunnel: " << error.message() << std::endl;
+                
                 if (ptr)
-                    ptr->error(error);
-
-                std::cout << "start: " << error.message() << std::endl;
+                    ptr->cancel();
             }
             else if (ptr)
             {
-                ptr->route();
-                ptr->listen();
+                ptr->accept_client();
+                ptr->listen_tunnel();
             }
         });
-
-        m_reactor->io().run();
     }
 
-private:
-
-    void route(uint32_t id)
+    void accept_client()
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (id == std::numeric_limits<uint32_t>::max())
+        auto iter = m_bunch.rbegin();
+        uint32_t id = iter != m_bunch.rend() ? (iter->first + 1) : 0;
+
+        std::cout << "connect client " << id << std::endl;
+
+        auto client = std::make_shared<novemus::wormhole::client>(m_reactor);
+        m_bunch.emplace(id, client);
+
+        std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(shared_from_this());
+        m_server.async_accept(client->socket(), [weak, id](const boost::system::error_code& error)
         {
-            auto iter = m_bunch.rbegin();
-            id = iter != m_bunch.rend() ? (iter->first + 1) : 0;
-
-            auto client = std::make_shared<novemus::wormhole::client>();
-            m_bunch.emplace(id, client);
-
-            std::weak_ptr<router> weak = shared_from_this();
-            m_server.async_accept(client->socket(), [weak, id](const boost::system::error_code& error)
+            auto ptr = weak.lock();
+            if (error)
             {
-                auto ptr = weak.lock();
-                if (error)
-                {
-                    if (ptr)
-                        ptr->error(id, error);
+                std::cout << "accept_client " << id << ": " << error.message() << std::endl;
+                
+                if (ptr)
+                    ptr->remove_client(id);
+            }
+            else if (ptr)
+            {
+                ptr->notify_tunnel(id);
+                ptr->read_client(id);
+                ptr->accept_client();
+            }
+        });
+    }
 
-                    std::cout << "accept_facade " << id << ": " << error.message() << std::endl;
-                }
-                else if (ptr)
-                {
-                    ptr->write_tunnel(id, novemus::const_buffer());
-                    ptr->read_client(id);
-                    ptr->route();
-                }
-            });
-        }
-        else
-            m_bunch.erase(id);
+    void notify_client(uint32_t id)
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        m_bunch.erase(id);
+        std::cout << "disconnect client " << id << std::endl;
     }
 };
 
@@ -472,18 +505,27 @@ class exporter : public router
 
 public:
 
-    static std::shared_ptr<novemus::wormhole::router> create(std::shared_ptr<novemus::tubus::channel> tunnel, const boost::asio::ip::tcp::endpoint& server)
-    {
-        return std::make_shared<novemus::wormhole::exporter>(tunnel, server);
-    }
-
-    exporter(std::shared_ptr<novemus::tubus::channel> tunnel, const boost::asio::ip::tcp::endpoint& server)
-        : router(tunnel)
+    exporter(const boost::asio::ip::tcp::endpoint& server, const boost::asio::ip::udp::endpoint& gateway, const boost::asio::ip::udp::endpoint& faraway, uint64_t secret)
+        : router(gateway, faraway, secret)
         , m_server(server)
     {
     }
 
-    void start() override
+    void employ() override
+    {
+        connect_tunnel();
+        router::employ();
+    }
+
+    void launch() override
+    {
+        connect_tunnel();
+        router::launch();
+    }
+
+private:
+
+    void connect_tunnel()
     {
         std::weak_ptr<router> weak = shared_from_this();
         m_tunnel->connect([weak](const boost::system::error_code& error)
@@ -491,30 +533,28 @@ public:
             auto ptr = weak.lock();
             if (error)
             {
+                std::cout << "connect_tunnel: " << error.message() << std::endl;
+                
                 if (ptr)
-                    ptr->error(error);
-
-                std::cout << "start: " << error.message() << std::endl;
+                    ptr->cancel();
             }
             else if (ptr)
             {
-                ptr->listen();
+                ptr->listen_tunnel();
             }
         });
-
-        m_reactor->io().run();
     }
 
-private:
-
-    void route(uint32_t id) override
+    void notify_client(uint32_t id) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
         auto iter = m_bunch.find(id);
         if (iter == m_bunch.end())
         {
-            auto client = std::make_shared<novemus::wormhole::client>();
+            std::cout << "connect client " << id << std::endl;
+
+            auto client = std::make_shared<novemus::wormhole::client>(m_reactor);
             m_bunch.emplace(id, client);
             
             std::weak_ptr<router> weak = shared_from_this();
@@ -523,10 +563,10 @@ private:
                 auto ptr = weak.lock();
                 if (error)
                 {
+                    std::cout << "notify_client " << id << ": " << error.message() << std::endl;
+                    
                     if (ptr)
-                        ptr->error(id, error);
-
-                    std::cout << "warn_client " << id << ": " << error.message() << std::endl;
+                        ptr->remove_client(id);
                 }
                 else if (ptr)
                 {
@@ -535,9 +575,22 @@ private:
             });
         }
         else
+        {
             m_bunch.erase(iter);
+            std::cout << "disconnect client " << id << std::endl;
+        }
     }
 };
+
+router_ptr create_exporter(const boost::asio::ip::tcp::endpoint& server, const boost::asio::ip::udp::endpoint& gateway, const boost::asio::ip::udp::endpoint& faraway, uint64_t secret)
+{
+    return std::make_shared<novemus::wormhole::importer>(server, gateway, faraway, secret);
+}
+
+router_ptr create_importer(const boost::asio::ip::tcp::endpoint& server, const boost::asio::ip::udp::endpoint& gateway, const boost::asio::ip::udp::endpoint& faraway, uint64_t secret)
+{
+    return std::make_shared<novemus::wormhole::importer>(server, gateway, faraway, secret);
+}
 
 }}
 
@@ -556,11 +609,11 @@ int main(int argc, char *argv[])
     boost::program_options::options_description desc("wormhole options");
     desc.add_options()
         ("help", "produce help message")
-        ("purpose", boost::program_options::value<std::string>()->required(), "wormhole tunnel usage: <expose|obtain>")
-        ("service", boost::program_options::value<std::string>()->required(), "endpoint of exposed/obtained service: <ip:port>")
-        ("gateway", boost::program_options::value<std::string>()->required(), "local endpoint of wormhole tunnel: <ip:port>")
-        ("faraway", boost::program_options::value<std::string>()->required(), "remote endpoint of wormhole tunnel: <ip:port>")
-        ("obscure", boost::program_options::value<uint64_t>()->default_value(0), "pre-shared key to obscure wormhole tunnel: <number>");
+        ("purpose", boost::program_options::value<std::string>()->required(), "wormhole purpose: <export|import>")
+        ("service", boost::program_options::value<std::string>()->required(), "endpoint of the exported/imported service: <ip:port>")
+        ("gateway", boost::program_options::value<std::string>()->required(), "gateway endpoint of the transport tunnel: <ip:port>")
+        ("faraway", boost::program_options::value<std::string>()->required(), "faraway endpoint of the transport tunnel: <ip:port>")
+        ("obscure", boost::program_options::value<uint64_t>()->default_value(0), "pre-shared key to obscure the transport tunnel: <number>");
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
@@ -589,18 +642,18 @@ int main(int argc, char *argv[])
         auto service = parse_address<boost::asio::ip::tcp::endpoint>(vm["service"].as<std::string>());
         auto gateway = parse_address<boost::asio::ip::udp::endpoint>(vm["gateway"].as<std::string>());
         auto faraway = parse_address<boost::asio::ip::udp::endpoint>(vm["faraway"].as<std::string>());
-        auto tubus = novemus::tubus::create_channel(gateway, faraway, vm["obscure"].as<uint64_t>());
 
-        auto router = vm["purpose"].as<std::string>() == "obtain"
-                    ? novemus::wormhole::importer::create(tubus, service)
-                    : novemus::wormhole::exporter::create(tubus, service);
+        auto router = vm["purpose"].as<std::string>() == "import"
+                    ? novemus::wormhole::create_importer(service, gateway, faraway, vm["obscure"].as<uint64_t>())
+                    : novemus::wormhole::create_exporter(service, gateway, faraway, vm["obscure"].as<uint64_t>());
 
-        router->start();
+        router->employ();
     }
     catch (const std::exception& e)
     {
         std::cerr << e.what() << std::endl;
         return 1;
     }
+
     return 0;
 }

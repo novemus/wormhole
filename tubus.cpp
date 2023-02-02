@@ -911,10 +911,10 @@ protected:
 
 public:
 
-    transport(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t secret)
-        : m_bind(bind)
+    transport(reactor_ptr reactor, const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t secret)
+        : m_reactor(reactor)
+        , m_bind(bind)
         , m_peer(peer)
-        , m_reactor(novemus::reactor::shared_reactor())
         , m_socket(m_reactor->io())
         , m_timer(m_reactor->io())
         , m_connector(m_reactor->io())
@@ -1032,9 +1032,9 @@ public:
 
 private:
 
+    reactor_ptr m_reactor;
     boost::asio::ip::udp::endpoint m_bind;
     boost::asio::ip::udp::endpoint m_peer;
-    std::shared_ptr<reactor> m_reactor;
     boost::asio::ip::udp::socket m_socket;
     boost::asio::deadline_timer m_timer;
     connector m_connector;
@@ -1044,9 +1044,9 @@ private:
     std::mutex m_mutex;
 };
 
-std::shared_ptr<channel> create_channel(const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t secret) noexcept(true)
+std::shared_ptr<channel> create_channel(reactor_ptr reactor, const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t secret) noexcept(true)
 {
-    return std::make_shared<transport>(bind, peer, secret);
+    return std::make_shared<transport>(reactor, bind, peer, secret);
 }
 
 }}
