@@ -7,7 +7,7 @@
 #include <boost/system/error_code.hpp>
 #include <boost/asio/ip/udp.hpp>
 
-namespace novemus { namespace tubus {
+namespace novemus::tubus {
 
 typedef boost::asio::ip::udp::endpoint endpoint;
 typedef std::function<void(const boost::system::error_code&)> callback;
@@ -29,4 +29,4 @@ typedef std::shared_ptr<channel> channel_ptr;
 
 channel_ptr create_channel(reactor_ptr reactor, const endpoint& bind, const endpoint& peer, uint64_t secret = 0) noexcept(true);
 
-}}
+}

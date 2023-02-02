@@ -5,7 +5,7 @@
 #include <random>
 #include <numeric>
 
-namespace novemus { namespace tubus {
+namespace novemus::tubus {
 
 struct section : public mutable_buffer
 {
@@ -216,4 +216,4 @@ private:
     }
 };
 
-}}
+}

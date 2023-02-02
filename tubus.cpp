@@ -14,7 +14,7 @@
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
-namespace novemus { namespace tubus {
+namespace novemus::tubus {
 
 template<class value_type> value_type getenv(const std::string& name, const value_type& def)
 {
@@ -911,7 +911,7 @@ protected:
 
 public:
 
-    transport(reactor_ptr reactor, const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t secret)
+    transport(reactor_ptr reactor, const endpoint& bind, const endpoint& peer, uint64_t secret)
         : m_reactor(reactor)
         , m_bind(bind)
         , m_peer(peer)
@@ -1044,9 +1044,9 @@ private:
     std::mutex m_mutex;
 };
 
-std::shared_ptr<channel> create_channel(reactor_ptr reactor, const boost::asio::ip::udp::endpoint& bind, const boost::asio::ip::udp::endpoint& peer, uint64_t secret) noexcept(true)
+std::shared_ptr<channel> create_channel(reactor_ptr reactor, const endpoint& bind, const endpoint& peer, uint64_t secret) noexcept(true)
 {
     return std::make_shared<transport>(reactor, bind, peer, secret);
 }
 
-}}
+}
