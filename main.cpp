@@ -4,15 +4,20 @@
 #include <boost/program_options.hpp>
 #include <boost/lexical_cast.hpp>
 
-template<class proto> 
-boost::asio::ip::basic_endpoint<proto> parse_address(const std::string& str)
+namespace boost::asio::ip {
+
+template<class proto>
+void validate(boost::any& result, const std::vector<std::string>& values, basic_endpoint<proto>*, int)
 {
+    const std::string& str = boost::program_options::validators::get_single_string(values);
+
     std::smatch match;
-    if (std::regex_search(str, match, std::regex("(\\w+://)?(.+):(.*)")))
-    {
-        return boost::asio::ip::basic_endpoint<proto>(boost::asio::ip::make_address(match[2].str()), boost::lexical_cast<uint16_t>(match[3].str()));
-    }
-    throw std::runtime_error("wrong endpoint format");
+    if (std::regex_search(str, match, std::regex("(\\w+://)?(.+):(.+)")))
+        result = boost::any(basic_endpoint<proto>(make_address(match[2].str()), boost::lexical_cast<uint16_t>(match[3].str())));
+    else
+        throw boost::program_options::validation_error(boost::program_options::validation_error::invalid_option_value);
+}
+
 }
 
 int main(int argc, char *argv[])
@@ -21,9 +26,9 @@ int main(int argc, char *argv[])
     desc.add_options()
         ("help", "produce help message")
         ("purpose", boost::program_options::value<std::string>()->required(), "wormhole purpose: <export|import>")
-        ("service", boost::program_options::value<std::string>()->required(), "endpoint of the exported/imported service: <ip:port>")
-        ("gateway", boost::program_options::value<std::string>()->required(), "gateway endpoint of the transport tunnel: <ip:port>")
-        ("faraway", boost::program_options::value<std::string>()->required(), "faraway endpoint of the transport tunnel: <ip:port>")
+        ("service", boost::program_options::value<boost::asio::ip::tcp::endpoint>()->required(), "endpoint of the exported/imported service: <ip:port>")
+        ("gateway", boost::program_options::value<boost::asio::ip::udp::endpoint>()->required(), "gateway endpoint of the transport tunnel: <ip:port>")
+        ("faraway", boost::program_options::value<boost::asio::ip::udp::endpoint>()->required(), "faraway endpoint of the transport tunnel: <ip:port>")
         ("obscure", boost::program_options::value<uint64_t>()->default_value(0), "pre-shared key to obscure the transport tunnel: <number>");
 
     boost::program_options::variables_map vm;
@@ -48,13 +53,14 @@ int main(int argc, char *argv[])
 
     try
     {
-        auto service = parse_address<boost::asio::ip::tcp>(vm["service"].as<std::string>());
-        auto gateway = parse_address<boost::asio::ip::udp>(vm["gateway"].as<std::string>());
-        auto faraway = parse_address<boost::asio::ip::udp>(vm["faraway"].as<std::string>());
+        auto service = vm["service"].as<boost::asio::ip::tcp::endpoint>();
+        auto gateway = vm["gateway"].as<boost::asio::ip::udp::endpoint>();
+        auto faraway = vm["faraway"].as<boost::asio::ip::udp::endpoint>();
+        auto obscure = vm["obscure"].as<uint64_t>();
 
         auto router = vm["purpose"].as<std::string>() == "import"
-                    ? novemus::wormhole::create_importer(service, gateway, faraway, vm["obscure"].as<uint64_t>())
-                    : novemus::wormhole::create_exporter(service, gateway, faraway, vm["obscure"].as<uint64_t>());
+                    ? novemus::wormhole::create_importer(service, gateway, faraway, obscure)
+                    : novemus::wormhole::create_exporter(service, gateway, faraway, obscure);
 
         router->employ();
     }
