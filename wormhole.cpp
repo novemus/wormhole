@@ -118,7 +118,8 @@ public:
                     if (ptr)
                         ptr->error(error);
 
-                    std::cout << "async_read: " << error.message() << std::endl;
+                    if (error != boost::asio::error::operation_aborted)
+                        std::cout << "tcp::async_read: " << error.message() << std::endl;
                 }
                 else if (ptr)
                     ptr->read();
@@ -142,7 +143,8 @@ public:
                     if (ptr)
                         ptr->error(error);
 
-                    std::cout << "async_write: " << error.message() << std::endl;
+                    if (error != boost::asio::error::operation_aborted)
+                        std::cout << "tcp::async_write: " << error.message() << std::endl;
                 }
                 else if (ptr)
                     ptr->write();
@@ -212,14 +214,17 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             auto ptr = weak.lock();
             if (error)
             {
-                std::cout << "listen_tunnel: " << error.message() << std::endl;
-                
-                if (ptr)
-                    ptr->cancel();
+                if (error != boost::asio::error::operation_aborted)
+                {
+                    std::cout << "engine::listen_tunnel: " << error.message() << std::endl;
+                    
+                    if (ptr)
+                        ptr->cancel();
+                }
             }
             else if (size < pack.size())
             {
-                std::cout << "listen_tunnel: can't read tunnel" << std::endl;
+                std::cout << "engine::listen_tunnel: can't read tunnel" << std::endl;
                 
                 if (ptr)
                     ptr->cancel();
@@ -245,7 +250,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
         auto client = fetch_client(id);
         if (!client)
         {
-            std::cout << "read_client " << id << ": connection not found" << std::endl;
+            std::cout << "engine::read_client: client " << id << " not found" << std::endl;
             return;
         }
 
@@ -256,10 +261,14 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             auto ptr = weak.lock();
             if (error)
             {
-                std::cout << "read_client " << id << ": " << error.message() << std::endl;
+                if (error != boost::asio::error::operation_aborted)
+                    std::cout << "engine::read_client: client " << id << ": " << error.message() << std::endl;
                 
                 if (ptr)
+                {
+                    ptr->notify_tunnel(id);
                     ptr->remove_client(id);
+                }
             }
             else if (ptr)
             {
@@ -276,20 +285,24 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
         auto client = fetch_client(id);
         if (!client)
         {
-            std::cout << "write_client " << id << ": connection not found" << std::endl;
+            std::cout << "engine::write_client: client " << id << ": not found" << std::endl;
             return;
         }
 
         std::weak_ptr<engine> weak = shared_from_this();
         client->async_write(data, [weak, id, data](const boost::system::error_code& error, size_t size)
         {
-            if (error && error != boost::asio::error::operation_aborted)
+            if (error)
             {
-                std::cout << "write_client " << id << ": " << error.message() << std::endl;
+                if (error != boost::asio::error::operation_aborted)
+                    std::cout << "engine::write_client: client " << id << ": " << error.message() << std::endl;
                 
                 auto ptr = weak.lock();
                 if (ptr)
+                {
+                    ptr->notify_tunnel(id);
                     ptr->remove_client(id);
+                }
             }
         });
     }
@@ -305,15 +318,15 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             {
                 if (error != boost::asio::error::operation_aborted)
                 {
-                    std::cout << "write_tunnel " << pack.id() << ": " << error.message() << std::endl;
-                    
+                    std::cout << "engine::write_tunnel: client " << pack.id() << ": " << error.message() << std::endl;
+
                     if (ptr)
                         ptr->cancel();
                 }
             }
             else if (size < pack.size())
             {
-                std::cout << "write_tunnel " << pack.id() << ": can't write packet" << std::endl;
+                std::cout << "engine::write_tunnel: client " << pack.id() << ": can't write packet" << std::endl;
                 
                 if (ptr)
                     ptr->cancel();
@@ -332,7 +345,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             {
                 if (error != boost::asio::error::operation_aborted)
                 {
-                    std::cout << "read_tunnel " << id << ": " << error.message() << std::endl;
+                    std::cout << "engine::read_tunnel: client " << id << ": " << error.message() << std::endl;
                     
                     if (ptr)
                         ptr->cancel();
@@ -340,7 +353,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             }
             else if (size < data.size())
             {
-                std::cout << "read_tunnel " << id << ": can't read data" << std::endl;
+                std::cout << "engine::read_tunnel: client " << id << ": can't read data" << std::endl;
                 
                 if (ptr)
                     ptr->cancel();
@@ -363,7 +376,9 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
     void remove_client(uint32_t id)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
-        m_bunch.erase(id);
+        
+        if (m_bunch.erase(id) != 0)
+            std::cout << "exporter::remove_client: client " << id << " is removed" << std::endl;
     }
 
     void notify_tunnel(uint32_t id)
@@ -379,6 +394,7 @@ public:
         : m_reactor(std::make_shared<novemus::reactor>())
         , m_tunnel(novemus::tubus::create_channel(m_reactor, gateway, faraway, secret))
     {
+        m_tunnel->open();
     }
 
     void employ() noexcept(true) override
@@ -393,6 +409,8 @@ public:
     
     void cancel() noexcept(true) override
     {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
         m_bunch.clear();
         m_tunnel->close();
         m_reactor->terminate();
@@ -416,13 +434,13 @@ public:
 
     void employ() noexcept(true) override
     {
-        connect_tunnel();
+        accept_tunnel();
         engine::employ();
     }
 
     void launch() noexcept(true) override
     {
-        connect_tunnel();
+        accept_tunnel();
         engine::launch();
     }
 
@@ -435,7 +453,7 @@ public:
 
 private:
 
-    void connect_tunnel()
+    void accept_tunnel()
     {
         std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(shared_from_this());
         m_tunnel->accept([weak](const boost::system::error_code& error)
@@ -443,13 +461,18 @@ private:
             auto ptr = weak.lock();
             if (error)
             {
-                std::cout << "connect_tunnel: " << error.message() << std::endl;
+                if (error != boost::asio::error::operation_aborted)
+                {
+                    std::cout << "importer::accept_tunnel: " << error.message() << std::endl;
                 
-                if (ptr)
-                    ptr->cancel();
+                    if (ptr)
+                        ptr->cancel();
+                }
             }
             else if (ptr)
             {
+                std::cout << "importer::accept_tunnel: tunnel is accepted" << std::endl;
+
                 ptr->accept_client();
                 ptr->listen_tunnel();
             }
@@ -463,7 +486,7 @@ private:
         auto iter = m_bunch.rbegin();
         uint32_t id = iter != m_bunch.rend() ? (iter->first + 1) : 0;
 
-        std::cout << "connect client " << id << std::endl;
+        std::cout << "importer::accept_client: accepting client " << id << std::endl;
 
         auto client = std::make_shared<tcp>(m_reactor);
         m_bunch.emplace(id, client);
@@ -474,13 +497,16 @@ private:
             auto ptr = weak.lock();
             if (error)
             {
-                std::cout << "accept_client " << id << ": " << error.message() << std::endl;
+                if (error != boost::asio::error::operation_aborted)
+                    std::cout << "importer::accept_client: client " << id << ": " << error.message() << std::endl;
                 
                 if (ptr)
                     ptr->remove_client(id);
             }
             else if (ptr)
             {
+                std::cout << "importer::accept_client: client " << id << " is accepted" << std::endl;
+
                 ptr->notify_tunnel(id);
                 ptr->read_client(id);
                 ptr->accept_client();
@@ -492,8 +518,8 @@ private:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        m_bunch.erase(id);
-        std::cout << "disconnect client " << id << std::endl;
+        if (m_bunch.erase(id) != 0)
+            std::cout << "importer::notify_client: client " << id << " is disconnected" << std::endl;
     }
 };
 
@@ -531,13 +557,18 @@ private:
             auto ptr = weak.lock();
             if (error)
             {
-                std::cout << "connect_tunnel: " << error.message() << std::endl;
-                
-                if (ptr)
-                    ptr->cancel();
+                if (error != boost::asio::error::operation_aborted)
+                {
+                    std::cout << "exporter::connect_tunnel: " << error.message() << std::endl;
+                    
+                    if (ptr)
+                        ptr->cancel();
+                }
             }
             else if (ptr)
             {
+                std::cout << "exporter::connect_tunnel: tunnel is connected" << std::endl;
+
                 ptr->listen_tunnel();
             }
         });
@@ -550,7 +581,7 @@ private:
         auto iter = m_bunch.find(id);
         if (iter == m_bunch.end())
         {
-            std::cout << "connect client " << id << std::endl;
+            std::cout << "exporter::notify_client: connecting client " << id << std::endl;
 
             auto client = std::make_shared<tcp>(m_reactor);
             m_bunch.emplace(id, client);
@@ -561,28 +592,34 @@ private:
                 auto ptr = weak.lock();
                 if (error)
                 {
-                    std::cout << "notify_client " << id << ": " << error.message() << std::endl;
+                    if (error != boost::asio::error::operation_aborted)
+                        std::cout << "exporter::notify_client: client " << id << ": " << error.message() << std::endl;
                     
                     if (ptr)
+                    {
+                        ptr->notify_tunnel(id);
                         ptr->remove_client(id);
+                    }
                 }
                 else if (ptr)
                 {
+                    std::cout << "exporter::notify_client: client " << id << " is connected" << std::endl;
+
                     ptr->read_client(id);
                 }
             });
         }
         else
         {
-            m_bunch.erase(iter);
-            std::cout << "disconnect client " << id << std::endl;
+            if (m_bunch.erase(id) != 0)
+                std::cout << "exporter::notify_client: client " << id << " is disconnected" << std::endl;
         }
     }
 };
 
 router_ptr create_exporter(const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(true)
 {
-    return std::make_shared<importer>(server, gateway, faraway, secret);
+    return std::make_shared<exporter>(server, gateway, faraway, secret);
 }
 
 router_ptr create_importer(const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(true)
