@@ -2,7 +2,7 @@
 
 #include <memory>
 #include <thread>
-#include <iostream>
+#include <boost/log/trivial.hpp>
 #include <boost/asio.hpp>
 
 namespace novemus {
@@ -26,7 +26,7 @@ class reactor
                     boost::system::error_code code;
                     io.run(code);
                     if (code)
-                        std::cout << code.message() << std::endl;
+                        BOOST_LOG_TRIVIAL(error) << code.message();
                 });
             }
         }
@@ -43,7 +43,7 @@ class reactor
                 }
                 catch (const std::exception& e)
                 {
-                    std::cout << e.what() << std::endl;
+                    BOOST_LOG_TRIVIAL(error) << e.what();
                 }
             }
         }
@@ -53,7 +53,7 @@ class reactor
             boost::system::error_code code;
             io.run(code);
             if (code)
-                std::cout << code.message() << std::endl;
+                BOOST_LOG_TRIVIAL(error) << code.message();
         }
 
         bool active() const noexcept(true)

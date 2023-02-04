@@ -8,6 +8,7 @@
 #include <iostream>
 #include <random>
 #include <mutex>
+#include <boost/log/trivial.hpp>
 #include <boost/asio.hpp>
 #include <boost/bind/bind.hpp>
 #include <boost/lexical_cast.hpp>
@@ -25,7 +26,7 @@ template<class value_type> value_type getenv(const std::string& name, const valu
     }
     catch (const boost::bad_lexical_cast& ex)
     {
-        std::cout << "getenv: " << ex.what() << std::endl;
+        BOOST_LOG_TRIVIAL(error) << "getenv: " << ex.what();
     }
 
     return def;
