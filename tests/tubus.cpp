@@ -104,7 +104,7 @@ class mediator
         if (e)
         {
             if (e != boost::asio::error::operation_aborted)
-                std::cout << "mediator: " << e.message() << std::endl;
+                BOOST_TEST_MESSAGE("mediator: " << e.message());
             return;
         }
 
@@ -116,7 +116,7 @@ class mediator
         if(e)
         {
             if (e != boost::asio::error::operation_aborted)
-                std::cout << "mediator: " << e.message() << std::endl;
+                BOOST_TEST_MESSAGE("mediator: " << e.message());
             return;
         }
 
@@ -206,8 +206,6 @@ public:
 
 BOOST_AUTO_TEST_CASE(tubus_core)
 {
-    std::cout << "tubus_core" << std::endl;
-
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
@@ -255,8 +253,6 @@ BOOST_AUTO_TEST_CASE(tubus_core)
 
 BOOST_AUTO_TEST_CASE(tubus_connectivity)
 {
-    std::cout << "tubus_connectivity" << std::endl;
-
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
@@ -296,8 +292,6 @@ BOOST_AUTO_TEST_CASE(tubus_connectivity)
 
 BOOST_AUTO_TEST_CASE(tubus_integrity)
 {
-    std::cout << "tubus_integrity" << std::endl;
-
     boost::asio::ip::udp::endpoint pe(boost::asio::ip::address::from_string("127.0.0.1"), 3000);
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
@@ -349,8 +343,6 @@ BOOST_AUTO_TEST_CASE(tubus_integrity)
 
 BOOST_AUTO_TEST_CASE(tubus_fall)
 {
-    std::cout << "tubus_fall" << std::endl;
-
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
@@ -399,8 +391,6 @@ BOOST_AUTO_TEST_CASE(tubus_fall)
 
 BOOST_AUTO_TEST_CASE(tubus_speed)
 {
-    std::cout << "tubus_speed" << std::endl;
-
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
@@ -421,7 +411,6 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     {
         if (err)
         {
-            std::cout << "on_write: " << err.message() << std::endl;
             wp.set_exception(std::make_exception_ptr(boost::system::system_error(err)));
             return;
         }
@@ -443,7 +432,6 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     {
         if (err)
         {
-            std::cout << "on_connect: " << err.message() << std::endl;
             wp.set_exception(std::make_exception_ptr(boost::system::system_error(err)));
             return;
         }
@@ -460,7 +448,6 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     {
         if (err)
         {
-            std::cout << "on_read: " << err.message() << std::endl;
             rp.set_exception(std::make_exception_ptr(boost::system::system_error(err)));
             return;
         }
@@ -482,7 +469,6 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     {
         if (err)
         {
-            std::cout << "on_accept: " << err.message() << std::endl;
             rp.set_exception(std::make_exception_ptr(boost::system::system_error(err)));
             return;
         }
@@ -496,30 +482,19 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     right->accept(on_accept);
     left->connect(on_connect);
 
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": begin" << std::endl;
+    BOOST_TEST_MESSAGE(boost::posix_time::microsec_clock::local_time() << ": begin");
 
-    wf.get();
-    rf.get();
+    BOOST_REQUIRE_NO_THROW(wf.get());
+    BOOST_REQUIRE_NO_THROW(rf.get());
 
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": end" << std::endl;
+    BOOST_TEST_MESSAGE(boost::posix_time::microsec_clock::local_time() << ": end");
 
-    novemus::tubus::callback on_shutdown = [&](const boost::system::error_code& err)
-    {
-        if (err)
-        {
-            std::cout << "on_shutdown: " << err.message() << std::endl;
-            return;
-        }
-    };
-
-    right->shutdown(on_shutdown);
-    left->shutdown(on_shutdown);
+    right->close();
+    left->close();
 }
 
 BOOST_AUTO_TEST_CASE(udp_speed)
 {
-    std::cout << "udp_speed" << std::endl;
-
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
@@ -543,7 +518,7 @@ BOOST_AUTO_TEST_CASE(udp_speed)
     left->bind(le);
     left->connect(re);
     
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": begin" << std::endl;
+    BOOST_TEST_MESSAGE(boost::posix_time::microsec_clock::local_time() << ": begin");
 
     size_t recv = 0;
     size_t sent = 0;
@@ -569,13 +544,11 @@ BOOST_AUTO_TEST_CASE(udp_speed)
         }
     }
 
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": end " << std::endl;
+    BOOST_TEST_MESSAGE(boost::posix_time::microsec_clock::local_time() << ": end");
 }
 
 BOOST_AUTO_TEST_CASE(tcp_speed)
 {
-    std::cout << "tcp_speed" << std::endl;
-
     boost::asio::ip::tcp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::tcp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
@@ -592,7 +565,7 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
     {
         if (error)
         {
-            std::cout << error.message() << std::endl;
+            promise.set_exception(std::make_exception_ptr(boost::system::system_error(error)));
             return;
         }
 
@@ -615,14 +588,14 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
     size_t sent = 0;
     novemus::mutable_buffer wb(1024 * 1024);
 
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": begin" << std::endl;
+    BOOST_TEST_MESSAGE(boost::posix_time::microsec_clock::local_time() << ": begin");
     while (sent < 1024 * 1024 * 1024)
     {
         boost::system::error_code error;
         sent += right.write_some(wb, error);
     }
 
-    future.get();
+    BOOST_REQUIRE_NO_THROW(future.get());
     
-    std::cout << boost::posix_time::microsec_clock::local_time() << ": end" << std::endl;
+    BOOST_TEST_MESSAGE(boost::posix_time::microsec_clock::local_time() << ": end");
 }

@@ -5,8 +5,6 @@
 
 BOOST_AUTO_TEST_CASE(mutable_buffer)
 {
-    std::cout << "mutable_buffer" << std::endl;
-
     BOOST_REQUIRE_NO_THROW(novemus::mutable_buffer());
     BOOST_CHECK_EQUAL(novemus::mutable_buffer().size(), 0);
 
@@ -132,8 +130,6 @@ BOOST_AUTO_TEST_CASE(mutable_buffer)
 
 BOOST_AUTO_TEST_CASE(const_buffer)
 {
-    std::cout << "const_buffer" << std::endl;
-
     BOOST_REQUIRE_NO_THROW(novemus::const_buffer());
     BOOST_CHECK_EQUAL(novemus::const_buffer().size(), 0);
 
@@ -241,8 +237,6 @@ BOOST_AUTO_TEST_CASE(const_buffer)
 
 BOOST_AUTO_TEST_CASE(buffer_factory)
 {
-    std::cout << "buffer_factory" << std::endl;
-
     {
         auto buf1 = novemus::mutable_buffer::create(16384);
         auto buf2 = novemus::mutable_buffer::create(8192);

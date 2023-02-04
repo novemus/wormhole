@@ -3,8 +3,6 @@
 
 BOOST_AUTO_TEST_CASE(cursor)
 {
-    std::cout << "cursor" << std::endl;
-
     novemus::mutable_buffer mb(8);
     std::memset(mb.data(), 0, mb.size());
 
@@ -16,8 +14,6 @@ BOOST_AUTO_TEST_CASE(cursor)
 
 BOOST_AUTO_TEST_CASE(snippet)
 {
-    std::cout << "snippet" << std::endl;
-
     novemus::mutable_buffer mb(16);
     std::memset(mb.data(), 0, mb.size());
 
@@ -30,8 +26,6 @@ BOOST_AUTO_TEST_CASE(snippet)
 
 BOOST_AUTO_TEST_CASE(section)
 {
-    std::cout << "section" << std::endl;
-
     novemus::mutable_buffer mb(1024);
     novemus::tubus::section sect(mb);
 
@@ -81,8 +75,6 @@ BOOST_AUTO_TEST_CASE(section)
 
 BOOST_AUTO_TEST_CASE(packet)
 {
-    std::cout << "packet" << std::endl;
-
     novemus::mutable_buffer mb(1024);
     novemus::tubus::packet pack(mb);
 
