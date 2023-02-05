@@ -1,3 +1,5 @@
+#pragma once
+
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/ip/tcp.hpp>
 

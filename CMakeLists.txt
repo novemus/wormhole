@@ -5,8 +5,8 @@ project(${PROJECT_NAME} VERSION 1.0)
 
 set(TESTS tests)
 
-set(SOURCES buffer.cpp reactor.cpp tubus.cpp wormhole.cpp main.cpp)
-set(TESTS_SOURCES buffer.cpp reactor.cpp tubus.cpp wormhole.cpp tests/buffer.cpp tests/packet.cpp tests/tubus.cpp)
+set(SOURCES buffer.cpp reactor.cpp tubus.cpp logger.cpp wormhole.cpp main.cpp)
+set(TESTS_SOURCES buffer.cpp reactor.cpp tubus.cpp logger.cpp wormhole.cpp tests/buffer.cpp tests/packet.cpp tests/tubus.cpp)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall")
 

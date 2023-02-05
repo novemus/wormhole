@@ -1,9 +1,9 @@
 #include "wormhole.h"
 #include "buffer.h"
 #include "reactor.h"
+#include "logger.h"
 #include "tubus.h"
 #include <list>
-#include <boost/log/trivial.hpp>
 #include <boost/asio.hpp>
 
 namespace novemus::wormhole {
@@ -120,7 +120,7 @@ public:
                         ptr->error(error);
 
                     if (error != boost::asio::error::operation_aborted)
-                        BOOST_LOG_TRIVIAL(error) << "tcp::async_read: " << error.message();
+                        _err_ << error.message();
                 }
                 else if (ptr)
                     ptr->read();
@@ -145,7 +145,7 @@ public:
                         ptr->error(error);
 
                     if (error != boost::asio::error::operation_aborted)
-                        BOOST_LOG_TRIVIAL(error) << "tcp::async_write: " << error.message();
+                        _err_ << error.message();
                 }
                 else if (ptr)
                     ptr->write();
@@ -217,7 +217,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             {
                 if (error != boost::asio::error::operation_aborted)
                 {
-                    BOOST_LOG_TRIVIAL(error) << "engine::listen_tunnel: " << error.message();
+                    _err_ << error.message();
                     
                     if (ptr)
                         ptr->cancel();
@@ -225,7 +225,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             }
             else if (size < pack.size())
             {
-                BOOST_LOG_TRIVIAL(error) << "engine::listen_tunnel: can't read tunnel";
+                _err_ << "can't read tunnel";
                 
                 if (ptr)
                     ptr->cancel();
@@ -251,7 +251,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
         auto client = fetch_client(id);
         if (!client)
         {
-            BOOST_LOG_TRIVIAL(error) << "engine::read_client: client " << id << " not found";
+            _err_ << "client " << id << " not found";
             return;
         }
 
@@ -263,7 +263,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             if (error)
             {
                 if (error != boost::asio::error::operation_aborted)
-                    BOOST_LOG_TRIVIAL(error) << "engine::read_client: client " << id << ": " << error.message();
+                    _err_ << "client " << id << ": " << error.message();
                 
                 if (ptr)
                 {
@@ -286,7 +286,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
         auto client = fetch_client(id);
         if (!client)
         {
-            BOOST_LOG_TRIVIAL(error) << "engine::write_client: client " << id << ": not found";
+            _err_ << "client " << id << ": not found";
             return;
         }
 
@@ -296,7 +296,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             if (error)
             {
                 if (error != boost::asio::error::operation_aborted)
-                    BOOST_LOG_TRIVIAL(error) << "engine::write_client: client " << id << ": " << error.message();
+                    _err_ << "client " << id << ": " << error.message();
                 
                 auto ptr = weak.lock();
                 if (ptr)
@@ -319,7 +319,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             {
                 if (error != boost::asio::error::operation_aborted)
                 {
-                    BOOST_LOG_TRIVIAL(error) << "engine::write_tunnel: client " << pack.id() << ": " << error.message();
+                    _err_ << "client " << pack.id() << ": " << error.message();
 
                     if (ptr)
                         ptr->cancel();
@@ -327,7 +327,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             }
             else if (size < pack.size())
             {
-                BOOST_LOG_TRIVIAL(error) << "engine::write_tunnel: client " << pack.id() << ": can't write packet";
+                _err_ << "client " << pack.id() << ": can't write packet";
                 
                 if (ptr)
                     ptr->cancel();
@@ -346,7 +346,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             {
                 if (error != boost::asio::error::operation_aborted)
                 {
-                    BOOST_LOG_TRIVIAL(error) << "engine::read_tunnel: client " << id << ": " << error.message();
+                    _err_ << "client " << id << ": " << error.message();
                     
                     if (ptr)
                         ptr->cancel();
@@ -354,7 +354,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             }
             else if (size < data.size())
             {
-                BOOST_LOG_TRIVIAL(error) << "engine::read_tunnel: client " << id << ": can't read data";
+                _err_ << "client " << id << ": can't read data";
                 
                 if (ptr)
                     ptr->cancel();
@@ -379,7 +379,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
         std::unique_lock<std::mutex> lock(m_mutex);
         
         if (m_bunch.erase(id) != 0)
-            BOOST_LOG_TRIVIAL(info) << "exporter::remove_client: client " << id << " is removed";
+            _inf_ << "client " << id << " is removed";
     }
 
     void notify_tunnel(uint32_t id)
@@ -464,7 +464,7 @@ private:
             {
                 if (error != boost::asio::error::operation_aborted)
                 {
-                    BOOST_LOG_TRIVIAL(error) << "importer::connect_tunnel: " << error.message();
+                    _err_ << error.message();
                 
                     if (ptr)
                         ptr->cancel();
@@ -472,7 +472,7 @@ private:
             }
             else if (ptr)
             {
-                BOOST_LOG_TRIVIAL(error) << "importer::connect_tunnel: tunnel is connected";
+                _err_ << "tunnel is connected";
 
                 ptr->accept_client();
                 ptr->listen_tunnel();
@@ -487,7 +487,7 @@ private:
         auto iter = m_bunch.rbegin();
         uint32_t id = iter != m_bunch.rend() ? (iter->first + 1) : 0;
 
-        BOOST_LOG_TRIVIAL(info) << "importer::accept_client: accepting client " << id;
+        _inf_ << "accepting client " << id;
 
         auto client = std::make_shared<tcp>(m_reactor);
         m_bunch.emplace(id, client);
@@ -499,14 +499,14 @@ private:
             if (error)
             {
                 if (error != boost::asio::error::operation_aborted)
-                    BOOST_LOG_TRIVIAL(error) << "importer::accept_client: client " << id << ": " << error.message();
+                    _err_ << "client " << id << ": " << error.message();
                 
                 if (ptr)
                     ptr->remove_client(id);
             }
             else if (ptr)
             {
-                BOOST_LOG_TRIVIAL(info) << "importer::accept_client: client " << id << " is accepted";
+                _err_ << "client " << id << " is accepted";
 
                 ptr->notify_tunnel(id);
                 ptr->read_client(id);
@@ -520,7 +520,7 @@ private:
         std::unique_lock<std::mutex> lock(m_mutex);
 
         if (m_bunch.erase(id) != 0)
-            BOOST_LOG_TRIVIAL(info) << "importer::notify_client: client " << id << " is disconnected";
+            _inf_ << "client " << id << " is disconnected";
     }
 };
 
@@ -560,7 +560,7 @@ private:
             {
                 if (error != boost::asio::error::operation_aborted)
                 {
-                    BOOST_LOG_TRIVIAL(error) << "exporter::accept_tunnel: " << error.message();
+                    _err_ << error.message();
                     
                     if (ptr)
                         ptr->cancel();
@@ -568,7 +568,7 @@ private:
             }
             else if (ptr)
             {
-                BOOST_LOG_TRIVIAL(info) << "exporter::accept_tunnel: tunnel is accepted";
+                _inf_ << "tunnel is accepted";
 
                 ptr->listen_tunnel();
             }
@@ -582,7 +582,7 @@ private:
         auto iter = m_bunch.find(id);
         if (iter == m_bunch.end())
         {
-            BOOST_LOG_TRIVIAL(info) << "exporter::notify_client: connecting client " << id;
+            _inf_ << "connecting client " << id;
 
             auto client = std::make_shared<tcp>(m_reactor);
             m_bunch.emplace(id, client);
@@ -594,7 +594,7 @@ private:
                 if (error)
                 {
                     if (error != boost::asio::error::operation_aborted)
-                        BOOST_LOG_TRIVIAL(error) << "exporter::notify_client: client " << id << ": " << error.message();
+                        _err_ << "client " << id << ": " << error.message();
                     
                     if (ptr)
                     {
@@ -604,7 +604,7 @@ private:
                 }
                 else if (ptr)
                 {
-                    BOOST_LOG_TRIVIAL(info) << "exporter::notify_client: client " << id << " is connected";
+                    _err_ << "client " << id << " is connected";
 
                     ptr->read_client(id);
                 }
@@ -613,7 +613,7 @@ private:
         else
         {
             if (m_bunch.erase(id) != 0)
-                BOOST_LOG_TRIVIAL(info) << "exporter::notify_client: client " << id << " is disconnected";
+                _inf_ << "client " << id << " is disconnected";
         }
     }
 };

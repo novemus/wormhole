@@ -1,22 +1,9 @@
 #include "wormhole.h"
+#include "logger.h"
 #include <regex>
 #include <iostream>
-#include <boost/log/trivial.hpp>
-#include <boost/log/utility/setup/console.hpp>
-#include <boost/log/utility/setup/file.hpp>
-#include <boost/log/utility/setup/common_attributes.hpp>
-#include <boost/log/support/date_time.hpp>
 #include <boost/program_options.hpp>
 #include <boost/lexical_cast.hpp>
-
-#if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
-#include <sys/syscall.h>
-#define gettid() syscall(SYS_gettid)
-#elif _WIN32
-#include <windows.h>
-#include <processthreadsapi.h>
-#define gettid() GetCurrentThreadId()
-#endif
 
 namespace boost::asio::ip {
 
@@ -32,37 +19,6 @@ void validate(boost::any& result, const std::vector<std::string>& values, basic_
         throw boost::program_options::validation_error(boost::program_options::validation_error::invalid_option_value);
 }
 
-}
-
-void init_logger(const std::string& file, boost::log::trivial::severity_level level)
-{
-    boost::log::add_common_attributes();
-
-    auto formatter = [](const boost::log::record_view& view, boost::log::formatting_ostream& strm)
-    {
-        strm << boost::log::extract<boost::posix_time::ptime>("TimeStamp", view)
-             << " [" << gettid() << "] "
-             << view[boost::log::trivial::severity] << ": "
-             << view[boost::log::expressions::message];
-    };
-
-    if (file.empty())
-    {
-        boost::log::add_console_log(
-            std::cout,
-            boost::log::keywords::format = formatter,
-            boost::log::keywords::severity = level
-            );
-    }
-    else
-    {
-        boost::log::add_file_log(
-            boost::log::keywords::file_name = file,
-            boost::log::keywords::rotation_size = 500 * 1024 * 1024,
-            boost::log::keywords::format = formatter,
-            boost::log::keywords::severity = level
-            );
-    }
 }
 
 int main(int argc, char *argv[])
@@ -100,7 +56,7 @@ int main(int argc, char *argv[])
 
     try
     {
-        init_logger(vm["log-file"].as<std::string>(), vm["log-level"].as<boost::log::trivial::severity_level>());
+        novemus::logger::set(vm["log-file"].as<std::string>(), vm["log-level"].as<boost::log::trivial::severity_level>());
 
         auto service = vm["service"].as<boost::asio::ip::tcp::endpoint>();
         auto gateway = vm["gateway"].as<boost::asio::ip::udp::endpoint>();

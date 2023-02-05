@@ -1,8 +1,8 @@
 #pragma once
 
+#include "logger.h"
 #include <memory>
 #include <thread>
-#include <boost/log/trivial.hpp>
 #include <boost/asio.hpp>
 
 namespace novemus {
@@ -26,7 +26,7 @@ class reactor
                     boost::system::error_code code;
                     io.run(code);
                     if (code)
-                        BOOST_LOG_TRIVIAL(error) << code.message();
+                        _err_ << code.message();
                 });
             }
         }
@@ -43,7 +43,7 @@ class reactor
                 }
                 catch (const std::exception& e)
                 {
-                    BOOST_LOG_TRIVIAL(error) << e.what();
+                    _err_ << e.what();
                 }
             }
         }
@@ -53,7 +53,7 @@ class reactor
             boost::system::error_code code;
             io.run(code);
             if (code)
-                BOOST_LOG_TRIVIAL(error) << code.message();
+                _err_ << code.message();
         }
 
         bool active() const noexcept(true)
