@@ -329,7 +329,6 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             m_local = make_pin();
             on_connect = handler;
 
-            m_seen = boost::posix_time::microsec_clock::universal_time();
             m_status = state::accepting;
         }
 

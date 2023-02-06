@@ -472,7 +472,7 @@ private:
             }
             else if (ptr)
             {
-                _err_ << "tunnel is connected";
+                _inf_ << "tunnel is connected";
 
                 ptr->accept_client();
                 ptr->listen_tunnel();
@@ -506,7 +506,7 @@ private:
             }
             else if (ptr)
             {
-                _err_ << "client " << id << " is accepted";
+                _inf_ << "client " << id << " is accepted";
 
                 ptr->notify_tunnel(id);
                 ptr->read_client(id);
@@ -604,7 +604,7 @@ private:
                 }
                 else if (ptr)
                 {
-                    _err_ << "client " << id << " is connected";
+                    _inf_ << "client " << id << " is connected";
 
                     ptr->read_client(id);
                 }
