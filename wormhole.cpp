@@ -204,6 +204,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
     reactor_ptr m_reactor;
     novemus::tubus::channel_ptr m_tunnel;
     std::map<uint32_t, tcp_ptr> m_bunch;
+    uint32_t m_top;
     std::mutex m_mutex;
 
     void listen_tunnel()
@@ -394,6 +395,7 @@ public:
     engine(const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
         : m_reactor(std::make_shared<novemus::reactor>())
         , m_tunnel(novemus::tubus::create_channel(m_reactor, gateway, faraway, secret))
+        , m_top(std::numeric_limits<uint32_t>::max())
     {
         m_tunnel->open();
     }
@@ -484,8 +486,7 @@ private:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        auto iter = m_bunch.rbegin();
-        uint32_t id = iter != m_bunch.rend() ? (iter->first + 1) : 0;
+        uint32_t id = ++m_top;
 
         _inf_ << "accepting client " << id;
 
@@ -579,9 +580,10 @@ private:
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        auto iter = m_bunch.find(id);
-        if (iter == m_bunch.end())
+        if (id == m_top + 1)
         {
+            m_top = id;
+
             _inf_ << "connecting client " << id;
 
             auto client = std::make_shared<tcp>(m_reactor);
