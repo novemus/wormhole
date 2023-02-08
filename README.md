@@ -9,7 +9,7 @@ Project depends on `boost` library. Clone repository and run the following comma
 ```console
 cd ~
 git clone git@github.com:novemus/wormhole.git
-cd ~/plexus
+cd ~/wormhole
 cmake -B ./build [-DBOOST_ROOT=...]
 cmake --build ./build --target wormhole
 cmake --build ./build --target install
