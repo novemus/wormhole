@@ -11,15 +11,7 @@
 #pragma once
 
 #include <boost/log/trivial.hpp>
-
-#if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
-#include <sys/syscall.h>
-#define gettid() syscall(SYS_gettid)
-#elif _WIN32
-#include <windows.h>
-#include <processthreadsapi.h>
-#define gettid() GetCurrentThreadId()
-#endif
+#include <boost/log/utility/manipulators/add_value.hpp>
 
 namespace novemus::logger {
 
@@ -27,11 +19,11 @@ void set(const std::string& file, boost::log::trivial::severity_level level);
 
 }
 
-#define NOVEMUS_LOG(severity) BOOST_LOG_TRIVIAL(severity) << "[" << gettid() << "] " << __FUNCTION__ << ": "
+#define GET_LOGGER(severity) BOOST_LOG_TRIVIAL(severity) << boost::log::add_value("Function", __FUNCTION__) << boost::log::add_value("File", __FILE__) << boost::log::add_value("Line", __LINE__)
 
-#define _trc_ NOVEMUS_LOG(trace)
-#define _dbg_ NOVEMUS_LOG(debug)
-#define _inf_ NOVEMUS_LOG(info)
-#define _wrn_ NOVEMUS_LOG(warning)
-#define _err_ NOVEMUS_LOG(error)
-#define _ftl_ NOVEMUS_LOG(fatal)
+#define _trc_ GET_LOGGER(trace)
+#define _dbg_ GET_LOGGER(debug)
+#define _inf_ GET_LOGGER(info)
+#define _wrn_ GET_LOGGER(warning)
+#define _err_ GET_LOGGER(error)
+#define _ftl_ GET_LOGGER(fatal)
