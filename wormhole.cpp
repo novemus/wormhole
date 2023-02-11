@@ -31,19 +31,26 @@ class tcp : public std::enable_shared_from_this<tcp>
 
     void error(const boost::system::error_code& error)
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
-
-        std::for_each(m_wq.begin(), m_wq.end(), [this, error](const auto& item)
+        std::list<std::pair<mutable_buffer, io_callback>> rq;
+        std::list<std::pair<const_buffer, io_callback>> wq;
         {
-            m_reactor->io().post(std::bind(item.second, error, 0));
-        });
-        m_wq.clear();
+            std::unique_lock<std::mutex> lock(m_mutex);
+            boost::system::error_code ec;
+            m_socket.close(ec);
 
-        std::for_each(m_rq.begin(), m_rq.end(), [this, error](const auto& item)
+            std::swap(rq, m_rq);
+            std::swap(wq, m_wq);
+        }
+
+        std::for_each(wq.begin(), wq.end(), [this, error](const auto& item)
         {
-            m_reactor->io().post(std::bind(item.second, error, 0));
+            item.second(error, 0);
         });
-        m_rq.clear();
+
+        std::for_each(rq.begin(), rq.end(), [this, error](const auto& item)
+        {
+            item.second(error, 0);
+        });
     }
 
     void read()
@@ -58,10 +65,10 @@ class tcp : public std::enable_shared_from_this<tcp>
             std::weak_ptr<tcp> weak = shared_from_this();
             m_socket.async_read_some(buffer, [weak, handler](const boost::system::error_code& error, size_t size)
             {
+                handler(error, size);
+                
                 if (auto ptr = weak.lock())
                     ptr->read();
-
-                handler(error, size);
             });
 
             m_rq.pop_front();
@@ -80,10 +87,10 @@ class tcp : public std::enable_shared_from_this<tcp>
             std::weak_ptr<tcp> weak = shared_from_this();
             boost::asio::async_write(m_socket, buffer, [weak, handler](const boost::system::error_code& error, size_t size)
             {
+                handler(error, size);
+                
                 if (auto ptr = weak.lock())
                     ptr->write();
-
-                handler(error, size);
             });
 
             m_wq.pop_front();
@@ -244,15 +251,15 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             else if (ptr)
             {
                 auto id = pack.id();
-                if (id != std::numeric_limits<uint32_t>::max())
+                if (pack.length() == 0)
                 {
-                    if (pack.length() == 0)
-                        ptr->notify_client(id);
-                    else
-                        ptr->read_tunnel(id, pack.length());
+                    ptr->notify_client(id);
+                    ptr->listen_tunnel();
                 }
-
-                ptr->listen_tunnel();
+                else
+                {
+                    ptr->read_tunnel(id, pack.length());
+                }
             }
         });
     }
@@ -373,6 +380,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             else if (ptr)
             {
                 ptr->write_client(id, data);
+                ptr->listen_tunnel();
             }
         });
     }
