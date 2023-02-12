@@ -126,7 +126,7 @@ struct packet : public mutable_buffer
     static constexpr size_t packet_sign = 0x0909;
     static constexpr size_t packet_version = 0x0100;
     static constexpr size_t header_size = 16;
-    static constexpr size_t max_packet_size = 65507;
+    static constexpr size_t max_packet_size = 1432;
     static constexpr size_t max_payload_size = max_packet_size - header_size;
 
     packet(const mutable_buffer& buf) : mutable_buffer(buf)
