@@ -6,3 +6,4 @@ tubus
 tubus.exe
 config.json
 build/**
+*.log

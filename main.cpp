@@ -68,12 +68,15 @@ int main(int argc, char *argv[])
     {
         novemus::logger::set(vm["log-file"].as<std::string>(), vm["log-level"].as<boost::log::trivial::severity_level>());
 
+        auto purpose = vm["purpose"].as<std::string>();
         auto service = vm["service"].as<boost::asio::ip::tcp::endpoint>();
         auto gateway = vm["gateway"].as<boost::asio::ip::udp::endpoint>();
         auto faraway = vm["faraway"].as<boost::asio::ip::udp::endpoint>();
         auto obscure = vm["obscure"].as<uint64_t>();
 
-        auto router = vm["purpose"].as<std::string>() == "import"
+        _inf_ << "Starting wormhole: purpose=" << purpose << " service=" << service << " gateway=" << gateway << " faraway=" << faraway << " obscure=" << (obscure != 0);
+
+        auto router = purpose == "import"
                     ? novemus::wormhole::create_importer(service, gateway, faraway, obscure)
                     : novemus::wormhole::create_exporter(service, gateway, faraway, obscure);
 

@@ -40,13 +40,15 @@ void set(const std::string& file, boost::log::trivial::severity_level level)
     
     boost::log::core::get()->add_global_attribute("Thread", boost::log::attributes::make_function(&gettid));
 
-    auto sink = boost::make_shared<boost::log::sinks::asynchronous_sink<boost::log::sinks::text_ostream_backend>>();
+    auto sink = boost::make_shared<boost::log::sinks::asynchronous_sink<boost::log::sinks::text_ostream_backend>>(true);
 
     if (!file.empty())
         sink->locked_backend()->add_stream(boost::shared_ptr<std::ostream>(new std::ofstream(file.c_str())));
+    else
+        sink->locked_backend()->add_stream(boost::shared_ptr<std::ostream>(&std::clog, boost::null_deleter()));
 
-    sink->locked_backend()->add_stream(boost::shared_ptr<std::ostream>(&std::clog, boost::null_deleter()));
-
+    sink->locked_backend()->auto_flush(true);
+    
     sink->set_formatter([level](const boost::log::record_view& view, boost::log::formatting_ostream& strm)
     {
         strm << "[" << boost::log::extract<int>("Thread", view) << "] "

@@ -31,26 +31,19 @@ class tcp : public std::enable_shared_from_this<tcp>
 
     void error(const boost::system::error_code& error)
     {
-        std::list<std::pair<mutable_buffer, io_callback>> rq;
-        std::list<std::pair<const_buffer, io_callback>> wq;
-        {
-            std::unique_lock<std::mutex> lock(m_mutex);
-            boost::system::error_code ec;
-            m_socket.close(ec);
+        std::unique_lock<std::mutex> lock(m_mutex);
 
-            std::swap(rq, m_rq);
-            std::swap(wq, m_wq);
-        }
-
-        std::for_each(wq.begin(), wq.end(), [this, error](const auto& item)
+        std::for_each(m_wq.begin(), m_wq.end(), [this, error](const auto& item)
         {
-            item.second(error, 0);
+            m_reactor->io().post(std::bind(item.second, error, 0));
         });
+        m_wq.clear();
 
-        std::for_each(rq.begin(), rq.end(), [this, error](const auto& item)
+        std::for_each(m_rq.begin(), m_rq.end(), [this, error](const auto& item)
         {
-            item.second(error, 0);
+            m_reactor->io().post(std::bind(item.second, error, 0));
         });
+        m_rq.clear();
     }
 
     void read()
@@ -106,8 +99,6 @@ public:
     ~tcp()
     {
         error(boost::asio::error::operation_aborted);
-        boost::system::error_code ec;
-        m_socket.close(ec);
     }
 
     void async_connect(const tcp_endpoint& ep, const callback& handler)
@@ -251,6 +242,9 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             else if (ptr)
             {
                 auto id = pack.id();
+
+                _trc_ << "client " << id << ": length=" << pack.length();
+
                 if (pack.length() == 0)
                 {
                     ptr->notify_client(id);
@@ -291,6 +285,8 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             }
             else if (ptr)
             {
+                _trc_ << "client " << id << ": size=" << size;
+
                 if (size > 0)
                     ptr->write_tunnel(id, data.slice(0, size));
 
@@ -319,6 +315,8 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
                 auto ptr = weak.lock();
                 if (ptr)
                 {
+                    _trc_ << "client " << id << ": size=" << size;
+
                     ptr->notify_tunnel(id);
                     ptr->remove_client(id);
                 }
@@ -350,6 +348,10 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
                 if (ptr)
                     ptr->cancel();
             }
+            else
+            {
+                _trc_ << "client " << pack.id() << ": size=" << size;
+            }
         });
     }
 
@@ -379,6 +381,8 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             }
             else if (ptr)
             {
+                _trc_ << "client " << id << ": size=" << size;
+
                 ptr->write_client(id, data);
                 ptr->listen_tunnel();
             }
