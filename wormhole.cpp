@@ -46,9 +46,12 @@ class tcp : public std::enable_shared_from_this<tcp>
         m_rq.clear();
     }
 
-    void read()
+    void next_read(bool pop = true)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
+
+        if (pop)
+            m_rq.pop_front();
 
         if (m_socket.is_open() && m_rq.size() > 0)
         {
@@ -61,16 +64,17 @@ class tcp : public std::enable_shared_from_this<tcp>
                 handler(error, size);
                 
                 if (auto ptr = weak.lock())
-                    ptr->read();
+                    ptr->next_read();
             });
-
-            m_rq.pop_front();
         }
     }
 
-    void write()
+    void next_write(bool pop = true)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
+
+        if (pop)
+            m_wq.pop_front();
 
         if (m_socket.is_open() && m_wq.size() > 0)
         {
@@ -83,10 +87,8 @@ class tcp : public std::enable_shared_from_this<tcp>
                 handler(error, size);
                 
                 if (auto ptr = weak.lock())
-                    ptr->write();
+                    ptr->next_write();
             });
-
-            m_wq.pop_front();
         }
     }
 
@@ -119,6 +121,7 @@ public:
         if (m_socket.is_open() && m_rq.size() == 1)
         {
             std::weak_ptr<tcp> weak = shared_from_this();
+            
             m_socket.async_wait(boost::asio::ip::tcp::socket::wait_read, [weak](const boost::system::error_code& error)
             {
                 auto ptr = weak.lock();
@@ -131,7 +134,7 @@ public:
                         _err_ << error.message();
                 }
                 else if (ptr)
-                    ptr->read();
+                    ptr->next_read(false);
             });
         }
     }
@@ -141,7 +144,7 @@ public:
         std::unique_lock<std::mutex> lock(m_mutex);
 
         m_wq.emplace_back(buffer, handler);
-        if (m_wq.size() == 1)
+        if (m_socket.is_open() && m_wq.size() == 1)
         {
             std::weak_ptr<tcp> weak = shared_from_this();
             m_socket.async_wait(boost::asio::ip::tcp::socket::wait_write, [weak](const boost::system::error_code& error)
@@ -156,7 +159,7 @@ public:
                         _err_ << error.message();
                 }
                 else if (ptr)
-                    ptr->write();
+                    ptr->next_write(false);
             });
         }
     }
@@ -243,8 +246,6 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             {
                 auto id = pack.id();
 
-                _trc_ << "client " << id << ": length=" << pack.length();
-
                 if (pack.length() == 0)
                 {
                     ptr->notify_client(id);
@@ -285,8 +286,6 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             }
             else if (ptr)
             {
-                _trc_ << "client " << id << ": size=" << size;
-
                 if (size > 0)
                     ptr->write_tunnel(id, data.slice(0, size));
 
@@ -315,8 +314,6 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
                 auto ptr = weak.lock();
                 if (ptr)
                 {
-                    _trc_ << "client " << id << ": size=" << size;
-
                     ptr->notify_tunnel(id);
                     ptr->remove_client(id);
                 }
@@ -348,10 +345,6 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
                 if (ptr)
                     ptr->cancel();
             }
-            else
-            {
-                _trc_ << "client " << pack.id() << ": size=" << size;
-            }
         });
     }
 
@@ -381,8 +374,6 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             }
             else if (ptr)
             {
-                _trc_ << "client " << id << ": size=" << size;
-
                 ptr->write_client(id, data);
                 ptr->listen_tunnel();
             }

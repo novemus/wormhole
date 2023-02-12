@@ -19,7 +19,7 @@ void set(const std::string& file, boost::log::trivial::severity_level level);
 
 }
 
-#define GET_LOGGER(severity) BOOST_LOG_TRIVIAL(severity) << boost::log::add_value("Function", __FUNCTION__) << boost::log::add_value("File", __FILE__) << boost::log::add_value("Line", __LINE__)
+#define GET_LOGGER(severity) BOOST_LOG_TRIVIAL(severity) << boost::log::add_value("Function", __PRETTY_FUNCTION__) << boost::log::add_value("File", __FILE__) << boost::log::add_value("Line", __LINE__)
 
 #define _trc_ GET_LOGGER(trace)
 #define _dbg_ GET_LOGGER(debug)
