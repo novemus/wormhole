@@ -226,7 +226,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             auto now = boost::posix_time::microsec_clock::universal_time();
             if (now > m_dead || m_seen + ping_timeout() < now - boost::posix_time::seconds(5))
             {
-                m_io.post(boost::bind(on_error, boost::asio::error::broken_pipe));
+                m_io.post(boost::bind(on_error, boost::asio::error::interrupted));
                 return;
             }
 
@@ -254,9 +254,20 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                         on_connect = 0;
                     }
                 }
-                else if (iter->first == (section::ping | section::echo) || iter->first == (section::tear | section::echo))
+                else if (iter->first == (section::ping | section::echo))
                 {
                     m_jobs.erase(iter);
+                }
+                else if (iter->first == (section::tear | section::echo))
+                {
+                    m_jobs.erase(iter);
+                    m_status = state::finished;
+
+                    if (on_shutdown)
+                    {
+                        m_io.post(boost::bind(on_shutdown, boost::system::error_code()));
+                        on_shutdown = 0;
+                    }
                 }
                 else
                 {
@@ -276,13 +287,16 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
         void shutdown(const callback& handler)
         {
-            if (m_status != state::linked)
+            if (m_status == state::finished)
+            {
+                m_io.post(boost::bind(handler, boost::system::error_code()));
+                return;
+            }
+
+            if (m_status != state::linked && m_status != state::tearing)
             {
                 boost::system::error_code error = m_status == state::shutting ? 
-                    boost::asio::error::in_progress : boost::asio::error::broken_pipe;
-
-                if (error == boost::asio::error::broken_pipe)
-                    m_io.post(boost::bind(on_error, boost::asio::error::broken_pipe));
+                    boost::asio::error::in_progress : boost::asio::error::not_connected;
 
                 m_io.post(boost::bind(handler, error));
                 return;
@@ -292,9 +306,12 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             on_shutdown = handler;
 
             m_dead = now + shutdown_timeout();
-            m_status = state::shutting;
-
-            m_jobs.emplace(section::tear, now);
+            
+            if (m_status != state::tearing)
+            {
+                m_status = state::shutting;
+                m_jobs.emplace(section::tear, now);
+            }
         }
 
         void connect(const callback& handler)
@@ -303,10 +320,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             {
                 boost::system::error_code error = m_status == state::connecting ? 
                     boost::asio::error::in_progress : m_status == state::linked ?
-                        boost::asio::error::already_connected : boost::asio::error::broken_pipe;
-
-                if (error == boost::asio::error::broken_pipe)
-                    m_io.post(boost::bind(on_error, boost::asio::error::broken_pipe));
+                        boost::asio::error::already_connected : boost::asio::error::no_permission;
 
                 m_io.post(boost::bind(handler, error));
                 return;
@@ -327,10 +341,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
             {
                 boost::system::error_code error = m_status == state::accepting ? 
                     boost::asio::error::in_progress : m_status == state::linked ?
-                        boost::asio::error::already_connected : boost::asio::error::broken_pipe;
-
-                if (error == boost::asio::error::broken_pipe)
-                    m_io.post(boost::bind(on_error, boost::asio::error::broken_pipe));
+                        boost::asio::error::already_connected : boost::asio::error::no_permission;
 
                 m_io.post(boost::bind(handler, error));
                 return;
@@ -815,8 +826,8 @@ protected:
 
             if (m_connector.status() == state::tearing || m_connector.status() == state::shutting)
             {
-                m_istreamer.error(boost::asio::error::interrupted);
-                m_ostreamer.error(boost::asio::error::interrupted);
+                m_istreamer.error(boost::asio::error::connection_aborted);
+                m_ostreamer.error(boost::asio::error::connection_aborted);
             }
 
             boost::system::error_code err;
@@ -830,8 +841,8 @@ protected:
 
         if (m_connector.status() == state::finished)
         {
-            m_istreamer.error(boost::asio::error::interrupted);
-            m_ostreamer.error(boost::asio::error::interrupted);
+            m_istreamer.error(boost::asio::error::connection_aborted);
+            m_ostreamer.error(boost::asio::error::connection_aborted);
             return;
         }
 
@@ -862,8 +873,8 @@ protected:
 
         if (m_connector.status() == state::finished)
         {
-            m_istreamer.error(boost::asio::error::interrupted);
-            m_ostreamer.error(boost::asio::error::interrupted);
+            m_istreamer.error(boost::asio::error::connection_aborted);
+            m_ostreamer.error(boost::asio::error::connection_aborted);
 
             boost::system::error_code err;
             m_socket.close(err);
@@ -977,7 +988,7 @@ public:
 
     void close() noexcept(true) override
     {
-        mistake(boost::asio::error::connection_aborted);
+        mistake(boost::asio::error::interrupted);
     }
 
     void shutdown(const callback& handler) noexcept(true) override
@@ -1012,7 +1023,7 @@ public:
         if (status != state::linked)
         {
             boost::system::error_code ec = status == state::initial ? boost::asio::error::not_connected : 
-                status == state::connecting || status == state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
+                status == state::connecting || status == state::accepting ? boost::asio::error::try_again : boost::asio::error::no_permission;
 
             m_reactor->io().post(boost::bind(handler, ec, 0));
             return;
@@ -1029,7 +1040,7 @@ public:
         if (status != state::linked)
         {
             boost::system::error_code ec = status == state::initial ? boost::asio::error::not_connected : 
-                status == state::connecting || status == state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
+                status == state::connecting || status == state::accepting ? boost::asio::error::try_again : boost::asio::error::no_permission;
 
             m_reactor->io().post(boost::bind(handler, ec, 0));
             return;

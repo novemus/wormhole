@@ -63,6 +63,11 @@ public:
     {
     }
 
+    ~tubus_channel()
+    {
+        m_channel->close();
+    }
+
     void open()
     {
         m_channel = novemus::tubus::create_channel(novemus::shared_reactor(), m_bind, m_peer, m_secret);
@@ -86,7 +91,7 @@ public:
 
     std::future<void> async_shutdown()
     {
-        ASYNC(m_channel, shutdown, error && error != boost::asio::error::broken_pipe && error != boost::asio::error::connection_refused);
+        ASYNC(m_channel, shutdown, error && error != boost::asio::error::interrupted && error != boost::asio::error::connection_refused);
     }
 
     std::future<void> async_write(const novemus::const_buffer& buffer)
@@ -274,13 +279,12 @@ BOOST_AUTO_TEST_CASE(tubus_connectivity)
 
     auto la = left.async_accept();
     BOOST_CHECK_EQUAL((int)la.wait_for(std::chrono::seconds(3)), (int)std::future_status::timeout);
-    BOOST_REQUIRE_NO_THROW(left.async_shutdown().get());
+    BOOST_REQUIRE_THROW(left.async_shutdown().get(), boost::system::system_error);
+    BOOST_REQUIRE_NO_THROW(left.close());
 
     auto rc = right.async_connect();
     BOOST_REQUIRE_THROW(rc.get(), boost::system::system_error);
     BOOST_REQUIRE_NO_THROW(right.async_shutdown().get());
-    
-    BOOST_REQUIRE_NO_THROW(left.close());
     BOOST_REQUIRE_NO_THROW(right.close());
 
     BOOST_REQUIRE_NO_THROW(left.open());

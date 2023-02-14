@@ -213,6 +213,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
     friend class exporter;
 
     reactor_ptr m_reactor;
+    boost::asio::signal_set m_signals;
     novemus::tubus::channel_ptr m_tunnel;
     std::map<uint32_t, tcp_ptr> m_bunch;
     uint32_t m_top;
@@ -227,7 +228,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             auto ptr = weak.lock();
             if (error)
             {
-                if (error != boost::asio::error::operation_aborted)
+                if (error != boost::asio::error::interrupted)
                 {
                     _err_ << error.message();
                     
@@ -330,7 +331,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             auto ptr = weak.lock();
             if (error)
             {
-                if (error != boost::asio::error::operation_aborted)
+                if (error != boost::asio::error::interrupted)
                 {
                     _err_ << "client " << pack.id() << ": " << error.message();
 
@@ -357,7 +358,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             auto ptr = weak.lock();
             if (error)
             {
-                if (error != boost::asio::error::operation_aborted)
+                if (error != boost::asio::error::interrupted)
                 {
                     _err_ << "client " << id << ": " << error.message();
                     
@@ -401,12 +402,33 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
         write_tunnel(id, const_buffer());
     }
 
+    void listen_signals()
+    {
+        std::weak_ptr<engine> weak = shared_from_this();
+        m_signals.async_wait([weak](const boost::system::error_code& error, int signal)
+        {
+            if (error)
+            {
+                if (error != boost::asio::error::operation_aborted)
+                    _err_ << error.message();
+                return;
+            }
+
+            if (auto ptr = weak.lock())
+            {
+                _wrn_ << "shutting down due to the signal " << signal;
+                ptr->cancel();
+            }
+        });
+    }
+
     virtual void notify_client(uint32_t id) = 0;
 
 public:
 
     engine(const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
         : m_reactor(std::make_shared<novemus::reactor>())
+        , m_signals(m_reactor->io(), SIGINT, SIGTERM)
         , m_tunnel(novemus::tubus::create_channel(m_reactor, gateway, faraway, secret))
         , m_top(std::numeric_limits<uint32_t>::max())
     {
@@ -415,21 +437,31 @@ public:
 
     void employ() noexcept(true) override
     {
+        listen_signals();
         m_reactor->execute();
     }
     
     void launch() noexcept(true) override
     {
+        listen_signals();
         m_reactor->activate();
     }
-    
+
     void cancel() noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
         m_bunch.clear();
-        m_tunnel->close();
-        m_reactor->terminate();
+        m_tunnel->shutdown([reactor = m_reactor](const boost::system::error_code& error)
+        {
+            if (error && error != boost::asio::error::interrupted && error != boost::asio::error::in_progress)
+                _err_ << error.message();
+
+            reactor->terminate();
+        });
+
+        boost::system::error_code ec;
+        m_signals.cancel(ec);
     }
 };
 
@@ -477,7 +509,7 @@ private:
             auto ptr = weak.lock();
             if (error)
             {
-                if (error != boost::asio::error::operation_aborted)
+                if (error != boost::asio::error::interrupted)
                 {
                     _err_ << error.message();
                 
@@ -572,7 +604,7 @@ private:
             auto ptr = weak.lock();
             if (error)
             {
-                if (error != boost::asio::error::operation_aborted)
+                if (error != boost::asio::error::interrupted)
                 {
                     _err_ << error.message();
                     
