@@ -533,22 +533,22 @@ BOOST_AUTO_TEST_CASE(udp_speed)
     size_t recv = 0;
     size_t sent = 0;
 
-    novemus::mutable_buffer data(65507);
+    novemus::mutable_buffer data(1432);
     novemus::mutable_buffer ackn(20);
-    for (size_t j = 0; j < 3278; ++j)
+    for (size_t j = 0; j < 15621; ++j)
     {
-        for (size_t i = 0; i < 5; ++i)
+        for (size_t i = 0; i < 48; ++i)
         {
             sent += left->send(data);
         }
 
-        for (size_t i = 0; i < 5; ++i)
+        for (size_t i = 0; i < 48; ++i)
         {
             recv += right->receive(data);
             right->send(ackn);
         }
 
-        for (size_t i = 0; i < 5; ++i)
+        for (size_t i = 0; i < 48; ++i)
         {
             left->receive(ackn);
         }
@@ -580,7 +580,7 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
         }
 
         size_t read = 0;
-        novemus::mutable_buffer rb(1024 * 1024);
+        novemus::mutable_buffer rb(1432);
 
         while (read < 1024 * 1024 * 1024)
         {
@@ -596,7 +596,7 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
     right.connect(le);
 
     size_t sent = 0;
-    novemus::mutable_buffer wb(1024 * 1024);
+    novemus::mutable_buffer wb(1432);
 
     BOOST_TEST_MESSAGE(boost::posix_time::microsec_clock::local_time() << ": begin");
     while (sent < 1024 * 1024 * 1024)

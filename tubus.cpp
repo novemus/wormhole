@@ -66,7 +66,7 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 
     inline static size_t snippet_flight()
     {
-        static size_t s_flight(getenv("TUBUS_SNIPPET_FLIGHT", 5));
+        static size_t s_flight(getenv("TUBUS_SNIPPET_FLIGHT", 48));
         return s_flight;
     }
 
