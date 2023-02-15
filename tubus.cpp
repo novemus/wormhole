@@ -1023,7 +1023,7 @@ public:
         if (status != state::linked)
         {
             boost::system::error_code ec = status == state::initial ? boost::asio::error::not_connected : 
-                status == state::connecting || status == state::accepting ? boost::asio::error::try_again : boost::asio::error::no_permission;
+                status == state::connecting || status == state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
 
             m_reactor->io().post(boost::bind(handler, ec, 0));
             return;
@@ -1040,7 +1040,7 @@ public:
         if (status != state::linked)
         {
             boost::system::error_code ec = status == state::initial ? boost::asio::error::not_connected : 
-                status == state::connecting || status == state::accepting ? boost::asio::error::try_again : boost::asio::error::no_permission;
+                status == state::connecting || status == state::accepting ? boost::asio::error::try_again : boost::asio::error::broken_pipe;
 
             m_reactor->io().post(boost::bind(handler, ec, 0));
             return;

@@ -27,8 +27,8 @@ enum severity
     trace
 };
 
-std::ostream& operator<<(std::ostream& out, novemus::logger::severity severity);
-std::istream& operator>>(std::istream& in, novemus::logger::severity& severity);
+std::ostream& operator<<(std::ostream& out, novemus::logger::severity level);
+std::istream& operator>>(std::istream& in, novemus::logger::severity& level);
 
 struct line
 {
@@ -49,11 +49,11 @@ private:
     std::stringstream stream;
 };
 
-void set(severity level, const std::string& file = "");
+void set(severity level, const std::string& file = "", bool async = true);
 
 }
 
-#define LOG_LINE(severity) novemus::logger::line(severity, __PRETTY_FUNCTION__, __FILE__, __LINE__)
+#define LOG_LINE(severity) novemus::logger::line(severity, __FUNCTION__, __FILE__, __LINE__)
 
 #define _ftl_ LOG_LINE(novemus::logger::fatal)
 #define _err_ LOG_LINE(novemus::logger::error)

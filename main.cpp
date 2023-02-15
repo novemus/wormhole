@@ -74,7 +74,7 @@ int main(int argc, char *argv[])
         auto faraway = vm["faraway"].as<boost::asio::ip::udp::endpoint>();
         auto obscure = vm["obscure"].as<uint64_t>();
 
-        _inf_ << "Starting wormhole: purpose=" << purpose << " service=" << service << " gateway=" << gateway << " faraway=" << faraway << " obscure=" << (obscure != 0);
+        _inf_ << "starting wormhole for purpose=" << purpose << " service=" << service << " gateway=" << gateway << " faraway=" << faraway << " obscure=" << (obscure != 0);
 
         auto router = purpose == "import"
                     ? novemus::wormhole::create_importer(service, gateway, faraway, obscure)

@@ -30,20 +30,25 @@
 namespace novemus::logger {
 
 severity      g_level(severity::info);
-reactor_ptr   g_reactor = std::make_shared<novemus::reactor>(1);
+reactor_ptr   g_reactor;
 std::ofstream g_file;
 std::mutex    g_mutex;
 
 void append(std::string&& entry) 
 {
-    g_reactor->io().post([line = entry]()
+    auto job = [line = entry]()
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_file.is_open())
             g_file << line << std::endl;
         else
             std::cout << line << std::endl;
-    });
+    };
+
+    if (g_reactor)
+        g_reactor->io().post(job);
+    else
+        job();
 };
 
 std::ostream& operator<<(std::ostream& out, novemus::logger::severity level)
@@ -101,11 +106,11 @@ line::line(severity l, const char* func, const char* file, int line) : level(l <
 {
     if (level != severity::none)
     {
-         stream << boost::posix_time::microsec_clock::local_time() << " [" << gettid() << "] " << level << ": ";
+         stream << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << level << ": ";
         if (novemus::logger::level() > severity::info)
         {
-            auto file = std::filesystem::path(func).filename();
-            stream << "[" << func << " in " << file << ":" << line << "] ";
+            auto name = std::filesystem::path(file).filename().string();
+            stream << "[" << func << " in " << name << ":" << line << "] ";
         }
     }
 }
@@ -118,9 +123,27 @@ line::~line()
     }
 }
 
-void set(severity level, const std::string& file)
+void set(severity level, const std::string& file, bool async)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
+
+    if (async)
+    {
+        if (!g_reactor)
+        {
+            g_reactor = std::make_shared<novemus::reactor>(1);
+            g_reactor->activate();
+        }
+    }
+    else
+    {
+        if (g_reactor)
+        {
+            g_reactor->terminate();
+            g_reactor.reset();
+        }
+    }
+
     if (file.empty())
     {
         g_file.close();
