@@ -10,20 +10,54 @@
 
 #pragma once
 
-#include <boost/log/trivial.hpp>
-#include <boost/log/utility/manipulators/add_value.hpp>
+#include <iostream>
+#include <sstream>
+#include <functional>
 
 namespace novemus::logger {
 
-void set(const std::string& file, boost::log::trivial::severity_level level);
+enum severity
+{
+    none,
+    fatal,
+    error,
+    warning,
+    info,
+    debug,
+    trace
+};
+
+std::ostream& operator<<(std::ostream& out, novemus::logger::severity severity);
+std::istream& operator>>(std::istream& in, novemus::logger::severity& severity);
+
+struct line
+{
+    line(severity level, const char* func, const char* file, int line);
+    ~line();
+    
+    template<typename type_t> 
+    line& operator<<(const type_t& value)
+    {
+        if (level != severity::none)
+            stream << value;
+        return *this;
+    }
+
+private:
+
+    severity level;
+    std::stringstream stream;
+};
+
+void set(severity level, const std::string& file = "");
 
 }
 
-#define GET_LOGGER(severity) BOOST_LOG_TRIVIAL(severity) << boost::log::add_value("Function", __PRETTY_FUNCTION__) << boost::log::add_value("File", __FILE__) << boost::log::add_value("Line", __LINE__)
+#define LOG_LINE(severity) novemus::logger::line(severity, __PRETTY_FUNCTION__, __FILE__, __LINE__)
 
-#define _trc_ GET_LOGGER(trace)
-#define _dbg_ GET_LOGGER(debug)
-#define _inf_ GET_LOGGER(info)
-#define _wrn_ GET_LOGGER(warning)
-#define _err_ GET_LOGGER(error)
-#define _ftl_ GET_LOGGER(fatal)
+#define _ftl_ LOG_LINE(novemus::logger::fatal)
+#define _err_ LOG_LINE(novemus::logger::error)
+#define _wrn_ LOG_LINE(novemus::logger::warning)
+#define _inf_ LOG_LINE(novemus::logger::info)
+#define _dbg_ LOG_LINE(novemus::logger::debug)
+#define _trc_ LOG_LINE(novemus::logger::trace)

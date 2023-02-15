@@ -8,20 +8,15 @@
  * 
  */
 
+#include "reactor.h"
 #include "logger.h"
-#include <filesystem>
-#include <boost/log/trivial.hpp>
-#include <boost/log/utility/setup/console.hpp>
-#include <boost/log/utility/setup/file.hpp>
-#include <boost/log/utility/setup/common_attributes.hpp>
-#include <boost/log/attributes/function.hpp>
-#include <boost/log/sinks/async_frontend.hpp>
-#include <boost/log/sinks/text_ostream_backend.hpp>
-#include <boost/log/support/date_time.hpp>
-#include <boost/core/null_deleter.hpp>
-#include <boost/shared_ptr.hpp>
 #include <fstream>
-#include <ostream>
+#include <mutex>
+#include <future>
+#include <filesystem>
+#include <sys/types.h>
+#include <boost/thread/thread.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 #if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
 #include <sys/syscall.h>
@@ -34,40 +29,107 @@
 
 namespace novemus::logger {
 
-void set(const std::string& file, boost::log::trivial::severity_level level)
+severity      g_level(severity::info);
+reactor_ptr   g_reactor = std::make_shared<novemus::reactor>(1);
+std::ofstream g_file;
+std::mutex    g_mutex;
+
+void append(std::string&& entry) 
 {
-    boost::log::add_common_attributes();
-    
-    boost::log::core::get()->add_global_attribute("Thread", boost::log::attributes::make_function(&gettid));
-
-    auto sink = boost::make_shared<boost::log::sinks::asynchronous_sink<boost::log::sinks::text_ostream_backend>>(true);
-
-    if (!file.empty())
-        sink->locked_backend()->add_stream(boost::shared_ptr<std::ostream>(new std::ofstream(file.c_str())));
-    else
-        sink->locked_backend()->add_stream(boost::shared_ptr<std::ostream>(&std::clog, boost::null_deleter()));
-
-    sink->locked_backend()->auto_flush(true);
-    
-    sink->set_formatter([level](const boost::log::record_view& view, boost::log::formatting_ostream& strm)
+    g_reactor->io().post([line = entry]()
     {
-        strm << "[" << boost::log::extract<int>("Thread", view) << "] "
-             << boost::log::extract<boost::posix_time::ptime>("TimeStamp", view) 
-             << " " << view[boost::log::trivial::severity] << ": ";
-             
-             if (level == boost::log::trivial::debug || level == boost::log::trivial::trace)
-             {
-                auto file = std::filesystem::path(boost::log::extract<std::string>("File", view).get()).filename();
-
-                strm << "[" << boost::log::extract<std::string>("Function", view)
-                    << " in " << file.string() << ":" << boost::log::extract<int>("Line", view) << "] ";
-             }
-
-             strm << view[boost::log::expressions::message];
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_file.is_open())
+            g_file << line << std::endl;
+        else
+            std::cout << line << std::endl;
     });
+};
 
-    boost::log::core::get()->set_filter(boost::log::trivial::severity >= level);
-    boost::log::core::get()->add_sink(sink);
+std::ostream& operator<<(std::ostream& out, novemus::logger::severity level)
+{
+    switch(level)
+    {
+        case novemus::logger::fatal:
+            return out << "FATAL";
+        case novemus::logger::error:
+            return out << "ERROR";
+        case novemus::logger::warning:
+            return out << "WARN";
+        case novemus::logger::info:
+            return out << "INFO";
+        case novemus::logger::debug:
+            return out << "DEBUG";
+        case novemus::logger::trace:
+            return out << "TRACE";
+        default:
+            return out << "NONE";
+    }
+    return out;
+}
+
+std::istream& operator>>(std::istream& in, novemus::logger::severity& level)
+{
+    std::string str;
+    in >> str;
+
+    if (str == "fatal" || str == "FATAL")
+        level = novemus::logger::fatal;
+    else if (str == "error" || str == "ERROR")
+        level = novemus::logger::error;
+    else if (str == "warning" || str == "WARN")
+        level = novemus::logger::warning;
+    else if (str == "info" || str == "INFO")
+        level = novemus::logger::info;
+    else if (str == "debug" || str == "DEBUG")
+        level = novemus::logger::debug;
+    else if (str == "trace" || str == "TRACE")
+        level = novemus::logger::trace;
+    else
+        level = novemus::logger::none;
+
+    return in;
+}
+
+severity level()
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_level;
+}
+
+line::line(severity l, const char* func, const char* file, int line) : level(l <= novemus::logger::level() ? l : severity::none)
+{
+    if (level != severity::none)
+    {
+         stream << boost::posix_time::microsec_clock::local_time() << " [" << gettid() << "] " << level << ": ";
+        if (novemus::logger::level() > severity::info)
+        {
+            auto file = std::filesystem::path(func).filename();
+            stream << "[" << func << " in " << file << ":" << line << "] ";
+        }
+    }
+}
+
+line::~line()
+{
+    if (level != severity::none)
+    {
+        novemus::logger::append(std::move(stream.str()));
+    }
+}
+
+void set(severity level, const std::string& file)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (file.empty())
+    {
+        g_file.close();
+    }
+    else
+    {
+        g_file.open(file);
+    }
+    g_level = level;
 }
 
 }
