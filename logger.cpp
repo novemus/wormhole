@@ -102,7 +102,8 @@ severity level()
     return g_level;
 }
 
-line::line(severity l, const char* func, const char* file, int line) : level(l <= novemus::logger::level() ? l : severity::none)
+line::line(severity sev, const char* func, const char* file, int line) noexcept(true) 
+    : level(sev <= novemus::logger::level() ? sev : severity::none)
 {
     if (level != severity::none)
     {
@@ -115,7 +116,7 @@ line::line(severity l, const char* func, const char* file, int line) : level(l <
     }
 }
 
-line::~line()
+line::~line() noexcept(true)
 {
     if (level != severity::none)
     {
@@ -123,7 +124,7 @@ line::~line()
     }
 }
 
-void set(severity level, const std::string& file, bool async)
+void set(severity level, const std::string& file, bool async) noexcept(false)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
 

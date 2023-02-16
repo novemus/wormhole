@@ -32,11 +32,11 @@ std::istream& operator>>(std::istream& in, novemus::logger::severity& level);
 
 struct line
 {
-    line(severity level, const char* func, const char* file, int line);
-    ~line();
+    line(severity sev, const char* func, const char* file, int line) noexcept(true);
+    ~line() noexcept(true);
     
     template<typename type_t> 
-    line& operator<<(const type_t& value)
+    line& operator<<(const type_t& value) noexcept(true)
     {
         if (level != severity::none)
             stream << value;
@@ -49,15 +49,15 @@ private:
     std::stringstream stream;
 };
 
-void set(severity level, const std::string& file = "", bool async = true);
+void set(severity level, const std::string& file = "", bool async = true) noexcept(false);
 
 }
 
-#define LOG_LINE(severity) novemus::logger::line(severity, __FUNCTION__, __FILE__, __LINE__)
+#define MAKE_LOG_LINE(severity) novemus::logger::line(severity, __FUNCTION__, __FILE__, __LINE__)
 
-#define _ftl_ LOG_LINE(novemus::logger::fatal)
-#define _err_ LOG_LINE(novemus::logger::error)
-#define _wrn_ LOG_LINE(novemus::logger::warning)
-#define _inf_ LOG_LINE(novemus::logger::info)
-#define _dbg_ LOG_LINE(novemus::logger::debug)
-#define _trc_ LOG_LINE(novemus::logger::trace)
+#define _ftl_ MAKE_LOG_LINE(novemus::logger::fatal)
+#define _err_ MAKE_LOG_LINE(novemus::logger::error)
+#define _wrn_ MAKE_LOG_LINE(novemus::logger::warning)
+#define _inf_ MAKE_LOG_LINE(novemus::logger::info)
+#define _dbg_ MAKE_LOG_LINE(novemus::logger::debug)
+#define _trc_ MAKE_LOG_LINE(novemus::logger::trace)

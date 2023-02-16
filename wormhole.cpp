@@ -445,13 +445,13 @@ public:
         m_tunnel->open();
     }
 
-    void employ() noexcept(true) override
+    void employ() noexcept(false) override
     {
         listen_signals();
         m_reactor->execute();
     }
     
-    void launch() noexcept(true) override
+    void launch() noexcept(false) override
     {
         listen_signals();
         m_reactor->activate();
@@ -490,13 +490,13 @@ public:
         m_server.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
     }
 
-    void employ() noexcept(true) override
+    void employ() noexcept(false) override
     {
         connect_tunnel();
         engine::employ();
     }
 
-    void launch() noexcept(true) override
+    void launch() noexcept(false) override
     {
         connect_tunnel();
         engine::launch();
@@ -592,13 +592,13 @@ public:
     {
     }
 
-    void employ() noexcept(true) override
+    void employ() noexcept(false) override
     {
         accept_tunnel();
         engine::employ();
     }
 
-    void launch() noexcept(true) override
+    void launch() noexcept(false) override
     {
         accept_tunnel();
         engine::launch();
@@ -675,12 +675,12 @@ private:
     }
 };
 
-router_ptr create_exporter(const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(true)
+router_ptr create_exporter(const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false)
 {
     return std::make_shared<exporter>(server, gateway, faraway, secret);
 }
 
-router_ptr create_importer(const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(true)
+router_ptr create_importer(const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false)
 {
     return std::make_shared<importer>(server, gateway, faraway, secret);
 }
