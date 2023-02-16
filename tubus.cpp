@@ -46,45 +46,51 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
 {
     enum state { neither, initial, accepting, connecting, linked, shutting, tearing, finished };
 
+    inline static size_t max_packet_size()
+    {
+        static size_t s_size(getenv("TUBUS_MAX_PACKET_SIZE", 1432u));
+        return s_size;
+    }
+
     inline static boost::posix_time::time_duration ping_timeout()
     {
-        static boost::posix_time::seconds s_timeout(getenv("TUBUS_PING_TIMEOUT", 30));
+        static boost::posix_time::seconds s_timeout(getenv("TUBUS_PING_TIMEOUT", 30l));
         return s_timeout;
     }
 
     inline static boost::posix_time::time_duration resend_timeout()
     {
-        static boost::posix_time::milliseconds s_timeout(getenv("TUBUS_RESEND_TIMEOUT", 100));
+        static boost::posix_time::milliseconds s_timeout(getenv("TUBUS_RESEND_TIMEOUT", 100l));
         return s_timeout;
     }
 
     inline static boost::posix_time::time_duration shutdown_timeout()
     {
-        static boost::posix_time::milliseconds s_timeout(getenv("TUBUS_SHUTDOWN_TIMEOUT", 2000));
+        static boost::posix_time::milliseconds s_timeout(getenv("TUBUS_SHUTDOWN_TIMEOUT", 2000l));
         return s_timeout;
     }
 
     inline static size_t snippet_flight()
     {
-        static size_t s_flight(getenv("TUBUS_SNIPPET_FLIGHT", 48));
+        static size_t s_flight(getenv("TUBUS_SNIPPET_FLIGHT", 48u));
         return s_flight;
     }
 
     inline static size_t move_attempts()
     {
-        static size_t s_attempts(getenv("TUBUS_MOVE_ATTEMPTS", 32));
+        static size_t s_attempts(getenv("TUBUS_MOVE_ATTEMPTS", 32u));
         return s_attempts;
     }
 
     inline static size_t receive_buffer_size()
     {
-        static size_t s_size(getenv("TUBUS_RECEIVE_BUFFER_SIZE", 5 * 1024 * 1024));
+        static size_t s_size(getenv("TUBUS_RECEIVE_BUFFER_SIZE", 5ull * 1024 * 1024));
         return s_size;
     }
 
     inline static size_t send_buffer_size()
     {
-        static size_t s_size(getenv("TUBUS_SEND_BUFFER_SIZE", 5 * 1024 * 1024));
+        static size_t s_size(getenv("TUBUS_SEND_BUFFER_SIZE", 5ull * 1024 * 1024));
         return s_size;
     }
 
@@ -861,7 +867,7 @@ protected:
         }
 
         std::weak_ptr<transport> weak = shared_from_this();
-        auto buffer = mutable_buffer::create(packet::max_packet_size);
+        auto buffer = mutable_buffer::create(max_packet_size());
         m_socket.async_receive(buffer, [weak, buffer](const boost::system::error_code& error, size_t size)
         {
             auto ptr = weak.lock();
@@ -897,7 +903,7 @@ protected:
 
         std::weak_ptr<transport> weak = shared_from_this();
 
-        packet pack(mutable_buffer::create(packet::max_packet_size));
+        packet pack(mutable_buffer::create(max_packet_size()));
         
         m_connector.imbue(pack);
         if (m_connector.status() == state::linked)

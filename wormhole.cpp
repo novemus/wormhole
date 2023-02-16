@@ -549,7 +549,7 @@ private:
         m_bunch.emplace(id, client);
 
         std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(shared_from_this());
-        m_server.async_accept(client->socket(), [weak, id](const boost::system::error_code& error)
+        m_server.async_accept(client->socket(), [weak, client, id](const boost::system::error_code& error)
         {
             auto ptr = weak.lock();
             if (error)
@@ -562,7 +562,7 @@ private:
             }
             else if (ptr)
             {
-                _inf_ << "client " << id << " is accepted";
+                _inf_ << "client " << id << " is accepted, endpoint=" << client->socket().remote_endpoint();
 
                 ptr->notify_tunnel(id);
                 ptr->read_client(id);
@@ -645,7 +645,7 @@ private:
             m_bunch.emplace(id, client);
             
             std::weak_ptr<engine> weak = shared_from_this();
-            client->async_connect(m_server, [weak, id](const boost::system::error_code& error)
+            client->async_connect(m_server, [weak, client, id](const boost::system::error_code& error)
             {
                 auto ptr = weak.lock();
                 if (error)
@@ -661,7 +661,7 @@ private:
                 }
                 else if (ptr)
                 {
-                    _inf_ << "client " << id << " is connected";
+                    _inf_ << "client " << id << " is connected, endpoint=" << client->socket().local_endpoint();
 
                     ptr->read_client(id);
                 }
