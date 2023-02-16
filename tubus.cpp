@@ -70,6 +70,12 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         return s_flight;
     }
 
+    inline static size_t move_attempts()
+    {
+        static size_t s_attempts(getenv("TUBUS_MOVE_ATTEMPTS", 32));
+        return s_attempts;
+    }
+
     inline static size_t receive_buffer_size()
     {
         static size_t s_size(getenv("TUBUS_RECEIVE_BUFFER_SIZE", 5 * 1024 * 1024));
@@ -450,8 +456,14 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
                 if (iter == m_moves.end())
                     break;
 
-                iter->second.time = now + resend_timeout();
+                if (iter->second.attempt++ == move_attempts())
+                {
+                    m_io.post(boost::bind(on_error, boost::asio::error::broken_pipe));
+                    return;
+                }
 
+                iter->second.time = now + resend_timeout();
+                
                 sect.snippet(iter->first, iter->second.data);
                 sect.advance();
             }
@@ -575,10 +587,12 @@ class transport : public novemus::tubus::channel, public std::enable_shared_from
         {
             const_buffer data;
             boost::posix_time::ptime time;
+            uint8_t attempt;
 
             flight(const const_buffer& s, const boost::posix_time::ptime& t)
                 : data(s)
                 , time(t)
+                , attempt(1)
             {
             }
         };
