@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
         ("faraway", boost::program_options::value<boost::asio::ip::udp::endpoint>()->required(), "faraway endpoint of the transport tunnel: <ip:port>")
         ("obscure", boost::program_options::value<uint64_t>()->default_value(0), "pre-shared key to obscure the transport tunnel: <number>")
         ("log-file", boost::program_options::value<std::string>()->default_value(""), "log file path: <path>")
-        ("log-level", boost::program_options::value<novemus::logger::severity>()->default_value(novemus::logger::info), "log level: <trace|debug|info|warning|error|fatal>");
+        ("log-level", boost::program_options::value<novemus::logger::severity>()->default_value(novemus::logger::info), "log level: <fatal|error|warning|info|debug|trace>");
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);

@@ -11,6 +11,7 @@
 #include "packet.h"
 #include "tubus.h"
 #include "reactor.h"
+#include "logger.h"
 #include <map>
 #include <set>
 #include <list>
@@ -18,7 +19,6 @@
 #include <iostream>
 #include <random>
 #include <mutex>
-#include <boost/log/trivial.hpp>
 #include <boost/asio.hpp>
 #include <boost/bind/bind.hpp>
 #include <boost/lexical_cast.hpp>
@@ -36,7 +36,7 @@ template<class value_type> value_type getenv(const std::string& name, const valu
     }
     catch (const boost::bad_lexical_cast& ex)
     {
-        BOOST_LOG_TRIVIAL(error) << "getenv: " << ex.what();
+        _err_ << "getenv: " << ex.what();
     }
 
     return def;

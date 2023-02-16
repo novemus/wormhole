@@ -265,7 +265,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
         auto client = fetch_client(id);
         if (!client)
         {
-            _err_ << "client " << id << " not found";
+            _err_ << "client " << id << " is not found";
             return;
         }
 
@@ -277,7 +277,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             if (error)
             {
                 if (error != boost::asio::error::operation_aborted)
-                    _err_ << "client " << id << ": " << error.message();
+                    _err_ << error.message() << ", " << "client=" << id;
                 
                 if (ptr)
                 {
@@ -300,19 +300,29 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
         auto client = fetch_client(id);
         if (!client)
         {
-            _err_ << "client " << id << ": not found";
+            _err_ << "client " << id << " is not found";
             return;
         }
 
         std::weak_ptr<engine> weak = shared_from_this();
         client->async_write(data, [weak, id, data](const boost::system::error_code& error, size_t size)
         {
+            auto ptr = weak.lock();
             if (error)
             {
                 if (error != boost::asio::error::operation_aborted)
-                    _err_ << "client " << id << ": " << error.message();
+                    _err_ << error.message() << ", " << "client=" << id;
                 
-                auto ptr = weak.lock();
+                if (ptr)
+                {
+                    ptr->notify_tunnel(id);
+                    ptr->remove_client(id);
+                }
+            }
+            else if (size < data.size())
+            {
+                _err_ << "can't write packet, client=" << id;
+                
                 if (ptr)
                 {
                     ptr->notify_tunnel(id);
@@ -333,7 +343,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             {
                 if (error != boost::asio::error::interrupted)
                 {
-                    _err_ << "client " << pack.id() << ": " << error.message();
+                    _err_ << error.message() << ", " << "client=" << pack.id();
 
                     if (ptr)
                         ptr->cancel();
@@ -341,7 +351,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             }
             else if (size < pack.size())
             {
-                _err_ << "client " << pack.id() << ": can't write packet";
+                _err_ << "can't write packet, client=" << pack.id();
                 
                 if (ptr)
                     ptr->cancel();
@@ -360,7 +370,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             {
                 if (error != boost::asio::error::interrupted)
                 {
-                    _err_ << "client " << id << ": " << error.message();
+                    _err_ << error.message() << ", " << "client=" << id;
                     
                     if (ptr)
                         ptr->cancel();
@@ -368,7 +378,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
             }
             else if (size < data.size())
             {
-                _err_ << "client " << id << ": can't read data";
+                _err_ << "can't read data, client=" << id;
                 
                 if (ptr)
                     ptr->cancel();
@@ -545,7 +555,7 @@ private:
             if (error)
             {
                 if (error != boost::asio::error::operation_aborted)
-                    _err_ << "client " << id << ": " << error.message();
+                    _err_ << error.message() << ", " << "client=" << id;
                 
                 if (ptr)
                     ptr->remove_client(id);
