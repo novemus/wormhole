@@ -41,20 +41,16 @@ class reactor
             }
         }
 
-        void terminate() noexcept(true)
+        void complete() noexcept(true)
         {
-            if (work)
+            try
             {
-                try
-                {
-                    work.reset();
-                    io.stop();
-                    pool.join();
-                }
-                catch (const std::exception& e)
-                {
-                    _err_ << e.what();
-                }
+                work.reset();
+                pool.join();
+            }
+            catch (const std::exception& e)
+            {
+                _err_ << e.what();
             }
         }
 
@@ -105,11 +101,21 @@ public:
         m_context->activate(m_threads);
     }
 
-    void terminate() noexcept(true)
+    void terminate(bool wait = false) noexcept(true)
     {
         if (m_context->active())
         {
-            std::thread([context = m_context]() { context->terminate(); }).detach();
+            std::thread thread([context = m_context]() { context->io.stop(); context->complete(); });
+            wait ? thread.join() : thread.detach();
+        }
+    }
+
+    void complete(bool wait = false) noexcept(true)
+    {
+        if (m_context->active())
+        {
+            std::thread thread([context = m_context]() { context->complete(); });
+            wait ? thread.join() : thread.detach();
         }
     }
 

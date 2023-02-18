@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
 
     try
     {
-        novemus::logger::set(vm["log-level"].as<novemus::logger::severity>(), vm["log-file"].as<std::string>());
+        novemus::logger::set(vm["log-level"].as<novemus::logger::severity>(), true, vm["log-file"].as<std::string>());
 
         auto purpose = vm["purpose"].as<std::string>();
         auto service = vm["service"].as<boost::asio::ip::tcp::endpoint>();

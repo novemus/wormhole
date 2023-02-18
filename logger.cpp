@@ -29,27 +29,57 @@
 
 namespace novemus::logger {
 
-severity      g_level(severity::info);
-reactor_ptr   g_reactor;
-std::ofstream g_file;
-std::mutex    g_mutex;
-
-void append(std::string&& entry) 
+class logger
 {
-    auto job = [line = entry]()
-    {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        if (g_file.is_open())
-            g_file << line << std::endl;
-        else
-            std::cout << line << std::endl;
-    };
+    severity                      m_level;
+    reactor_ptr                   m_reactor;
+    std::shared_ptr<std::ostream> m_sink;
 
-    if (g_reactor)
-        g_reactor->io().post(job);
-    else
-        job();
+public:
+
+    logger(severity level, bool async = false, const std::string& file = "") 
+        : m_level(level)
+    {
+        if (async)
+        {
+            m_reactor = std::make_shared<novemus::reactor>(1);
+            m_reactor->activate();
+        }
+
+        if (file.empty())
+            m_sink.reset(&std::cout, [](std::ostream*){});
+        else
+            m_sink = std::make_shared<std::ofstream>(file.c_str(), std::ofstream::out);
+    }
+
+    ~logger()
+    {
+        if (m_reactor)
+            m_reactor->complete();
+    }
+
+    severity level() const
+    {
+        return m_level;
+    }
+
+    void append(std::string&& entry) 
+    {
+        auto addition = [this, line = entry]()
+        {
+            *m_sink << line << std::endl;
+            m_sink->flush();
+        };
+
+        if (m_reactor)
+            m_reactor->io().post(addition);
+        else
+            addition();
+    };
 };
+
+std::unique_ptr<logger> g_logger = std::make_unique<logger>(severity::info);
+std::mutex g_mutex;
 
 std::ostream& operator<<(std::ostream& out, novemus::logger::severity level)
 {
@@ -99,7 +129,7 @@ std::istream& operator>>(std::istream& in, novemus::logger::severity& level)
 severity level()
 {
     std::lock_guard<std::mutex> lock(g_mutex);
-    return g_level;
+    return g_logger->level();
 }
 
 line::line(severity sev, const char* func, const char* file, int line) noexcept(true) 
@@ -120,40 +150,15 @@ line::~line() noexcept(true)
 {
     if (level != severity::none)
     {
-        novemus::logger::append(std::move(stream.str()));
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_logger->append(std::move(stream.str()));
     }
 }
 
-void set(severity level, const std::string& file, bool async) noexcept(false)
+void set(severity level, bool async, const std::string& file) noexcept(false)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
-
-    if (async)
-    {
-        if (!g_reactor)
-        {
-            g_reactor = std::make_shared<novemus::reactor>(1);
-            g_reactor->activate();
-        }
-    }
-    else
-    {
-        if (g_reactor)
-        {
-            g_reactor->terminate();
-            g_reactor.reset();
-        }
-    }
-
-    if (file.empty())
-    {
-        g_file.close();
-    }
-    else
-    {
-        g_file.open(file);
-    }
-    g_level = level;
+    g_logger = std::make_unique<logger>(level, async, file);
 }
 
 }
