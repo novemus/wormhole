@@ -8,12 +8,12 @@
  * 
  */
 
+#include "../logger.h"
 #include <boost/test/unit_test.hpp>
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <regex>
-#include "../logger.h"
 
 namespace {
 
