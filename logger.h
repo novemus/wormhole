@@ -14,7 +14,7 @@
 #include <sstream>
 #include <functional>
 
-namespace novemus::logger {
+namespace wormhole::log {
 
 enum severity
 {
@@ -27,8 +27,8 @@ enum severity
     trace
 };
 
-std::ostream& operator<<(std::ostream& out, novemus::logger::severity level);
-std::istream& operator>>(std::istream& in, novemus::logger::severity& level);
+std::ostream& operator<<(std::ostream& out, severity level);
+std::istream& operator>>(std::istream& in, severity& level);
 
 struct line
 {
@@ -53,11 +53,11 @@ void set(severity level, bool async = false, const std::string& file = "") noexc
 
 }
 
-#define MAKE_LOG_LINE(severity) novemus::logger::line(severity, __FUNCTION__, __FILE__, __LINE__)
+#define MAKE_LOG_LINE(severity) wormhole::log::line(severity, __FUNCTION__, __FILE__, __LINE__)
 
-#define _ftl_ MAKE_LOG_LINE(novemus::logger::fatal)
-#define _err_ MAKE_LOG_LINE(novemus::logger::error)
-#define _wrn_ MAKE_LOG_LINE(novemus::logger::warning)
-#define _inf_ MAKE_LOG_LINE(novemus::logger::info)
-#define _dbg_ MAKE_LOG_LINE(novemus::logger::debug)
-#define _trc_ MAKE_LOG_LINE(novemus::logger::trace)
+#define _ftl_ MAKE_LOG_LINE(wormhole::log::fatal)
+#define _err_ MAKE_LOG_LINE(wormhole::log::error)
+#define _wrn_ MAKE_LOG_LINE(wormhole::log::warning)
+#define _inf_ MAKE_LOG_LINE(wormhole::log::info)
+#define _dbg_ MAKE_LOG_LINE(wormhole::log::debug)
+#define _trc_ MAKE_LOG_LINE(wormhole::log::trace)

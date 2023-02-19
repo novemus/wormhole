@@ -11,7 +11,7 @@
 #include "reactor.h"
 #include <mutex>
 
-namespace novemus {
+namespace wormhole {
 
 reactor_ptr shared_reactor() noexcept(true)
 {

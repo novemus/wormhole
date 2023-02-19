@@ -27,7 +27,7 @@
 #define gettid() GetCurrentThreadId()
 #endif
 
-namespace novemus::logger {
+namespace wormhole::log {
 
 class logger
 {
@@ -42,7 +42,7 @@ public:
     {
         if (async)
         {
-            m_reactor = std::make_shared<novemus::reactor>(1);
+            m_reactor = std::make_shared<reactor>(1);
             m_reactor->activate();
         }
 
@@ -81,21 +81,21 @@ public:
 std::unique_ptr<logger> g_logger = std::make_unique<logger>(severity::info);
 std::mutex g_mutex;
 
-std::ostream& operator<<(std::ostream& out, novemus::logger::severity level)
+std::ostream& operator<<(std::ostream& out, severity level)
 {
     switch(level)
     {
-        case novemus::logger::fatal:
+        case severity::fatal:
             return out << "FATAL";
-        case novemus::logger::error:
+        case severity::error:
             return out << "ERROR";
-        case novemus::logger::warning:
+        case severity::warning:
             return out << "WARN";
-        case novemus::logger::info:
+        case severity::info:
             return out << "INFO";
-        case novemus::logger::debug:
+        case severity::debug:
             return out << "DEBUG";
-        case novemus::logger::trace:
+        case severity::trace:
             return out << "TRACE";
         default:
             return out << "NONE";
@@ -103,25 +103,25 @@ std::ostream& operator<<(std::ostream& out, novemus::logger::severity level)
     return out;
 }
 
-std::istream& operator>>(std::istream& in, novemus::logger::severity& level)
+std::istream& operator>>(std::istream& in, severity& level)
 {
     std::string str;
     in >> str;
 
-    if (str == "fatal" || str == "FATAL")
-        level = novemus::logger::fatal;
-    else if (str == "error" || str == "ERROR")
-        level = novemus::logger::error;
-    else if (str == "warning" || str == "WARN")
-        level = novemus::logger::warning;
-    else if (str == "info" || str == "INFO")
-        level = novemus::logger::info;
-    else if (str == "debug" || str == "DEBUG")
-        level = novemus::logger::debug;
-    else if (str == "trace" || str == "TRACE")
-        level = novemus::logger::trace;
+    if (str == "fatal" || str == "FATAL" || str == "1")
+        level = severity::fatal;
+    else if (str == "error" || str == "ERROR" || str == "2")
+        level = severity::error;
+    else if (str == "warning" || str == "WARN" || str == "3")
+        level = severity::warning;
+    else if (str == "info" || str == "INFO" || str == "4")
+        level = severity::info;
+    else if (str == "debug" || str == "DEBUG" || str == "5")
+        level = severity::debug;
+    else if (str == "trace" || str == "TRACE" || str == "6")
+        level = severity::trace;
     else
-        level = novemus::logger::none;
+        level = severity::info;
 
     return in;
 }
@@ -133,12 +133,12 @@ severity level()
 }
 
 line::line(severity sev, const char* func, const char* file, int line) noexcept(true) 
-    : level(sev <= novemus::logger::level() ? sev : severity::none)
+    : level(sev <= log::level() ? sev : severity::none)
 {
     if (level != severity::none)
     {
          stream << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << level << ": ";
-        if (novemus::logger::level() > severity::info)
+        if (log::level() > severity::info)
         {
             auto name = std::filesystem::path(file).filename().string();
             stream << "[" << func << " in " << name << ":" << line << "] ";

@@ -16,7 +16,7 @@
 #include <list>
 #include <boost/asio.hpp>
 
-namespace novemus::wormhole {
+namespace wormhole {
 
 class tcp : public std::enable_shared_from_this<tcp>
 {
@@ -167,24 +167,22 @@ public:
 
 typedef std::shared_ptr<tcp> tcp_ptr;
 
-struct packet : public novemus::mutable_buffer
+struct packet : public mutable_buffer
 {
     static constexpr size_t header_size = sizeof(uint32_t) + sizeof(uint32_t);
 
-    packet() : novemus::mutable_buffer(header_size)
+    packet() : mutable_buffer(header_size)
     {
         std::memset(data(), 0, header_size);
     }
 
-    packet(uint32_t id)
-        : novemus::mutable_buffer(header_size)
+    packet(uint32_t id) : mutable_buffer(header_size)
     {
         set<uint32_t>(0, htonl(id));
         set<uint32_t>(sizeof(uint32_t), 0);
     }
 
-    packet(uint32_t id, const novemus::const_buffer& payload)
-        : novemus::mutable_buffer(header_size + payload.size())
+    packet(uint32_t id, const const_buffer& payload) : mutable_buffer(header_size + payload.size())
     {
         set<uint32_t>(0, htonl(id));
         set<uint32_t>(sizeof(uint32_t), htonl(payload.size()));
@@ -207,14 +205,14 @@ struct packet : public novemus::mutable_buffer
     }
 };
 
-class engine : public novemus::wormhole::router, public std::enable_shared_from_this<engine>
+class engine : public router, public std::enable_shared_from_this<engine>
 {
     friend class importer;
     friend class exporter;
 
     reactor_ptr m_reactor;
     boost::asio::signal_set m_signals;
-    novemus::tubus::channel_ptr m_tunnel;
+    tubus::channel_ptr m_tunnel;
     std::map<uint32_t, tcp_ptr> m_bunch;
     uint32_t m_top;
     std::mutex m_mutex;
@@ -332,7 +330,7 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
         });
     }
 
-    void write_tunnel(uint32_t id, const novemus::const_buffer& data)
+    void write_tunnel(uint32_t id, const const_buffer& data)
     {
         packet pack(id, data);
         std::weak_ptr<engine> weak = shared_from_this();
@@ -437,9 +435,9 @@ class engine : public novemus::wormhole::router, public std::enable_shared_from_
 public:
 
     engine(const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
-        : m_reactor(std::make_shared<novemus::reactor>())
+        : m_reactor(std::make_shared<reactor>())
         , m_signals(m_reactor->io(), SIGINT, SIGTERM)
-        , m_tunnel(novemus::tubus::create_channel(m_reactor, gateway, faraway, secret))
+        , m_tunnel(tubus::create_channel(m_reactor, gateway, faraway, secret))
         , m_top(std::numeric_limits<uint32_t>::max())
     {
         m_tunnel->open();
@@ -474,8 +472,6 @@ public:
         m_signals.cancel(ec);
     }
 };
-
-typedef std::shared_ptr<novemus::wormhole::router> router_ptr;
 
 class importer : public engine
 {

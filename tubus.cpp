@@ -25,7 +25,7 @@
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
-namespace novemus::tubus {
+namespace wormhole::tubus {
 
 template<class value_type> value_type getenv(const std::string& name, const value_type& def)
 {
@@ -42,7 +42,7 @@ template<class value_type> value_type getenv(const std::string& name, const valu
     return def;
 }
 
-class transport : public novemus::tubus::channel, public std::enable_shared_from_this<transport>
+class transport : public channel, public std::enable_shared_from_this<transport>
 {
     enum state { neither, initial, accepting, connecting, linked, shutting, tearing, finished };
 

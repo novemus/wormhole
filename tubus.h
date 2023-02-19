@@ -17,7 +17,7 @@
 #include <boost/system/error_code.hpp>
 #include <boost/asio/ip/udp.hpp>
 
-namespace novemus::tubus {
+namespace wormhole::tubus {
 
 typedef boost::asio::ip::udp::endpoint endpoint;
 typedef std::function<void(const boost::system::error_code&)> callback;

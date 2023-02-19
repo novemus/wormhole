@@ -8,28 +8,28 @@
  * 
  */
 
-#define BOOST_TEST_MODULE tubus_tests
+#define BOOST_TEST_MODULE wormhole_tests
 
 #include "../buffer.h"
 #include <boost/test/included/unit_test.hpp>
 
 BOOST_AUTO_TEST_CASE(mutable_buffer)
 {
-    BOOST_REQUIRE_NO_THROW(novemus::mutable_buffer());
-    BOOST_CHECK_EQUAL(novemus::mutable_buffer().size(), 0);
+    BOOST_REQUIRE_NO_THROW(wormhole::mutable_buffer());
+    BOOST_CHECK_EQUAL(wormhole::mutable_buffer().size(), 0);
 
     const char* greet = "hello, tubus";
     const char* hello = "hello";
     const char* tubus = "tubus";
 
-    novemus::mutable_buffer mb(greet);
+    wormhole::mutable_buffer mb(greet);
 
     BOOST_CHECK(mb.unique());
     BOOST_CHECK_EQUAL(mb.size(), std::strlen(greet));
     BOOST_CHECK_EQUAL(std::memcmp(mb.data(), greet, mb.size()), 0);
 
     // fill, copy, get, set
-    novemus::mutable_buffer sb = mb.slice(7, 5);
+    wormhole::mutable_buffer sb = mb.slice(7, 5);
 
     BOOST_CHECK(!mb.unique());
     BOOST_CHECK(!sb.unique());
@@ -64,7 +64,7 @@ BOOST_AUTO_TEST_CASE(mutable_buffer)
     BOOST_REQUIRE_THROW(mb.set<uint8_t>(12, 9), std::runtime_error);
     BOOST_REQUIRE_THROW(mb.set<uint32_t>(10, 999), std::runtime_error);
 
-    sb = novemus::mutable_buffer(0);
+    sb = wormhole::mutable_buffer(0);
 
     // slice
     mb = mb.slice(0, 5);
@@ -84,7 +84,7 @@ BOOST_AUTO_TEST_CASE(mutable_buffer)
     BOOST_CHECK(mb.unique());
 
     // pop
-    mb = novemus::mutable_buffer(greet);
+    mb = wormhole::mutable_buffer(greet);
     auto pb = mb.pop_front(5);
 
     BOOST_CHECK_EQUAL(mb.size(), strlen(greet) - 5);
@@ -112,7 +112,7 @@ BOOST_AUTO_TEST_CASE(mutable_buffer)
     BOOST_REQUIRE_THROW(pb.pop_back(pb.size() + 1), std::runtime_error);
 
     // truncate, crop
-    mb = novemus::mutable_buffer(greet);
+    mb = wormhole::mutable_buffer(greet);
     
     pb = mb.pop_back(mb.size());
     pb.truncate(5);
@@ -140,19 +140,19 @@ BOOST_AUTO_TEST_CASE(mutable_buffer)
 
 BOOST_AUTO_TEST_CASE(const_buffer)
 {
-    BOOST_REQUIRE_NO_THROW(novemus::const_buffer());
-    BOOST_CHECK_EQUAL(novemus::const_buffer().size(), 0);
+    BOOST_REQUIRE_NO_THROW(wormhole::const_buffer());
+    BOOST_CHECK_EQUAL(wormhole::const_buffer().size(), 0);
 
     const char* greet = "hello, tubus";
 
-    novemus::const_buffer cb(greet);
+    wormhole::const_buffer cb(greet);
 
     BOOST_CHECK(cb.unique());
     BOOST_CHECK_EQUAL(cb.size(), std::strlen(greet));
     BOOST_CHECK_EQUAL(std::memcmp(cb.data(), greet, cb.size()), 0);
 
     // copy, get
-    novemus::const_buffer sb = cb.slice(4, 8);
+    wormhole::const_buffer sb = cb.slice(4, 8);
 
     BOOST_CHECK(!cb.unique());
     BOOST_CHECK(!sb.unique());
@@ -171,7 +171,7 @@ BOOST_AUTO_TEST_CASE(const_buffer)
     BOOST_REQUIRE_THROW(cb.get<uint8_t>(12), std::runtime_error);
     BOOST_REQUIRE_THROW(cb.get<uint32_t>(10), std::runtime_error);
 
-    sb = novemus::const_buffer();
+    sb = wormhole::const_buffer();
 
     // slice
     cb = cb.slice(0, 5);
@@ -191,7 +191,7 @@ BOOST_AUTO_TEST_CASE(const_buffer)
     BOOST_CHECK(cb.unique());
 
     // pop
-    cb = novemus::const_buffer(greet);
+    cb = wormhole::const_buffer(greet);
     auto pb = cb.pop_front(5);
 
     BOOST_CHECK_EQUAL(cb.size(), strlen(greet) - 5);
@@ -219,7 +219,7 @@ BOOST_AUTO_TEST_CASE(const_buffer)
     BOOST_REQUIRE_THROW(pb.pop_back(pb.size() + 1), std::runtime_error);
 
     // truncate, crop
-    cb = novemus::const_buffer(greet);
+    cb = wormhole::const_buffer(greet);
     
     pb = cb.pop_back(cb.size());
     pb.truncate(5);
@@ -248,16 +248,16 @@ BOOST_AUTO_TEST_CASE(const_buffer)
 BOOST_AUTO_TEST_CASE(buffer_factory)
 {
     {
-        auto buf1 = novemus::mutable_buffer::create(16384);
-        auto buf2 = novemus::mutable_buffer::create(8192);
-        auto buf3 = novemus::mutable_buffer::create(4096);
+        auto buf1 = wormhole::mutable_buffer::create(16384);
+        auto buf2 = wormhole::mutable_buffer::create(8192);
+        auto buf3 = wormhole::mutable_buffer::create(4096);
 
         BOOST_CHECK(buf1.data() != buf2.data() && buf2.data() != buf3.data() && buf1.data() != buf3.data());
     }
 
-    auto buf1 = novemus::mutable_buffer::create(512);
-    auto buf2 = novemus::mutable_buffer::create(1024);
-    auto buf3 = novemus::mutable_buffer::create(2048);
+    auto buf1 = wormhole::mutable_buffer::create(512);
+    auto buf2 = wormhole::mutable_buffer::create(1024);
+    auto buf3 = wormhole::mutable_buffer::create(2048);
 
     BOOST_CHECK(buf1.data() != buf2.data() && buf2.data() != buf3.data() && buf1.data() != buf3.data());
 }

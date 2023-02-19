@@ -11,7 +11,7 @@
 #include "buffer.h"
 #include <map>
 
-namespace novemus {
+namespace wormhole {
 
 mutable_buffer mutable_buffer::create(size_t size) noexcept(true)
 {

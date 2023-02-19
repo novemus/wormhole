@@ -52,7 +52,7 @@ class tubus_channel
     boost::asio::ip::udp::endpoint m_bind;
     boost::asio::ip::udp::endpoint m_peer;
     uint64_t m_secret;
-    std::shared_ptr<novemus::tubus::channel> m_channel;
+    std::shared_ptr<wormhole::tubus::channel> m_channel;
 
 public:
 
@@ -70,7 +70,7 @@ public:
 
     void open()
     {
-        m_channel = novemus::tubus::create_channel(novemus::shared_reactor(), m_bind, m_peer, m_secret);
+        m_channel = wormhole::tubus::create_channel(wormhole::shared_reactor(), m_bind, m_peer, m_secret);
         m_channel->open();
     }
 
@@ -94,12 +94,12 @@ public:
         ASYNC(m_channel, shutdown, error && error != boost::asio::error::interrupted && error != boost::asio::error::connection_refused);
     }
 
-    std::future<void> async_write(const novemus::const_buffer& buffer)
+    std::future<void> async_write(const wormhole::const_buffer& buffer)
     {
         ASYNC_IO(m_channel, write, buffer, error);
     }
 
-    std::future<void> async_read(const novemus::mutable_buffer& buffer)
+    std::future<void> async_read(const wormhole::mutable_buffer& buffer)
     {
         ASYNC_IO(m_channel, read, buffer, error);
     }
@@ -107,12 +107,12 @@ public:
 
 class mediator
 {
-    novemus::reactor_ptr m_reactor;
+    wormhole::reactor_ptr m_reactor;
     boost::asio::ip::udp::endpoint m_le;
     boost::asio::ip::udp::endpoint m_re;
     boost::asio::ip::udp::socket m_bs;
     boost::asio::ip::udp::endpoint m_ep;
-    novemus::mutable_buffer m_rb;
+    wormhole::mutable_buffer m_rb;
 
     void on_sent(const boost::system::error_code& e, size_t s)
     {
@@ -153,7 +153,7 @@ class mediator
 public:
 
     mediator(const boost::asio::ip::udp::endpoint& b, const boost::asio::ip::udp::endpoint& l, const boost::asio::ip::udp::endpoint& r)
-        : m_reactor(novemus::shared_reactor())
+        : m_reactor(wormhole::shared_reactor())
         , m_le(l)
         , m_re(r)
         , m_bs(m_reactor->io(), b.protocol())
@@ -172,9 +172,9 @@ class stream_source
 
 public:
 
-    novemus::const_buffer read_some()
+    wormhole::const_buffer read_some()
     {
-        novemus::mutable_buffer chank(1024 * 1024);
+        wormhole::mutable_buffer chank(1024 * 1024);
 
         uint8_t* ptr = (uint8_t*)chank.data();
         uint8_t* end = ptr + chank.size();
@@ -200,7 +200,7 @@ class stream_sink
 
 public:
 
-    void write_some(const novemus::const_buffer& chank)
+    void write_some(const wormhole::const_buffer& chank)
     {
         const uint8_t* ptr = (const uint8_t*)chank.data();
         const uint8_t* end = ptr + chank.size();
@@ -232,8 +232,8 @@ BOOST_AUTO_TEST_CASE(tubus_core)
 
     uint8_t data[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
-    novemus::mutable_buffer lb(sizeof(data));
-    novemus::mutable_buffer rb(sizeof(data));
+    wormhole::mutable_buffer lb(sizeof(data));
+    wormhole::mutable_buffer rb(sizeof(data));
 
     std::memcpy(lb.data(), data, lb.size());
     std::memcpy(rb.data(), data, rb.size());
@@ -298,8 +298,8 @@ BOOST_AUTO_TEST_CASE(tubus_connectivity)
 
     BOOST_REQUIRE_NO_THROW(left.async_shutdown().get());
 
-    BOOST_REQUIRE_THROW(left.async_read(novemus::mutable_buffer(1)).get(), boost::system::system_error);
-    BOOST_REQUIRE_THROW(right.async_write(novemus::mutable_buffer(1)).get(), boost::system::system_error);
+    BOOST_REQUIRE_THROW(left.async_read(wormhole::mutable_buffer(1)).get(), boost::system::system_error);
+    BOOST_REQUIRE_THROW(right.async_write(wormhole::mutable_buffer(1)).get(), boost::system::system_error);
 
     BOOST_REQUIRE_NO_THROW(right.async_shutdown().get());
 }
@@ -332,7 +332,7 @@ BOOST_AUTO_TEST_CASE(tubus_integrity)
     BOOST_REQUIRE_NO_THROW(left.async_write(source.read_some()).get());
     BOOST_REQUIRE_NO_THROW(left.async_write(source.read_some()).get());
 
-    novemus::mutable_buffer buffer(source.read() / 4);
+    wormhole::mutable_buffer buffer(source.read() / 4);
 
     BOOST_REQUIRE_NO_THROW(right.async_read(buffer).get());
     BOOST_REQUIRE_NO_THROW(sink.write_some(buffer));
@@ -372,7 +372,7 @@ BOOST_AUTO_TEST_CASE(tubus_fall)
     BOOST_REQUIRE_NO_THROW(la.get());
     BOOST_REQUIRE_NO_THROW(rc.get());
 
-    novemus::mutable_buffer buffer(1024 * 1024);
+    wormhole::mutable_buffer buffer(1024 * 1024);
 
     // receive buffer overflow
     BOOST_REQUIRE_NO_THROW(left.async_write(buffer).get());
@@ -397,7 +397,7 @@ BOOST_AUTO_TEST_CASE(tubus_fall)
     BOOST_REQUIRE_NO_THROW(c.get());
 
     // send buffer overflow
-    BOOST_REQUIRE_THROW(left.async_write(novemus::mutable_buffer(1024 * 1024 * 6)).get(), boost::system::system_error);
+    BOOST_REQUIRE_THROW(left.async_write(wormhole::mutable_buffer(1024 * 1024 * 6)).get(), boost::system::system_error);
 
     BOOST_REQUIRE_NO_THROW(left.close());
     BOOST_REQUIRE_NO_THROW(right.close());
@@ -408,11 +408,11 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    auto left = novemus::tubus::create_channel(novemus::shared_reactor(), le, re, 0);
-    auto right = novemus::tubus::create_channel(novemus::shared_reactor(), re, le, 0);
+    auto left = wormhole::tubus::create_channel(wormhole::shared_reactor(), le, re, 0);
+    auto right = wormhole::tubus::create_channel(wormhole::shared_reactor(), re, le, 0);
 
-    novemus::mutable_buffer wb(1024 * 1024);
-    novemus::mutable_buffer rb(1024 * 1024);
+    wormhole::mutable_buffer wb(1024 * 1024);
+    wormhole::mutable_buffer rb(1024 * 1024);
 
     const size_t TRAFFIC = 1024 * 1024 * 1024;
 
@@ -421,7 +421,7 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     std::promise<void> wp;
     std::future<void> wf = wp.get_future();
 
-    novemus::tubus::io_callback on_write = [&](const boost::system::error_code& err, size_t size)
+    wormhole::tubus::io_callback on_write = [&](const boost::system::error_code& err, size_t size)
     {
         if (err)
         {
@@ -442,7 +442,7 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
         }
     };
 
-    novemus::tubus::callback on_connect = [&](const boost::system::error_code& err)
+    wormhole::tubus::callback on_connect = [&](const boost::system::error_code& err)
     {
         if (err)
         {
@@ -458,7 +458,7 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
     std::promise<void> rp;
     std::future<void> rf = rp.get_future();
 
-    novemus::tubus::io_callback on_read = [&](const boost::system::error_code& err, size_t size)
+    wormhole::tubus::io_callback on_read = [&](const boost::system::error_code& err, size_t size)
     {
         if (err)
         {
@@ -479,7 +479,7 @@ BOOST_AUTO_TEST_CASE(tubus_speed)
         }
     };
 
-    novemus::tubus::callback on_accept = [&](const boost::system::error_code& err)
+    wormhole::tubus::callback on_accept = [&](const boost::system::error_code& err)
     {
         if (err)
         {
@@ -512,7 +512,7 @@ BOOST_AUTO_TEST_CASE(udp_speed)
     boost::asio::ip::udp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::udp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    auto reactor = novemus::shared_reactor();
+    auto reactor = wormhole::shared_reactor();
 
     auto right = std::make_shared<boost::asio::ip::udp::socket>(reactor->io(), re.protocol());
 
@@ -537,8 +537,8 @@ BOOST_AUTO_TEST_CASE(udp_speed)
     size_t recv = 0;
     size_t sent = 0;
 
-    novemus::mutable_buffer data(1432);
-    novemus::mutable_buffer ackn(20);
+    wormhole::mutable_buffer data(1432);
+    wormhole::mutable_buffer ackn(20);
     for (size_t j = 0; j < 15621; ++j)
     {
         for (size_t i = 0; i < 48; ++i)
@@ -566,7 +566,7 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
     boost::asio::ip::tcp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
     boost::asio::ip::tcp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
 
-    auto reactor = novemus::shared_reactor();
+    auto reactor = wormhole::shared_reactor();
 
     boost::asio::ip::tcp::socket right(reactor->io());
     boost::asio::ip::tcp::socket left(reactor->io());
@@ -584,7 +584,7 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
         }
 
         size_t read = 0;
-        novemus::mutable_buffer rb(1432);
+        wormhole::mutable_buffer rb(1432);
 
         while (read < 1024 * 1024 * 1024)
         {
@@ -600,7 +600,7 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
     right.connect(le);
 
     size_t sent = 0;
-    novemus::mutable_buffer wb(1432);
+    wormhole::mutable_buffer wb(1432);
 
     BOOST_TEST_MESSAGE(boost::posix_time::microsec_clock::local_time() << ": begin");
     while (sent < 1024 * 1024 * 1024)

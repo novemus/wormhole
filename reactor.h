@@ -16,7 +16,7 @@
 #include <boost/thread/thread.hpp>
 #include <boost/asio.hpp>
 
-namespace novemus {
+namespace wormhole {
 
 class reactor
 {

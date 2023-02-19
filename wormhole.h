@@ -13,7 +13,7 @@
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
-namespace novemus::wormhole {
+namespace wormhole {
 
 typedef boost::asio::ip::udp::endpoint udp_endpoint;
 typedef boost::asio::ip::tcp::endpoint tcp_endpoint;

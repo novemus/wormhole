@@ -15,7 +15,7 @@
 #include <random>
 #include <numeric>
 
-namespace novemus::tubus {
+namespace wormhole::tubus {
 
 struct section : public mutable_buffer
 {

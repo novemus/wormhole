@@ -25,7 +25,7 @@ std::regex pattern("\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d
 
 BOOST_AUTO_TEST_CASE(stdlog)
 {
-    novemus::logger::set(novemus::logger::severity::info, false);
+    wormhole::log::set(wormhole::log::info, false);
 
     std::stringstream out;
     std::streambuf *coutbuf = std::cout.rdbuf();
@@ -48,7 +48,7 @@ BOOST_AUTO_TEST_CASE(stdlog)
 
 BOOST_AUTO_TEST_CASE(filelog)
 {
-    novemus::logger::set(novemus::logger::severity::info, false, "log.txt");
+    wormhole::log::set(wormhole::log::info, false, "log.txt");
 
     _inf_ << "line " << 1;
     _wrn_ << "line " << 2;
@@ -57,7 +57,7 @@ BOOST_AUTO_TEST_CASE(filelog)
     _dbg_ << "line " << 5;
     _trc_ << "line " << 6;
 
-    novemus::logger::set(novemus::logger::severity::info);
+    wormhole::log::set(wormhole::log::info);
 
     std::smatch match;
     std::ifstream file("log.txt");

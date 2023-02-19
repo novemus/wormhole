@@ -14,7 +14,7 @@
 
 BOOST_AUTO_TEST_CASE(reactor_execute)
 {
-    auto reactor = std::make_shared<novemus::reactor>();
+    auto reactor = std::make_shared<wormhole::reactor>();
 
     std::promise<void> p1;
     std::future<void> f1 = p1.get_future();
@@ -47,7 +47,7 @@ BOOST_AUTO_TEST_CASE(reactor_execute)
 
 BOOST_AUTO_TEST_CASE(reactor_activate)
 {
-    auto reactor = std::make_shared<novemus::reactor>();
+    auto reactor = std::make_shared<wormhole::reactor>();
 
     std::promise<void> p1;
     std::future<void> f1 = p1.get_future();
@@ -80,7 +80,7 @@ BOOST_AUTO_TEST_CASE(reactor_activate)
 
 BOOST_AUTO_TEST_CASE(reactor_terminate)
 {
-    auto reactor = std::make_shared<novemus::reactor>(1);
+    auto reactor = std::make_shared<wormhole::reactor>(1);
 
     std::promise<void> p1;
     std::future<void> f1 = p1.get_future();
@@ -113,7 +113,7 @@ BOOST_AUTO_TEST_CASE(reactor_terminate)
 
 BOOST_AUTO_TEST_CASE(reactor_reuse)
 {
-    auto reactor = std::make_shared<novemus::reactor>(1);
+    auto reactor = std::make_shared<wormhole::reactor>(1);
 
     std::promise<void> p1;
     std::future<void> f1 = p1.get_future();

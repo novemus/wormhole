@@ -21,12 +21,12 @@
 #include <boost/asio.hpp>
 #include <boost/shared_array.hpp>
 
-namespace novemus {
+namespace wormhole {
 
 struct const_buffer : public boost::asio::const_buffer
 {
-    typedef boost::asio::const_buffer value_type;
-    typedef const boost::asio::const_buffer* const_iterator;
+    typedef const_buffer value_type;
+    typedef const const_buffer* const_iterator;
 
     const_buffer() noexcept(true) 
     {
@@ -133,8 +133,8 @@ private:
 
 struct mutable_buffer : public boost::asio::mutable_buffer
 {
-    typedef boost::asio::mutable_buffer value_type;
-    typedef const boost::asio::mutable_buffer* const_iterator;
+    typedef mutable_buffer value_type;
+    typedef const mutable_buffer* const_iterator;
 
     mutable_buffer() noexcept(true)
     {
