@@ -30,18 +30,10 @@ enum severity
 std::ostream& operator<<(std::ostream& out, severity level);
 std::istream& operator>>(std::istream& in, severity& level);
 
-struct line
+struct line : public std::ostream
 {
     line(severity sev, const char* func, const char* file, int line) noexcept(true);
     ~line() noexcept(true);
-    
-    template<typename type_t> 
-    line& operator<<(const type_t& value) noexcept(true)
-    {
-        if (level != severity::none)
-            stream << value;
-        return *this;
-    }
 
 private:
 

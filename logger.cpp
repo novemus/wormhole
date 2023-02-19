@@ -137,7 +137,9 @@ line::line(severity sev, const char* func, const char* file, int line) noexcept(
 {
     if (level != severity::none)
     {
-         stream << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << level << ": ";
+        rdbuf(stream.rdbuf());
+
+        stream << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << level << ": ";
         if (log::level() > severity::info)
         {
             auto name = std::filesystem::path(file).filename().string();
