@@ -11,159 +11,175 @@
 #pragma once
 
 #include "logger.h"
+#include <mutex>
+#include <memory>
 #include <vector>
-#include <atomic>
-#include <boost/thread/thread.hpp>
 #include <boost/asio.hpp>
 
 namespace wormhole {
 
 class reactor
 {
-    class worker
+    class context : public std::enable_shared_from_this<context>
     {
-        boost::asio::io_context& m_io;
-        std::promise<boost::thread::id> m_id;
-        std::promise<void> m_job;
+        class worker
+        {
+            std::promise<std::thread::id> m_id;
+            std::shared_future<void> m_job;
+
+        public:
+
+            worker(std::shared_ptr<boost::asio::io_context> io, std::launch method) noexcept(true)
+            {
+                m_job = std::async(method, [this, io]()
+                {
+                    m_id.set_value(std::this_thread::get_id());
+
+                    boost::system::error_code code;
+                    io->run(code);
+
+                    if (code)
+                        _err_ << code.message();
+                });
+            }
+
+            void wait() noexcept(true)
+            {
+                return m_job.wait();
+            }
+
+            std::thread::id get_id() noexcept(true)
+            {
+                return m_id.get_future().get();
+            }
+        };
+
+        std::shared_ptr<boost::asio::io_context> m_io;
+        std::unique_ptr<boost::asio::io_context::work> m_work;
+        std::vector<std::shared_ptr<worker>> m_pool;
 
     public:
 
-        worker(boost::asio::io_context& io) noexcept(true) : m_io(io)
+        context(std::shared_ptr<boost::asio::io_context> m_io) noexcept(true)
+            : m_io(m_io)
+            , m_work(new boost::asio::io_context::work(*m_io))
         {
+            m_io->reset();
         }
 
-        void exec() noexcept(true)
+        void activate(size_t size, bool attach) noexcept(false)
         {
-            m_id.set_value(boost::this_thread::get_id());
+            if (size == 0)
+                throw std::runtime_error("zero pool size");
 
-            boost::system::error_code code;
-            m_io.run(code);
+            for (size_t i = 0; i < (attach ? size - 1 : size); ++i)
+            {
+                m_pool.push_back(std::make_shared<worker>(m_io, std::launch::async));
+            }
 
-            if (code)
-                _err_ << code.message();
-
-            m_job.set_value();
+            if (attach)
+            {
+                auto task = std::make_shared<worker>(m_io, std::launch::deferred);
+                m_pool.push_back(task);
+                task->wait();
+            }
         }
 
-        void wait() noexcept(true)
+        void shutdown(bool hard, bool wait) noexcept(true)
         {
-            return m_job.get_future().get();
-        }
+            if (wait == false)
+            {
+                return std::thread([self = shared_from_this(), hard]() { self->shutdown(hard, true); }).detach();
+            }
 
-        boost::thread::id thread_id() noexcept(true)
-        {
-            return m_id.get_future().get();
+            try
+            {
+                m_work.reset();
+                
+                if (hard)
+                    m_io->stop();
+
+                auto id = std::this_thread::get_id();
+                for(auto& task : m_pool)
+                {
+                    if (task->get_id() != id)
+                        task->wait();
+                }
+            }
+            catch (const std::exception& e)
+            {
+                _err_ << e.what();
+            }
         }
     };
 
     size_t m_size;
-    boost::asio::io_context m_io;
-    boost::thread_group m_pool;
-    std::vector<std::shared_ptr<worker>> m_load;
-    std::atomic<boost::asio::io_context::work*> m_work;
+    std::shared_ptr<boost::asio::io_context> m_io;
+    std::shared_ptr<context> m_context;
+    std::mutex m_mutex;
 
-    void activate(bool attach) noexcept(false)
+    std::shared_ptr<context> free_context() noexcept(true)
     {
-        if (m_size == 0)
-        {
-            throw std::runtime_error("zero reactor");
-        }
+        std::unique_lock<std::mutex> lock(m_mutex);
 
-        auto work = m_work.exchange(new boost::asio::io_context::work(m_io));
-        if (work)
-        {
-            delete m_work.exchange(work);
-            throw std::runtime_error("active reactor");
-        }
+        auto ptr = m_context;
+        m_context.reset();
 
-        m_io.reset();
-
-        for (size_t i = 0; i < (attach ? m_size - 1 : m_size); ++i)
-        {
-            auto task = std::make_shared<worker>(m_io);
-            m_pool.create_thread(std::bind(&worker::exec, task));
-            m_load.push_back(task);
-        }
-
-        if (attach)
-        {
-            auto task = std::make_shared<worker>(m_io);
-            m_load.push_back(task);
-            task->exec();
-        }
+        return ptr;
     }
 
-    void shutdown(bool hard, bool join) noexcept(true)
+    std::shared_ptr<context> make_context() noexcept(false)
     {
-        try
-        {
-            auto work = m_work.exchange(0);
-            
-            if (!work)
-                return;
+        std::unique_lock<std::mutex> lock(m_mutex);
 
-            delete work;
+        if (m_context)
+            throw std::runtime_error("context already exists");
 
-            if (hard)
-                m_io.stop();
+        m_context = std::make_shared<context>(m_io);
 
-            if (join)
-            {
-                auto id = boost::this_thread::get_id();
-                for (auto& task : m_load)
-                {
-                    if (task->thread_id() != id)
-                        task->wait();
-                }
-            }
-
-            m_load.clear();
-
-            if (!hard)
-                m_io.stop();
-        }
-        catch (const std::exception& e)
-        {
-            _err_ << e.what();
-        }
+        return m_context;
     }
 
 public:
 
     reactor(size_t size = std::thread::hardware_concurrency()) noexcept(true)
         : m_size(size)
-        , m_work(0)
+        , m_io(std::make_shared<boost::asio::io_context>())
     {
     }
 
     ~reactor() noexcept(true)
     {
-        shutdown(true, false);
+        terminate();
     }
 
     void execute() noexcept(false)
     {
-        activate(true);
+        make_context()->activate(m_size, true);
     }
 
     void activate() noexcept(false)
     {
-        activate(false);
+        make_context()->activate(m_size, false);
     }
 
-    void terminate(bool join = false) noexcept(true)
+    void terminate(bool wait = false) noexcept(true)
     {
-        shutdown(true, join);
+        auto context = free_context();
+        if (context)
+            context->shutdown(true, wait);
     }
 
-    void complete(bool join = false) noexcept(true)
+    void complete(bool wait = false) noexcept(true)
     {
-        shutdown(false, join);
+        auto context = free_context();
+        if (context)
+            context->shutdown(false, wait);
     }
 
     boost::asio::io_context& io() noexcept(true)
     {
-        return m_io;
+        return *m_io;
     }
 };
 
