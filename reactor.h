@@ -64,7 +64,6 @@ class reactor
             : m_io(m_io)
             , m_work(new boost::asio::io_context::work(*m_io))
         {
-            m_io->reset();
         }
 
         void activate(size_t size, bool attach) noexcept(false)
@@ -81,7 +80,13 @@ class reactor
             {
                 auto task = std::make_shared<worker>(m_io, std::launch::deferred);
                 m_pool.push_back(task);
+                
+                m_io->restart();
                 task->wait();
+            }
+            else
+            {
+                m_io->restart();
             }
         }
 
@@ -146,6 +151,7 @@ public:
         : m_size(size)
         , m_io(std::make_shared<boost::asio::io_context>())
     {
+        m_io->stop();
     }
 
     ~reactor() noexcept(true)
