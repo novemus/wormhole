@@ -18,7 +18,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     )
 endif()
 
-find_package(Boost COMPONENTS system thread program_options unit_test_framework REQUIRED)
+find_package(Boost COMPONENTS system thread program_options filesystem unit_test_framework REQUIRED)
 
 message(status "** Boost Version: ${Boost_VERSION}")
 message(status "** Boost Include Dirs: ${Boost_INCLUDE_DIRS}")
@@ -32,6 +32,7 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 add_executable(${TESTS_NAME} ${TESTS_SOURCES})
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall")
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)
     target_link_libraries(${PROJECT_NAME} Threads::Threads)
