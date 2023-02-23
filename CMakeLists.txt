@@ -8,14 +8,13 @@ set(TESTS_NAME wormhole_ut)
 set(SOURCES buffer.cpp reactor.cpp tubus.cpp logger.cpp wormhole.cpp main.cpp)
 set(TESTS_SOURCES buffer.cpp reactor.cpp tubus.cpp logger.cpp wormhole.cpp tests/buffer.cpp tests/packet.cpp tests/tubus.cpp tests/logger.cpp tests/reactor.cpp)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall")
-
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     add_definitions(
         -D_CRT_NO_VA_START_VALIDATION
         -D_CRT_SECURE_NO_WARNINGS
         -D_WIN32_WINNT=0x0600
         -D_WINSOCK_DEPRECATED_NO_WARNINGS
+        -DINCL_EXTRA_HTON_FUNCTIONS
     )
 endif()
 

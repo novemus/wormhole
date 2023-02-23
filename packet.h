@@ -15,7 +15,13 @@
 #include <random>
 #include <numeric>
 
-namespace wormhole::tubus {
+#ifdef _MSC_VER
+#include <WinSock2.h>
+#define htole64 htonll
+#define le64toh ntohll
+#endif
+
+namespace wormhole { namespace tubus {
 
 struct section : public mutable_buffer
 {
@@ -62,7 +68,7 @@ struct section : public mutable_buffer
     void snippet(uint64_t handle, const const_buffer& data)
     {
         set<uint16_t>(0, htons(flag::move));
-        set<uint16_t>(sizeof(uint16_t), htons(sizeof(handle) + data.size()));
+        set<uint16_t>(sizeof(uint16_t), htons(static_cast<uint16_t>(sizeof(handle) + data.size())));
         set<uint64_t>(header_size, htole64(handle));
         fill(header_size + sizeof(handle), data.size(), data.data());
     }
@@ -179,27 +185,28 @@ struct dimmer
         uint8_t* ptr = (uint8_t*)buffer.data();
         uint8_t* end = ptr + buffer.size();
 
-        uint64_t salt = le64toh(*(uint64_t*)ptr);
-        if (salt == 0)
+        uint64_t salt = *(uint64_t*)ptr;
+        bool dim = salt == 0;
+        if (dim)
         {
             std::random_device dev;
             std::mt19937_64 gen(dev());
             salt = static_cast<uint64_t>(gen());
-            *(uint64_t*)ptr = salt ^ secret;
+            *(uint64_t*)ptr = htole64(salt ^ secret);
         }
         else
         {
-            salt ^= secret;
+            salt = le64toh(salt) ^ secret;
             *(uint64_t*)ptr = 0;
         }
 
         ptr += sizeof(uint64_t);
 
-        uint64_t inverter = make_inverter(secret, salt);
+        uint64_t inverter = make_inverter(secret, salt, dim);
         while (ptr + sizeof(uint64_t) <= end)
         {
             *(uint64_t*)ptr ^= inverter;
-            inverter = make_inverter(inverter, salt);
+            inverter = make_inverter(inverter, salt, dim);
             ptr += sizeof(uint64_t);
         }
 
@@ -216,12 +223,12 @@ struct dimmer
 
 private:
 
-    static inline uint64_t make_inverter(uint64_t secret, uint64_t salt)
+    static inline uint64_t make_inverter(uint64_t secret, uint64_t salt, bool dim)
     {
         uint64_t base = secret + salt;
         uint64_t shift = (base & 0x3F) | 0x01;
-        return ((base >> shift) | (base << (64 - shift))) ^ salt;
+        return dim ? htole64(((base >> shift) | (base << (64 - shift))) ^ salt) : le64toh(((base >> shift) | (base << (64 - shift))) ^ salt);
     }
 };
 
-}
+}}

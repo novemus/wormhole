@@ -14,7 +14,7 @@
 #include <sstream>
 #include <functional>
 
-namespace wormhole::log {
+namespace wormhole { namespace log {
 
 enum severity
 {
@@ -43,7 +43,7 @@ private:
 
 void set(severity level, bool async = false, const std::string& file = "") noexcept(false);
 
-}
+}}
 
 #define MAKE_LOG_LINE(severity) wormhole::log::line(severity, __FUNCTION__, __FILE__, __LINE__)
 

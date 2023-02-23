@@ -86,9 +86,12 @@ BOOST_AUTO_TEST_CASE(reactor_terminate)
     std::future<void> f1 = p1.get_future();
     reactor->io().post([&p1, reactor]()
     {
-        BOOST_REQUIRE_NO_THROW(reactor->terminate(true));
+        BOOST_REQUIRE_NO_THROW(reactor->terminate());
         p1.set_value();
     });
+
+    BOOST_REQUIRE_NO_THROW(reactor->activate());
+    BOOST_REQUIRE_NO_THROW(f1.get());
 
     std::promise<void> p2;
     std::future<void> f2 = p2.get_future();
@@ -104,9 +107,6 @@ BOOST_AUTO_TEST_CASE(reactor_terminate)
         p3.set_value();
     });
 
-    BOOST_REQUIRE_NO_THROW(reactor->execute());
-
-    BOOST_REQUIRE_NO_THROW(f1.get());
     BOOST_CHECK(f2.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout);
     BOOST_CHECK(f3.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout);
 }

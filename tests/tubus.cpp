@@ -563,8 +563,7 @@ BOOST_AUTO_TEST_CASE(udp_speed)
 
 BOOST_AUTO_TEST_CASE(tcp_speed)
 {
-    boost::asio::ip::tcp::endpoint le(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
-    boost::asio::ip::tcp::endpoint re(boost::asio::ip::address::from_string("127.0.0.1"), 3002);
+    boost::asio::ip::tcp::endpoint ep(boost::asio::ip::address::from_string("127.0.0.1"), 3001);
 
     auto reactor = wormhole::shared_reactor();
 
@@ -574,7 +573,8 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
     std::promise<void> promise;
     std::future<void> future = promise.get_future();
 
-    boost::asio::ip::tcp::acceptor acceptor(reactor->io(), le);
+    boost::asio::ip::tcp::acceptor acceptor(reactor->io(), ep);
+    acceptor.set_option(boost::asio::socket_base::reuse_address(true));
     acceptor.async_accept(left, [&left, &promise](const boost::system::error_code& error)
     {
         if (error)
@@ -595,9 +595,8 @@ BOOST_AUTO_TEST_CASE(tcp_speed)
         promise.set_value();
     });
 
-    right.open(re.protocol());
-    right.bind(re);
-    right.connect(le);
+    right.open(ep.protocol());
+    right.connect(ep);
 
     size_t sent = 0;
     wormhole::mutable_buffer wb(1432);

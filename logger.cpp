@@ -10,11 +10,11 @@
 
 #include "reactor.h"
 #include "logger.h"
-#include <fstream>
 #include <mutex>
 #include <future>
 #include <filesystem>
 #include <sys/types.h>
+#include <boost/filesystem.hpp>
 #include <boost/thread/thread.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 
@@ -27,7 +27,7 @@
 #define gettid() GetCurrentThreadId()
 #endif
 
-namespace wormhole::log {
+namespace wormhole { namespace log {
 
 class logger
 {
@@ -133,7 +133,8 @@ severity level()
 }
 
 line::line(severity sev, const char* func, const char* file, int line) noexcept(true) 
-    : level(sev <= log::level() ? sev : severity::none)
+    : std::ostream(nullptr)
+    , level(sev <= log::level() ? sev : severity::none)
 {
     if (level != severity::none)
     {
@@ -142,7 +143,7 @@ line::line(severity sev, const char* func, const char* file, int line) noexcept(
         stream << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << level << ": ";
         if (log::level() > severity::info)
         {
-            auto name = std::filesystem::path(file).filename().string();
+            auto name = boost::filesystem::path(file).filename().string();
             stream << "[" << func << " in " << name << ":" << line << "] ";
         }
     }
@@ -163,4 +164,4 @@ void set(severity level, bool async, const std::string& file) noexcept(false)
     g_logger = std::make_unique<logger>(level, async, file);
 }
 
-}
+}}

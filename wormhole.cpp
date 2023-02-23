@@ -185,7 +185,7 @@ struct packet : public mutable_buffer
     packet(uint32_t id, const const_buffer& payload) : mutable_buffer(header_size + payload.size())
     {
         set<uint32_t>(0, htonl(id));
-        set<uint32_t>(sizeof(uint32_t), htonl(payload.size()));
+        set<uint32_t>(sizeof(uint32_t), htonl(static_cast<uint32_t>(payload.size())));
         fill(header_size, payload.size(), payload.data());
     }
 

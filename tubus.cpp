@@ -25,7 +25,7 @@
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
-namespace wormhole::tubus {
+namespace wormhole { namespace tubus {
 
 template<class value_type> value_type getenv(const std::string& name, const value_type& def)
 {
@@ -1090,4 +1090,4 @@ std::shared_ptr<channel> create_channel(reactor_ptr reactor, const endpoint& bin
     return std::make_shared<transport>(reactor, bind, peer, secret);
 }
 
-}
+}}

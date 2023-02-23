@@ -15,7 +15,7 @@
 #include <boost/program_options.hpp>
 #include <boost/lexical_cast.hpp>
 
-namespace boost::asio::ip {
+namespace boost { namespace asio { namespace ip {
 
 template<class proto>
 void validate(boost::any& result, const std::vector<std::string>& values, basic_endpoint<proto>*, int)
@@ -29,7 +29,7 @@ void validate(boost::any& result, const std::vector<std::string>& values, basic_
         throw boost::program_options::validation_error(boost::program_options::validation_error::invalid_option_value);
 }
 
-}
+}}}
 
 int main(int argc, char *argv[])
 {
