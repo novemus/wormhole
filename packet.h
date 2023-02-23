@@ -17,8 +17,8 @@
 
 #ifdef _MSC_VER
 #include <WinSock2.h>
-#define htole64 htonll
-#define le64toh ntohll
+#define htobe64 htonll
+#define be64toh ntohll
 #endif
 
 namespace wormhole { namespace tubus {
@@ -62,14 +62,14 @@ struct section : public mutable_buffer
     {
         set<uint16_t>(0, htons(flag::move | flag::echo));
         set<uint16_t>(sizeof(uint16_t), htons(sizeof(handle)));
-        set<uint64_t>(header_size, htole64(handle));
+        set<uint64_t>(header_size, htobe64(handle));
     }
 
     void snippet(uint64_t handle, const const_buffer& data)
     {
         set<uint16_t>(0, htons(flag::move));
         set<uint16_t>(sizeof(uint16_t), htons(static_cast<uint16_t>(sizeof(handle) + data.size())));
-        set<uint64_t>(header_size, htole64(handle));
+        set<uint64_t>(header_size, htobe64(handle));
         fill(header_size + sizeof(handle), data.size(), data.data());
     }
 
@@ -104,7 +104,7 @@ struct cursor : public mutable_buffer
 
     uint64_t handle() const
     {
-        return le64toh(get<uint64_t>(0));
+        return be64toh(get<uint64_t>(0));
     }
 };
 
@@ -118,7 +118,7 @@ struct snippet : public mutable_buffer
 
     uint64_t handle() const
     {
-        return le64toh(get<uint64_t>(0));
+        return be64toh(get<uint64_t>(0));
     }
 
     mutable_buffer fragment() const
@@ -139,7 +139,7 @@ struct packet : public mutable_buffer
 
     uint64_t salt() const
     {
-        return size() > packet::header_size ? le64toh(get<uint64_t>(0)) : 0;
+        return size() > packet::header_size ? be64toh(get<uint64_t>(0)) : 0;
     }
 
     uint16_t sign() const
@@ -192,11 +192,11 @@ struct dimmer
             std::random_device dev;
             std::mt19937_64 gen(dev());
             salt = static_cast<uint64_t>(gen());
-            *(uint64_t*)ptr = htole64(salt ^ secret);
+            *(uint64_t*)ptr = htobe64(salt ^ secret);
         }
         else
         {
-            salt = le64toh(salt) ^ secret;
+            salt = be64toh(salt) ^ secret;
             *(uint64_t*)ptr = 0;
         }
 
@@ -227,7 +227,7 @@ private:
     {
         uint64_t base = secret + salt;
         uint64_t shift = (base & 0x3F) | 0x01;
-        return dim ? htole64(((base >> shift) | (base << (64 - shift))) ^ salt) : le64toh(((base >> shift) | (base << (64 - shift))) ^ salt);
+        return dim ? htobe64(((base >> shift) | (base << (64 - shift))) ^ salt) : be64toh(((base >> shift) | (base << (64 - shift))) ^ salt);
     }
 };
 

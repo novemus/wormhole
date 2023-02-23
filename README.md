@@ -39,7 +39,7 @@ wormhole --purpose=import --service=<ip:port> --gateway=<ip:port> --faraway=<ip:
 
 ## Bugs and improvements
 
-Feel free to [report](https://github.com/novemus/wormhole/issues) bugs and [suggest](https://github.com/wormhole/plexus/issues) improvements. 
+Feel free to [report](https://github.com/novemus/wormhole/issues) bugs and [suggest](https://github.com/novemus/wormhole/issues) improvements. 
 
 ## License
 
