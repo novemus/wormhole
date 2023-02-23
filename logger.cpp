@@ -65,10 +65,10 @@ public:
 
     void append(std::string&& entry) 
     {
-        auto addition = [this, line = entry]()
+        auto addition = [sink = m_sink, line = entry]()
         {
-            *m_sink << line << std::endl;
-            m_sink->flush();
+            *sink << line << std::endl;
+            sink->flush();
         };
 
         if (m_reactor)
