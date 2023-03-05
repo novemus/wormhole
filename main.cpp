@@ -20,13 +20,18 @@ namespace boost { namespace asio { namespace ip {
 template<class proto>
 void validate(boost::any& result, const std::vector<std::string>& values, basic_endpoint<proto>*, int)
 {
-    const std::string& str = boost::program_options::validators::get_single_string(values);
+    const std::string& url = boost::program_options::validators::get_single_string(values);
+
+    boost::asio::io_context io;
+    typename proto::resolver resolver(io);
 
     std::smatch match;
-    if (std::regex_search(str, match, std::regex("(\\w+://)?(.+):(.+)")))
-        result = boost::any(basic_endpoint<proto>(make_address(match[2].str()), boost::lexical_cast<uint16_t>(match[3].str())));
+    if (std::regex_search(url, match, std::regex("^(\\w+://)?([^/]+):(\\d+)?$")))
+        result = boost::any(*resolver.resolve(match[2].str(), match[3].str()));
+    else if (std::regex_search(url, match, std::regex("^(\\w+)://([^/]+).*$")))
+        result = boost::any(*resolver.resolve(match[2].str(), match[1].str()));
     else
-        throw boost::program_options::validation_error(boost::program_options::validation_error::invalid_option_value);
+        result = boost::any(*resolver.resolve(url, "http"));
 }
 
 }}}

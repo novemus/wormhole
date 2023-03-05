@@ -18,6 +18,7 @@
 #include <numeric>
 #include <iostream>
 #include <type_traits>
+#include <vector>
 #include <boost/asio.hpp>
 #include <boost/shared_array.hpp>
 
@@ -143,6 +144,12 @@ struct mutable_buffer : public boost::asio::mutable_buffer
     mutable_buffer(size_t size) noexcept(true) 
         : mutable_buffer(boost::shared_array<uint8_t>(new uint8_t[size]), size)
     {
+    }
+
+    mutable_buffer(const std::vector<uint8_t>& data) noexcept(true)
+        : mutable_buffer(boost::shared_array<uint8_t>(new uint8_t[data.size()]), data.size())
+    {
+        std::memcpy(m_array.get(), data.data(), data.size());
     }
 
     mutable_buffer(const std::string& str) noexcept(true) 
