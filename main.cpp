@@ -20,18 +20,26 @@ namespace boost { namespace asio { namespace ip {
 template<class proto>
 void validate(boost::any& result, const std::vector<std::string>& values, basic_endpoint<proto>*, int)
 {
+    boost::program_options::validators::check_first_occurrence(result);
     const std::string& url = boost::program_options::validators::get_single_string(values);
 
-    boost::asio::io_context io;
-    typename proto::resolver resolver(io);
+    try
+    {
+        boost::asio::io_context io;
+        typename proto::resolver resolver(io);
 
-    std::smatch match;
-    if (std::regex_search(url, match, std::regex("^(\\w+://)?([^/]+):(\\d+)?$")))
-        result = boost::any(*resolver.resolve(match[2].str(), match[3].str()));
-    else if (std::regex_search(url, match, std::regex("^(\\w+)://([^/]+).*$")))
-        result = boost::any(*resolver.resolve(match[2].str(), match[1].str()));
-    else
-        result = boost::any(*resolver.resolve(url, "http"));
+        std::smatch match;
+        if (std::regex_search(url, match, std::regex("^(\\w+://)?([^/]+):(\\d+)?$")))
+            result = boost::any(*resolver.resolve(match[2].str(), match[3].str()));
+        else if (std::regex_search(url, match, std::regex("^(\\w+)://([^/]+).*$")))
+            result = boost::any(*resolver.resolve(match[2].str(), match[1].str()));
+        else
+            result = boost::any(*resolver.resolve(url));
+    }
+    catch(const boost::system::system_error&)
+    {
+         boost::throw_exception(boost::program_options::error("can't resolve " + url));
+    }
 }
 
 }}}
