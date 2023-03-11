@@ -30,11 +30,11 @@ void validate(boost::any& result, const std::vector<std::string>& values, basic_
 
         std::smatch match;
         if (std::regex_search(url, match, std::regex("^(\\w+://)?([^/]+):(\\d+)?$")))
-            result = boost::any(*resolver.resolve(match[2].str(), match[3].str()));
+            result = boost::any(basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[3].str())));
         else if (std::regex_search(url, match, std::regex("^(\\w+)://([^/]+).*$")))
-            result = boost::any(*resolver.resolve(match[2].str(), match[1].str()));
+            result = boost::any(basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[1].str())));
         else
-            result = boost::any(*resolver.resolve(url));
+            result = boost::any(basic_endpoint<proto>(*resolver.resolve(url)));
     }
     catch(const boost::system::system_error&)
     {
