@@ -60,9 +60,9 @@ class reactor
 
     public:
 
-        context(std::shared_ptr<boost::asio::io_context> m_io) noexcept(true)
-            : m_io(m_io)
-            , m_work(new boost::asio::io_context::work(*m_io))
+        context(std::shared_ptr<boost::asio::io_context> io) noexcept(true)
+            : m_io(io)
+            , m_work(new boost::asio::io_context::work(*io))
         {
         }
 
@@ -70,6 +70,8 @@ class reactor
         {
             if (size == 0)
                 throw std::runtime_error("zero pool size");
+
+            m_io->restart();
 
             for (size_t i = 0; i < (attach ? size - 1 : size); ++i)
             {
@@ -79,14 +81,8 @@ class reactor
             if (attach)
             {
                 auto task = std::make_shared<worker>(m_io, std::launch::deferred);
-                m_pool.push_back(task);
-                
-                m_io->restart();
+                m_pool.push_back(task); 
                 task->wait();
-            }
-            else
-            {
-                m_io->restart();
             }
         }
 
@@ -151,7 +147,6 @@ public:
         : m_size(size)
         , m_io(std::make_shared<boost::asio::io_context>())
     {
-        m_io->stop();
     }
 
     ~reactor() noexcept(true)
