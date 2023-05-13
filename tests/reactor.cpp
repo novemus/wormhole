@@ -86,12 +86,12 @@ BOOST_AUTO_TEST_CASE(reactor_terminate)
     std::future<void> f1 = p1.get_future();
     reactor->io().post([&p1, reactor]()
     {
-        BOOST_REQUIRE_NO_THROW(reactor->terminate());
         p1.set_value();
     });
 
     BOOST_REQUIRE_NO_THROW(reactor->activate());
     BOOST_REQUIRE_NO_THROW(f1.get());
+    BOOST_REQUIRE_NO_THROW(reactor->terminate(true));
 
     std::promise<void> p2;
     std::future<void> f2 = p2.get_future();

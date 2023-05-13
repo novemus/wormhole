@@ -9,10 +9,10 @@
  */
 
 #include "wormhole.h"
-#include "buffer.h"
 #include "reactor.h"
 #include "logger.h"
-#include "tubus.h"
+#include <buffer.h>
+#include <channel.h>
 #include <list>
 #include <boost/asio.hpp>
 
@@ -25,8 +25,8 @@ class tcp : public std::enable_shared_from_this<tcp>
 
     reactor_ptr m_reactor;
     boost::asio::ip::tcp::socket m_socket;
-    std::list<std::pair<mutable_buffer, io_callback>> m_rq;
-    std::list<std::pair<const_buffer, io_callback>> m_wq;
+    std::list<std::pair<tubus::mutable_buffer, io_callback>> m_rq;
+    std::list<std::pair<tubus::const_buffer, io_callback>> m_wq;
     std::mutex m_mutex;
 
     void error(const boost::system::error_code& error)
@@ -113,7 +113,7 @@ public:
         return m_socket;
     }
 
-    void async_read(const mutable_buffer& buffer, const io_callback& handler)
+    void async_read(const tubus::mutable_buffer& buffer, const io_callback& handler)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -139,7 +139,7 @@ public:
         }
     }
 
-    void async_write(const mutable_buffer& buffer, const io_callback& handler)
+    void async_write(const tubus::const_buffer& buffer, const io_callback& handler)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -167,7 +167,7 @@ public:
 
 typedef std::shared_ptr<tcp> tcp_ptr;
 
-struct packet : public mutable_buffer
+struct packet : public tubus::mutable_buffer
 {
     static constexpr size_t header_size = sizeof(uint32_t) + sizeof(uint32_t);
 
@@ -182,7 +182,7 @@ struct packet : public mutable_buffer
         set<uint32_t>(sizeof(uint32_t), 0);
     }
 
-    packet(uint32_t id, const const_buffer& payload) : mutable_buffer(header_size + payload.size())
+    packet(uint32_t id, const tubus::const_buffer& payload) : mutable_buffer(header_size + payload.size())
     {
         set<uint32_t>(0, htonl(id));
         set<uint32_t>(sizeof(uint32_t), htonl(static_cast<uint32_t>(payload.size())));
@@ -199,7 +199,7 @@ struct packet : public mutable_buffer
         return ntohl(get<uint32_t>(sizeof(uint32_t)));
     }
 
-    const_buffer payload() const
+    tubus::const_buffer payload() const
     {
         return slice(header_size, length());
     }
@@ -213,6 +213,8 @@ class engine : public router, public std::enable_shared_from_this<engine>
     reactor_ptr m_reactor;
     boost::asio::signal_set m_signals;
     tubus::channel_ptr m_tunnel;
+    udp_endpoint m_gateway;
+    udp_endpoint m_faraway;
     std::map<uint32_t, tcp_ptr> m_bunch;
     uint32_t m_top;
     std::mutex m_mutex;
@@ -267,7 +269,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
             return;
         }
 
-        mutable_buffer data(1024 * 1024);
+        tubus::mutable_buffer data(1024 * 1024);
         std::weak_ptr<engine> weak = shared_from_this();
         client->async_read(data, [weak, id, data](const boost::system::error_code& error, size_t size)
         {
@@ -293,7 +295,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
         });
     }
 
-    void write_client(uint32_t id, const const_buffer& data)
+    void write_client(uint32_t id, const tubus::const_buffer& data)
     {
         auto client = fetch_client(id);
         if (!client)
@@ -330,7 +332,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
         });
     }
 
-    void write_tunnel(uint32_t id, const const_buffer& data)
+    void write_tunnel(uint32_t id, const tubus::const_buffer& data)
     {
         packet pack(id, data);
         std::weak_ptr<engine> weak = shared_from_this();
@@ -359,7 +361,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
 
     void read_tunnel(uint32_t id, uint32_t size)
     {
-        mutable_buffer data(size);
+        tubus::mutable_buffer data(size);
         std::weak_ptr<engine> weak = shared_from_this();
         m_tunnel->read(data, [weak, id, data](const boost::system::error_code& error, size_t size)
         {
@@ -407,7 +409,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
 
     void notify_tunnel(uint32_t id)
     {
-        write_tunnel(id, const_buffer());
+        write_tunnel(id, tubus::const_buffer());
     }
 
     void listen_signals()
@@ -437,10 +439,11 @@ public:
     engine(const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
         : m_reactor(std::make_shared<reactor>())
         , m_signals(m_reactor->io(), SIGINT, SIGTERM)
-        , m_tunnel(tubus::create_channel(m_reactor, gateway, faraway, secret))
+        , m_tunnel(tubus::create_channel(m_reactor->io(), secret))
+        , m_gateway(gateway)
+        , m_faraway(faraway)
         , m_top(std::numeric_limits<uint32_t>::max())
     {
-        m_tunnel->open();
     }
 
     void employ() noexcept(false) override
@@ -510,18 +513,17 @@ private:
     void connect_tunnel()
     {
         std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(shared_from_this());
-        m_tunnel->connect([weak](const boost::system::error_code& error)
+
+        m_tunnel->open(m_gateway);
+        m_tunnel->connect(m_faraway, [weak](const boost::system::error_code& error)
         {
             auto ptr = weak.lock();
             if (error)
             {
-                if (error != boost::asio::error::interrupted)
-                {
-                    _err_ << error.message();
+                _err_ << error.message();
                 
-                    if (ptr)
-                        ptr->cancel();
-                }
+                if (ptr)
+                    ptr->cancel();
             }
             else if (ptr)
             {
@@ -605,18 +607,17 @@ private:
     void accept_tunnel()
     {
         std::weak_ptr<engine> weak = shared_from_this();
-        m_tunnel->accept([weak](const boost::system::error_code& error)
+
+        m_tunnel->open(m_gateway);
+        m_tunnel->accept(m_faraway, [weak](const boost::system::error_code& error)
         {
             auto ptr = weak.lock();
             if (error)
             {
-                if (error != boost::asio::error::interrupted)
-                {
-                    _err_ << error.message();
-                    
-                    if (ptr)
-                        ptr->cancel();
-                }
+                _err_ << error.message();
+
+                if (ptr)
+                    ptr->cancel();
             }
             else if (ptr)
             {

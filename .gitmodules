@@ -1,0 +1,3 @@
+[submodule "tubus"]
+	path = tubus
+	url = git@github.com:novemus/tubus.git

@@ -7,3 +7,7 @@
 ## 1.0.1 (April 24, 2023)
 
 - Fixed a serious concurrency bug.
+
+## 1.0.2 (May 13, 2023)
+
+- Migration to 1.1 version of the `tubus` protocol.

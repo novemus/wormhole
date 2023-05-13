@@ -58,16 +58,15 @@ int main(int argc, char *argv[])
         ("log-level", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "log level: <fatal|error|warning|info|debug|trace>");
 
     boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-
-    if (vm.count("help"))
-    {
-        std::cout << desc << std::endl;
-        return 0;
-    }
-
     try
     {
+        boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
+        if (vm.count("help"))
+        {
+            std::cout << desc << std::endl;
+            return 0;
+        }
+
         boost::program_options::notify(vm);
     }
     catch (const std::exception& e)
