@@ -12,7 +12,7 @@
 #include "logger.h"
 #include <mutex>
 #include <future>
-#include <filesystem>
+#include <fstream>
 #include <sys/types.h>
 #include <boost/filesystem.hpp>
 #include <boost/thread/thread.hpp>
@@ -21,6 +21,13 @@
 #if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
+#elif __APPLE__
+uint64_t gettid()
+{
+    uint64_t tid;
+    pthread_threadid_np(NULL, &tid);
+    return tid;
+}
 #elif _WIN32
 #include <windows.h>
 #include <processthreadsapi.h>
@@ -154,7 +161,7 @@ line::~line() noexcept(true)
     if (level != severity::none)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        g_logger->append(std::move(stream.str()));
+        g_logger->append(stream.str());
     }
 }
 

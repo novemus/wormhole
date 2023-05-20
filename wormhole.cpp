@@ -14,6 +14,7 @@
 #include <buffer.h>
 #include <channel.h>
 #include <list>
+#include <map>
 #include <boost/asio.hpp>
 
 namespace wormhole {
@@ -569,7 +570,7 @@ private:
         });
     }
 
-    void notify_client(uint32_t id)
+    void notify_client(uint32_t id) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 

@@ -38,12 +38,16 @@ link_directories(${Boost_LIBRARY_DIRS})
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall")
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)
     target_link_libraries(${PROJECT_NAME} Threads::Threads)
     target_link_libraries(${PROJECT_NAME} Boost::system Boost::thread Boost::filesystem Boost::program_options)
+endif()
+
+if(APPLE AND Boost_USE_STATIC_LIBS)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
 endif()
 
 target_link_libraries(${PROJECT_NAME} tubus)
@@ -64,7 +68,7 @@ if(BUILD_TESTING)
 
     add_executable(${TESTS_NAME} ${TESTS_SOURCES})
 
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_link_libraries(${TESTS_NAME} Threads::Threads)
         target_link_libraries(${TESTS_NAME} Boost::system Boost::thread Boost::filesystem Boost::unit_test_framework)
     endif()
