@@ -8,7 +8,7 @@ Project depends on `boost` library. Clone repository and run the following comma
 
 ```console
 cd ~
-git clone https://github.com/novemus/wormhole.git
+git clone --recurse-submodules https://github.com/novemus/wormhole.git
 cd ~/wormhole
 cmake -B ./build [-DBOOST_ROOT=...]
 cmake --build ./build --target wormhole
