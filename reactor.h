@@ -103,7 +103,7 @@ class reactor
                 auto id = std::this_thread::get_id();
                 for(auto& task : m_pool)
                 {
-                    if (task->get_id() != id)
+                    if (!(task->get_id() == id))
                         task->wait();
                 }
             }
