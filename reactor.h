@@ -57,6 +57,7 @@ class reactor
         std::shared_ptr<boost::asio::io_context> m_io;
         std::unique_ptr<boost::asio::io_context::work> m_work;
         std::vector<std::shared_ptr<worker>> m_pool;
+        std::mutex m_mutex;
 
     public:
 
@@ -71,6 +72,8 @@ class reactor
             if (size == 0)
                 throw std::runtime_error("zero pool size");
 
+            std::unique_lock<std::mutex> lock(m_mutex);
+
             m_io->restart();
 
             for (size_t i = 0; i < (attach ? size - 1 : size); ++i)
@@ -82,6 +85,8 @@ class reactor
             {
                 auto task = std::make_shared<worker>(m_io, std::launch::deferred);
                 m_pool.push_back(task); 
+
+                lock.unlock();
                 task->wait();
             }
         }
@@ -95,16 +100,23 @@ class reactor
 
             try
             {
-                m_work.reset();
+                std::vector<std::shared_ptr<worker>> pool;
+                {
+                    std::unique_lock<std::mutex> lock(m_mutex);
+
+                    m_work.reset();
                 
-                if (hard)
-                    m_io->stop();
+                    if (hard)
+                        m_io->stop();
+
+                    std::swap(pool, m_pool);
+                }
 
                 auto id = std::this_thread::get_id();
-                for(auto& task : m_pool)
+                for(auto& work : pool)
                 {
-                    if (!(task->get_id() == id))
-                        task->wait();
+                    if (!(work->get_id() == id))
+                        work->wait();
                 }
             }
             catch (const std::exception& e)
