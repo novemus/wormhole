@@ -11,3 +11,7 @@
 ## 1.0.2 (May 13, 2023)
 
 - Migration to 1.1 version of the `tubus` protocol.
+
+## 1.1.0 (October 8, 2023)
+
+- Migration to 1.2 version of the `tubus` protocol.
