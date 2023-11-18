@@ -3,10 +3,13 @@ message("***** wormhole *****")
 cmake_minimum_required(VERSION 3.10)
 
 project(wormhole)
-project(${PROJECT_NAME} VERSION 1.0)
+project(${PROJECT_NAME} VERSION 1.1)
 
-set(tubus_SKIP_INSTALL_TARGET ON)
+set(Boost_USE_STATIC_LIBS ON)
+
 add_subdirectory(tubus)
+
+include(GNUInstallDirs)
 
 set(SOURCES reactor.cpp logger.cpp wormhole.cpp main.cpp)
 
@@ -20,23 +23,24 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     )
 endif()
 
-include_directories(tubus)
-
 if(BUILD_TESTING)
     find_package(Boost REQUIRED COMPONENTS system thread filesystem program_options unit_test_framework)
 else()
     find_package(Boost REQUIRED COMPONENTS system thread filesystem program_options)
 endif()
-    
+
 message(status "* Boost Version: ${Boost_VERSION}")
 message(status "* Boost Include Dirs: ${Boost_INCLUDE_DIRS}")
 message(status "* Boost Librariy Dirs: ${Boost_LIBRARY_DIRS}")
 message(status "* Boost Libraries: ${Boost_LIBRARIES}")
 
+include_directories(tubus)
 include_directories(${Boost_INCLUDE_DIRS})
 link_directories(${Boost_LIBRARY_DIRS})
 
 add_executable(${PROJECT_NAME} ${SOURCES})
+
+set_target_properties(${PROJECT_NAME} PROPERTIES DEBUG_POSTFIX "d")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall")
@@ -50,16 +54,13 @@ if(APPLE AND Boost_USE_STATIC_LIBS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
 endif()
 
-target_link_libraries(${PROJECT_NAME} tubus)
+target_link_libraries(${PROJECT_NAME} ${TUBUS_STATIC_TARGET})
 
-install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
-
-if(BUILD_SHARED_LIBS)
-    if(WIN32)
-        install(FILES "$<TARGET_FILE:tubus>" DESTINATION bin)
-    else()
-        install(FILES "$<TARGET_FILE:tubus>" DESTINATION lib)
-    endif()
+if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
+    install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> CONFIGURATIONS "Debug" "RelWithDebInfo" DESTINATION ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
+else()
+    install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 if(BUILD_TESTING)
@@ -67,6 +68,7 @@ if(BUILD_TESTING)
     set(TESTS_SOURCES reactor.cpp logger.cpp tests/logger.cpp tests/reactor.cpp)
 
     add_executable(${TESTS_NAME} ${TESTS_SOURCES})
+    set_target_properties(${TESTS_NAME} PROPERTIES DEBUG_POSTFIX "d")
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_link_libraries(${TESTS_NAME} Threads::Threads)
