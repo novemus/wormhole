@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.1.1 (December 18, 2023)
+
+- Improved CMake build scripts.
+
 ## 1.1.0 (October 8, 2023)
 
 - Migration to 1.2 version of the `tubus` protocol.
