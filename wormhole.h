@@ -22,7 +22,6 @@ struct router
 {
     virtual ~router() {}
     virtual void employ() noexcept(false) = 0;
-    virtual void launch() noexcept(false) = 0;
     virtual void cancel() noexcept(true) = 0;
 };
 

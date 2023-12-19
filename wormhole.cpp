@@ -229,13 +229,10 @@ class engine : public router, public std::enable_shared_from_this<engine>
             auto ptr = weak.lock();
             if (error)
             {
-                if (error != boost::asio::error::interrupted)
-                {
-                    _err_ << error.message();
-                    
-                    if (ptr)
-                        ptr->cancel();
-                }
+                _err_ << error.message();
+
+                if (ptr)
+                    ptr->cancel();
             }
             else if (size < pack.size())
             {
@@ -342,12 +339,12 @@ class engine : public router, public std::enable_shared_from_this<engine>
             auto ptr = weak.lock();
             if (error)
             {
-                if (error != boost::asio::error::interrupted)
-                {
-                    _err_ << error.message() << ", " << "client=" << pack.id();
+                _err_ << error.message() << ", " << "client=" << pack.id();
 
-                    if (ptr)
-                        ptr->cancel();
+                if (ptr)
+                {
+                    ptr->notify_client(pack.id());
+                    ptr->cancel();
                 }
             }
             else if (size < pack.size())
@@ -355,7 +352,10 @@ class engine : public router, public std::enable_shared_from_this<engine>
                 _err_ << "can't write packet, client=" << pack.id();
                 
                 if (ptr)
+                {
+                    ptr->notify_client(pack.id());
                     ptr->cancel();
+                }
             }
         });
     }
@@ -369,12 +369,12 @@ class engine : public router, public std::enable_shared_from_this<engine>
             auto ptr = weak.lock();
             if (error)
             {
-                if (error != boost::asio::error::interrupted)
+                _err_ << error.message() << ", " << "client=" << id;
+
+                if (ptr)
                 {
-                    _err_ << error.message() << ", " << "client=" << id;
-                    
-                    if (ptr)
-                        ptr->cancel();
+                    ptr->notify_client(id);
+                    ptr->cancel();
                 }
             }
             else if (size < data.size())
@@ -382,7 +382,10 @@ class engine : public router, public std::enable_shared_from_this<engine>
                 _err_ << "can't read data, client=" << id;
                 
                 if (ptr)
+                {
+                    ptr->notify_client(id);
                     ptr->cancel();
+                }
             }
             else if (ptr)
             {
@@ -418,18 +421,27 @@ class engine : public router, public std::enable_shared_from_this<engine>
         std::weak_ptr<engine> weak = shared_from_this();
         m_signals.async_wait([weak](const boost::system::error_code& error, int signal)
         {
-            if (error)
-            {
-                if (error != boost::asio::error::operation_aborted)
-                    _err_ << error.message();
-                return;
-            }
-
             if (auto ptr = weak.lock())
             {
-                _wrn_ << "shutting down due to the signal " << signal;
-                ptr->cancel();
+                if (error)
+                    _wrn_ << "shutting down due to the error: " << error.message();
+                else
+                    _wrn_ << "shutting down due to the signal: " << signal;
+                
+                ptr->terminate();
             }
+        });
+    }
+
+    void terminate()
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_tunnel->shutdown([reactor = m_reactor](const boost::system::error_code& error)
+        {
+            if (error && error != boost::asio::error::interrupted && error != boost::asio::error::in_progress)
+                _err_ << error.message();
+
+            reactor->terminate();
         });
     }
 
@@ -452,26 +464,10 @@ public:
         listen_signals();
         m_reactor->execute();
     }
-    
-    void launch() noexcept(false) override
-    {
-        listen_signals();
-        m_reactor->activate();
-    }
 
     void cancel() noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
-
-        m_bunch.clear();
-        m_tunnel->shutdown([reactor = m_reactor](const boost::system::error_code& error)
-        {
-            if (error && error != boost::asio::error::interrupted && error != boost::asio::error::in_progress)
-                _err_ << error.message();
-
-            reactor->terminate();
-        });
-
         boost::system::error_code ec;
         m_signals.cancel(ec);
     }
@@ -494,12 +490,6 @@ public:
     {
         connect_tunnel();
         engine::employ();
-    }
-
-    void launch() noexcept(false) override
-    {
-        connect_tunnel();
-        engine::launch();
     }
 
     void cancel() noexcept(true) override
@@ -595,12 +585,6 @@ public:
     {
         accept_tunnel();
         engine::employ();
-    }
-
-    void launch() noexcept(false) override
-    {
-        accept_tunnel();
-        engine::launch();
     }
 
 private:
