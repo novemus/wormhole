@@ -12,6 +12,7 @@ add_subdirectory(tubus)
 include(GNUInstallDirs)
 
 set(SOURCES reactor.cpp logger.cpp wormhole.cpp main.cpp)
+add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     add_definitions(
@@ -67,9 +68,11 @@ endif()
 
 if(BUILD_TESTING)
     set(TESTS_NAME wormhole_ut)
-    set(TESTS_SOURCES reactor.cpp logger.cpp tests/logger.cpp tests/reactor.cpp)
+    set(TESTS_SOURCES reactor.cpp logger.cpp wormhole.cpp tests/logger.cpp tests/reactor.cpp tests/wormhole.cpp)
 
     add_executable(${TESTS_NAME} ${TESTS_SOURCES})
+    target_link_libraries(${TESTS_NAME} ${TUBUS_STATIC_TARGET})
+
     set_target_properties(${TESTS_NAME} PROPERTIES DEBUG_POSTFIX "d")
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")

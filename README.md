@@ -4,6 +4,8 @@ The [wormhole](https://github.com/novemus/wormhole) is a tool for forwarding a r
 
 ## Build
 
+You can download [prebuild packages](https://github.com/novemus/plexus/releases) for Debian and Windows platforms.
+
 Project depends on `boost` library. Clone repository and run the following commands:
 
 ```console
