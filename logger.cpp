@@ -11,7 +11,7 @@
 #include "reactor.h"
 #include "logger.h"
 #include <mutex>
-#include <future>
+#include <regex>
 #include <fstream>
 #include <sys/types.h>
 #include <boost/filesystem.hpp>
@@ -21,7 +21,9 @@
 #if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
+#define getpid() syscall(SYS_getpid)
 #elif __APPLE__
+#include <unistd.h>
 uint64_t gettid()
 {
     uint64_t tid;
@@ -32,6 +34,7 @@ uint64_t gettid()
 #include <windows.h>
 #include <processthreadsapi.h>
 #define gettid() GetCurrentThreadId()
+#define getpid() GetCurrentProcessId()
 #endif
 
 namespace wormhole { namespace log {
@@ -168,7 +171,7 @@ line::~line() noexcept(true)
 void set(severity level, bool async, const std::string& file) noexcept(false)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_logger = std::make_unique<logger>(level, async, file);
+    g_logger = std::make_unique<logger>(level, async, std::regex_replace(file, std::regex("%p"), std::to_string(getpid())));
 }
 
 }}
