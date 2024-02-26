@@ -42,6 +42,7 @@ namespace wormhole { namespace log {
 class logger
 {
     severity                      m_level;
+    std::string                   m_file;
     reactor_ptr                   m_reactor;
     std::shared_ptr<std::ostream> m_sink;
 
@@ -49,6 +50,7 @@ public:
 
     logger(severity level, bool async = false, const std::string& file = "") 
         : m_level(level)
+        , m_file(file)
     {
         if (async)
         {
@@ -56,10 +58,10 @@ public:
             m_reactor->activate();
         }
 
-        if (file.empty())
+        if (m_file.empty())
             m_sink.reset(&std::cout, [](std::ostream*){});
         else
-            m_sink = std::make_shared<std::ofstream>(file.c_str(), std::ofstream::out);
+            m_sink = std::make_shared<std::ofstream>(m_file.c_str(), std::ofstream::out);
     }
 
     ~logger()
@@ -71,6 +73,11 @@ public:
     severity level() const
     {
         return m_level;
+    }
+
+    std::string file() const
+    {
+        return m_file;
     }
 
     void append(std::string&& entry) 
@@ -136,10 +143,16 @@ std::istream& operator>>(std::istream& in, severity& level)
     return in;
 }
 
-severity level()
+severity level() noexcept(true) 
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     return g_logger->level();
+}
+
+std::string file() noexcept(true) 
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_logger->file();
 }
 
 line::line(severity sev, const char* func, const char* file, int line) noexcept(true) 
@@ -171,7 +184,7 @@ line::~line() noexcept(true)
 void set(severity level, bool async, const std::string& file) noexcept(false)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_logger = std::make_unique<logger>(level, async, std::regex_replace(file, std::regex("%p"), std::to_string(getpid())));
+    g_logger = std::make_unique<logger>(level, async, file);
 }
 
 }}

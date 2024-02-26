@@ -212,7 +212,6 @@ class engine : public router, public std::enable_shared_from_this<engine>
     friend class exporter;
 
     reactor_ptr m_reactor;
-    boost::asio::signal_set m_signals;
     tubus::channel_ptr m_tunnel;
     udp_endpoint m_gateway;
     udp_endpoint m_faraway;
@@ -416,42 +415,12 @@ class engine : public router, public std::enable_shared_from_this<engine>
         write_tunnel(id, tubus::const_buffer());
     }
 
-    void listen_signals()
-    {
-        std::weak_ptr<engine> weak = shared_from_this();
-        m_signals.async_wait([weak](const boost::system::error_code& error, int signal)
-        {
-            if (auto ptr = weak.lock())
-            {
-                if (error)
-                    _wrn_ << "shutting down due to the error: " << error.message();
-                else
-                    _wrn_ << "shutting down due to the signal: " << signal;
-                
-                ptr->terminate();
-            }
-        });
-    }
-
-    void terminate()
-    {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_tunnel->shutdown([reactor = m_reactor](const boost::system::error_code& error)
-        {
-            if (error && error != boost::asio::error::interrupted && error != boost::asio::error::in_progress)
-                _err_ << error.message();
-
-            reactor->terminate();
-        });
-    }
-
     virtual void notify_client(uint32_t id) = 0;
 
 public:
 
     engine(const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
         : m_reactor(std::make_shared<reactor>())
-        , m_signals(m_reactor->io(), SIGINT, SIGTERM)
         , m_tunnel(tubus::create_channel(m_reactor->io(), secret))
         , m_gateway(gateway)
         , m_faraway(faraway)
@@ -461,15 +430,19 @@ public:
 
     void employ() noexcept(false) override
     {
-        listen_signals();
         m_reactor->execute();
     }
 
     void cancel() noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
-        boost::system::error_code ec;
-        m_signals.cancel(ec);
+        m_tunnel->shutdown([reactor = m_reactor](const boost::system::error_code& error)
+        {
+            if (error && error != boost::asio::error::interrupted && error != boost::asio::error::in_progress)
+                _err_ << error.message();
+
+            reactor->terminate();
+        });
     }
 };
 

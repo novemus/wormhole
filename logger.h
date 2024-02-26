@@ -12,7 +12,6 @@
 
 #include <iostream>
 #include <sstream>
-#include <functional>
 
 namespace wormhole { namespace log {
 
@@ -42,6 +41,8 @@ private:
 };
 
 void set(severity level, bool async = false, const std::string& file = "") noexcept(false);
+severity level() noexcept(true);
+std::string file() noexcept(true);
 
 }}
 
