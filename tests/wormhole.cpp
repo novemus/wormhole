@@ -193,10 +193,10 @@ BOOST_AUTO_TEST_CASE(hello_wormhole)
     BOOST_REQUIRE_EQUAL(std::memcmp(buffer, WORMHOLE_HELLO, sizeof(WORMHOLE_HELLO)), 0);
 
     BOOST_REQUIRE_NO_THROW(client1.shutdown(boost::asio::ip::tcp::socket::shutdown_both));
-    BOOST_REQUIRE_NO_THROW(client1.shutdown(boost::asio::ip::tcp::socket::shutdown_both));
+    BOOST_REQUIRE_NO_THROW(client2.shutdown(boost::asio::ip::tcp::socket::shutdown_both));
 
     BOOST_REQUIRE_NO_THROW(client1.close());
-    BOOST_REQUIRE_NO_THROW(client1.close());
+    BOOST_REQUIRE_NO_THROW(client2.close());
 
     BOOST_REQUIRE_NO_THROW(importer->cancel());
     BOOST_REQUIRE_NO_THROW(imp.wait());
