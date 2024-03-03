@@ -184,7 +184,7 @@ line::~line() noexcept(true)
 void set(severity level, bool async, const std::string& file) noexcept(false)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_logger = std::make_unique<logger>(level, async, file);
+    g_logger = std::make_unique<logger>(level, async, std::regex_replace(file, std::regex("%p"), std::to_string(getpid())));
 }
 
 }}
