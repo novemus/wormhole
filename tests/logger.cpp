@@ -19,19 +19,20 @@
 
 namespace {
 
-std::regex pattern("\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} INFO: line 1\n"
-                   "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} WARN: line 2\n"
-                   "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} ERROR: line 3\n"
-                   "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} FATAL: line 4\n");
+std::regex pattern("[^\\n]+\\n"
+                   "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} INFO: line 1\\n"
+                   "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} WARN: line 2\\n"
+                   "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} ERROR: line 3\\n"
+                   "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} FATAL: line 4\\n");
 }
 
 BOOST_AUTO_TEST_CASE(stdlog)
 {
-    wormhole::log::set(wormhole::log::info, false);
-
     std::stringstream out;
     std::streambuf *coutbuf = std::cout.rdbuf();
     std::cout.rdbuf(out.rdbuf());
+
+    wormhole::log::set(wormhole::log::info);
 
     _inf_ << "line " << 1;
     _wrn_ << "line " << 2;
@@ -40,17 +41,17 @@ BOOST_AUTO_TEST_CASE(stdlog)
     _dbg_ << "line " << 5;
     _trc_ << "line " << 6;
 
-    std::smatch match;
     std::string text = out.str();
     out.clear();
     std::cout.rdbuf(coutbuf);
 
+    std::smatch match;
     BOOST_CHECK(std::regex_match(text, match, pattern));
 }
 
 BOOST_AUTO_TEST_CASE(filelog)
 {
-    wormhole::log::set(wormhole::log::info, false, "log.txt");
+    wormhole::log::set(wormhole::log::info, "log.txt");
 
     _inf_ << "line " << 1;
     _wrn_ << "line " << 2;
@@ -61,10 +62,10 @@ BOOST_AUTO_TEST_CASE(filelog)
 
     wormhole::log::set(wormhole::log::info);
 
-    std::smatch match;
     std::ifstream file("log.txt");
     std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
+    std::smatch match;
     BOOST_CHECK(std::regex_match(text, match, pattern));
 
     file.close();

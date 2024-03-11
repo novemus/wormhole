@@ -8,11 +8,11 @@
  * 
  */
 
-#include "reactor.h"
 #include "logger.h"
+#include <stdexcept>
+#include <stdio.h>
 #include <mutex>
 #include <regex>
-#include <fstream>
 #include <sys/types.h>
 #include <boost/filesystem.hpp>
 #include <boost/thread/thread.hpp>
@@ -33,70 +33,21 @@ uint64_t gettid()
 #elif _WIN32
 #include <windows.h>
 #include <processthreadsapi.h>
+#include <io.h>
 #define gettid() GetCurrentThreadId()
 #define getpid() GetCurrentProcessId()
+#define dup(handle) _dup(handle)
+#define dup2(src, dst) _dup2(src, dst)
+#define fileno(file) _fileno(file)
 #endif
 
 namespace wormhole { namespace log {
 
-class logger
-{
-    severity                      m_level;
-    std::string                   m_file;
-    reactor_ptr                   m_reactor;
-    std::shared_ptr<std::ostream> m_sink;
-
-public:
-
-    logger(severity level, bool async = false, const std::string& file = "") 
-        : m_level(level)
-        , m_file(file)
-    {
-        if (async)
-        {
-            m_reactor = std::make_shared<reactor>(1);
-            m_reactor->activate();
-        }
-
-        if (m_file.empty())
-            m_sink.reset(&std::cout, [](std::ostream*){});
-        else
-            m_sink = std::make_shared<std::ofstream>(m_file.c_str(), std::ofstream::out);
-    }
-
-    ~logger()
-    {
-        if (m_reactor)
-            m_reactor->complete();
-    }
-
-    severity level() const
-    {
-        return m_level;
-    }
-
-    std::string file() const
-    {
-        return m_file;
-    }
-
-    void append(std::string&& entry) 
-    {
-        auto addition = [sink = m_sink, line = entry]()
-        {
-            *sink << line << std::endl;
-            sink->flush();
-        };
-
-        if (m_reactor)
-            m_reactor->io().post(addition);
-        else
-            addition();
-    };
-};
-
-std::unique_ptr<logger> g_logger = std::make_unique<logger>(severity::info);
-std::mutex g_mutex;
+int         g_out = dup(1);
+int         g_err = dup(2);
+FILE*       g_file = nullptr;
+severity    g_level = severity::info;
+std::mutex  g_mutex;
 
 std::ostream& operator<<(std::ostream& out, severity level)
 {
@@ -146,13 +97,7 @@ std::istream& operator>>(std::istream& in, severity& level)
 severity level() noexcept(true) 
 {
     std::lock_guard<std::mutex> lock(g_mutex);
-    return g_logger->level();
-}
-
-std::string file() noexcept(true) 
-{
-    std::lock_guard<std::mutex> lock(g_mutex);
-    return g_logger->file();
+    return g_level;
 }
 
 line::line(severity sev, const char* func, const char* file, int line) noexcept(true) 
@@ -177,14 +122,45 @@ line::~line() noexcept(true)
     if (level != severity::none)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        g_logger->append(stream.str());
+        std::cout << stream.rdbuf() << std::endl;
     }
 }
 
-void set(severity level, bool async, const std::string& file) noexcept(false)
+void set(severity level, const std::string& file) noexcept(false)
 {
+    fflush(stdout);
+    fflush(stderr);
+
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_logger = std::make_unique<logger>(level, async, std::regex_replace(file, std::regex("%p"), std::to_string(getpid())));
+    g_level = level;
+
+    if (!file.empty())
+    {
+        if (g_file)
+        {
+            fclose(g_file);
+            g_file = nullptr;
+        }
+
+        auto path = std::regex_replace(file, std::regex("%p"), std::to_string(getpid()));
+
+        g_file = fopen(path.c_str(), "a");
+        if(!g_file)
+            throw std::runtime_error("can't open log file");
+
+        dup2(fileno(g_file), 1);
+        dup2(fileno(g_file), 2);
+    }
+    else if (g_file)
+    {
+        fclose(g_file);
+        g_file = nullptr;
+
+        dup2(g_out, 1);
+        dup2(g_err, 2);
+    }
+
+    std::cout << "********** " << boost::posix_time::second_clock::local_time() << " PID=" << getpid() << " LOG=" << g_level  << " **********" << std::endl;
 }
 
 }}

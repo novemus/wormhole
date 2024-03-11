@@ -78,7 +78,7 @@ int main(int argc, char *argv[])
 
     try
     {
-        wormhole::log::set(vm["log-level"].as<wormhole::log::severity>(), true, vm["log-file"].as<std::string>());
+        wormhole::log::set(vm["log-level"].as<wormhole::log::severity>(), vm["log-file"].as<std::string>());
 
         auto purpose = vm["purpose"].as<std::string>();
         auto service = vm["service"].as<boost::asio::ip::tcp::endpoint>();

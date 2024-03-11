@@ -40,9 +40,7 @@ private:
     std::stringstream stream;
 };
 
-void set(severity level, bool async = false, const std::string& file = "") noexcept(false);
-severity level() noexcept(true);
-std::string file() noexcept(true);
+void set(severity level, const std::string& file = "") noexcept(false);
 
 }}
 
