@@ -159,8 +159,6 @@ void set(severity level, const std::string& file) noexcept(false)
         dup2(g_out, 1);
         dup2(g_err, 2);
     }
-
-    std::cout << "********** " << boost::posix_time::second_clock::local_time() << " PID=" << getpid() << " LOG=" << g_level  << " **********" << std::endl;
 }
 
 }}
