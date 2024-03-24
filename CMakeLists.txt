@@ -11,7 +11,6 @@ add_subdirectory(tubus)
 
 include(GNUInstallDirs)
 
-set(SOURCES reactor.cpp logger.cpp wormhole.cpp main.cpp)
 add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
@@ -39,23 +38,30 @@ include_directories(tubus)
 include_directories(${Boost_INCLUDE_DIRS})
 link_directories(${Boost_LIBRARY_DIRS})
 
-add_executable(${PROJECT_NAME} ${SOURCES})
+set(WORMHOLE_OBJECT ${PROJECT_NAME}_object)
+
+if(NOT PROJECT_IS_TOP_LEVEL)
+    set(TUBUS_OBJECT ${TUBUS_OBJECT} PARENT_SCOPE)
+    set(WORMHOLE_OBJECT ${WORMHOLE_OBJECT} PARENT_SCOPE)
+endif()
+
+add_library(${WORMHOLE_OBJECT} OBJECT reactor.cpp logger.cpp wormhole.cpp)
+
+add_executable(${PROJECT_NAME} main.cpp)
+target_link_libraries(${PROJECT_NAME} ${TUBUS_OBJECT} ${WORMHOLE_OBJECT})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES DEBUG_POSTFIX "d")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall -fPIC")
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)
-    target_link_libraries(${PROJECT_NAME} Threads::Threads)
-    target_link_libraries(${PROJECT_NAME} Boost::system Boost::thread Boost::filesystem Boost::program_options)
+    target_link_libraries(${PROJECT_NAME} Threads::Threads Boost::system Boost::thread Boost::filesystem Boost::program_options)
 endif()
 
 if(APPLE AND Boost_USE_STATIC_LIBS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
 endif()
-
-target_link_libraries(${PROJECT_NAME} ${TUBUS_STATIC_TARGET})
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
@@ -68,16 +74,13 @@ endif()
 
 if(BUILD_TESTING)
     set(TESTS_NAME wormhole_ut)
-    set(TESTS_SOURCES reactor.cpp logger.cpp wormhole.cpp tests/logger.cpp tests/reactor.cpp tests/wormhole.cpp)
-
-    add_executable(${TESTS_NAME} ${TESTS_SOURCES})
-    target_link_libraries(${TESTS_NAME} ${TUBUS_STATIC_TARGET})
+    add_executable(${TESTS_NAME} tests/logger.cpp tests/reactor.cpp tests/wormhole.cpp)
+    target_link_libraries(${TESTS_NAME} ${TUBUS_OBJECT} ${WORMHOLE_OBJECT})
 
     set_target_properties(${TESTS_NAME} PROPERTIES DEBUG_POSTFIX "d")
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        target_link_libraries(${TESTS_NAME} Threads::Threads)
-        target_link_libraries(${TESTS_NAME} Boost::system Boost::thread Boost::filesystem Boost::unit_test_framework)
+        target_link_libraries(${TESTS_NAME} Threads::Threads Boost::system Boost::thread Boost::filesystem Boost::unit_test_framework)
     endif()
 
     enable_testing()
