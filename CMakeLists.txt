@@ -47,44 +47,46 @@ endif()
 
 add_library(${WORMHOLE_OBJECT} OBJECT reactor.cpp logger.cpp wormhole.cpp)
 
-add_executable(${PROJECT_NAME} main.cpp)
-target_link_libraries(${PROJECT_NAME} ${TUBUS_OBJECT} ${WORMHOLE_OBJECT})
+if(NOT WORMHOLE_OBJECT_ONLY)
+    add_executable(${PROJECT_NAME} main.cpp)
+    target_link_libraries(${PROJECT_NAME} ${TUBUS_OBJECT} ${WORMHOLE_OBJECT})
 
-set_target_properties(${PROJECT_NAME} PROPERTIES DEBUG_POSTFIX "d")
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall -fPIC")
-    set(THREADS_PREFER_PTHREAD_FLAG ON)
-    find_package(Threads REQUIRED)
-    target_link_libraries(${PROJECT_NAME} Threads::Threads Boost::system Boost::thread Boost::filesystem Boost::program_options)
-endif()
-
-if(APPLE AND Boost_USE_STATIC_LIBS)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
-endif()
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
-    install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> CONFIGURATIONS "Debug" "RelWithDebInfo" DESTINATION ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
-elseif(CMAKE_INSTALL_PREFIX MATCHES "^(/usr)|(/usr/local)$")
-    install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-else()
-    install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${PROJECT_NAME}/${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
-endif()
-
-if(BUILD_TESTING)
-    set(TESTS_NAME wormhole_ut)
-    add_executable(${TESTS_NAME} tests/logger.cpp tests/reactor.cpp tests/wormhole.cpp)
-    target_link_libraries(${TESTS_NAME} ${TUBUS_OBJECT} ${WORMHOLE_OBJECT})
-
-    set_target_properties(${TESTS_NAME} PROPERTIES DEBUG_POSTFIX "d")
+    set_target_properties(${PROJECT_NAME} PROPERTIES DEBUG_POSTFIX "d")
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        target_link_libraries(${TESTS_NAME} Threads::Threads Boost::system Boost::thread Boost::filesystem Boost::unit_test_framework)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall -fPIC")
+        set(THREADS_PREFER_PTHREAD_FLAG ON)
+        find_package(Threads REQUIRED)
+        target_link_libraries(${PROJECT_NAME} Threads::Threads Boost::system Boost::thread Boost::filesystem Boost::program_options)
     endif()
 
-    enable_testing()
-    add_test(NAME ${TESTS_NAME} COMMAND ${TESTS_NAME} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    if(APPLE AND Boost_USE_STATIC_LIBS)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
+    endif()
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+        install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
+        install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> CONFIGURATIONS "Debug" "RelWithDebInfo" DESTINATION ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
+    elseif(CMAKE_INSTALL_PREFIX MATCHES "^(/usr)|(/usr/local)$")
+        install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    else()
+        install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${PROJECT_NAME}/${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
+    endif()
+
+    if(BUILD_TESTING)
+        set(TESTS_NAME wormhole_ut)
+        add_executable(${TESTS_NAME} tests/logger.cpp tests/reactor.cpp tests/wormhole.cpp)
+        target_link_libraries(${TESTS_NAME} ${TUBUS_OBJECT} ${WORMHOLE_OBJECT})
+
+        set_target_properties(${TESTS_NAME} PROPERTIES DEBUG_POSTFIX "d")
+
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            target_link_libraries(${TESTS_NAME} Threads::Threads Boost::system Boost::thread Boost::filesystem Boost::unit_test_framework)
+        endif()
+
+        enable_testing()
+        add_test(NAME ${TESTS_NAME} COMMAND ${TESTS_NAME} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    endif()
 endif()
 
 message("***** wormhole done *****")

@@ -1,0 +1,16 @@
+Source: wormhole
+Section: utils
+Priority: optional
+Maintainer: Novemus Band <nineletters@mail.ru>
+Build-Depends: cmake, debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/novemus/wormhole
+Rules-Requires-Root: no
+
+Package: wormhole
+Architecture: any
+Multi-Arch: foreign
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: Tool for tunneling TCP applications via UDP
+ The 'wormhole' tool provides ability to forward a remote TCP
+ service to a local interface via UDP tunnel.

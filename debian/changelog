@@ -1,0 +1,5 @@
+wormhole (1.2-1+deb12u3) unstable; urgency=low
+
+  * Initial debian package.
+
+ -- Novemus Band <nineletters@mail.ru>  Tue, 26 Mar 2024 21:50:00 +0300
