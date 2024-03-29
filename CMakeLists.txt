@@ -3,7 +3,7 @@ message("***** wormhole *****")
 cmake_minimum_required(VERSION 3.10)
 
 project(wormhole)
-project(${PROJECT_NAME} VERSION 1.1)
+project(${PROJECT_NAME} VERSION 1.2)
 
 set(Boost_USE_STATIC_LIBS ON)
 
