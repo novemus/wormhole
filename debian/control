@@ -11,6 +11,6 @@ Package: wormhole
 Architecture: any
 Multi-Arch: foreign
 Depends: ${misc:Depends}, ${shlibs:Depends}
-Description: Tool for tunneling TCP applications via UDP
+Description: The tool for tunneling TCP applications via UDP
  The 'wormhole' tool provides ability to forward a remote TCP
  service to a local interface via UDP tunnel.

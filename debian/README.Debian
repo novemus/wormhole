@@ -1,9 +1,9 @@
 wormhole for Debian
 =================
 
-This package contains wormhole network tool.
+This package contains the 'wormhole' network tool.
 
-The wormhole tool provides ability to make UDP tunnel to remote
+The 'wormhole' tool provides the ability to make UDP tunnel to remote
 machine and forward a remote TCP service to a local interface
 with optional ability to obfuscate the channel protocol by
 a pre-shared key.
