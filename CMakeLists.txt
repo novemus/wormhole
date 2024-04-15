@@ -5,14 +5,13 @@ cmake_minimum_required(VERSION 3.10)
 project(wormhole)
 project(${PROJECT_NAME} VERSION 1.2)
 
-set(Boost_USE_STATIC_LIBS ON)
-
 add_subdirectory(tubus)
 
 include(GNUInstallDirs)
 
 add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
 
+set(HEADERS io.h logger.h wormhole.h)
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     add_definitions(
         -D_CRT_NO_VA_START_VALIDATION
@@ -20,13 +19,46 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         -D_WIN32_WINNT=0x0600
         -D_WINSOCK_DEPRECATED_NO_WARNINGS
         -DINCL_EXTRA_HTON_FUNCTIONS
+        -D_SILENCE_CXX17_ALLOCATOR_VOID_DEPRECATION_WARNING
+        -D_SILENCE_CXX17_OLD_ALLOCATOR_MEMBERS_DEPRECATION_WARNING
     )
+    set(WORMHOLE_INSTALL_LIBDIR ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_LIBDIR})
+    set(WORMHOLE_INSTALL_CMAKEDIR ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_LIBDIR}/cmake)
+    set(WORMHOLE_INSTALL_INCLUDEDIR ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_INCLUDEDIR})
+    set(CMAKE_STATIC_LIBRARY_SUFFIX "-static.lib")
+    set(CMAKE_STATIC_LIBRARY_PREFIX "lib")
+    set(CMAKE_SHARED_LIBRARY_PREFIX "lib")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++17")
+else()
+    if(CMAKE_INSTALL_PREFIX MATCHES "^(/usr)|(/usr/local)$")
+        if(APPLE)
+            set(WORMHOLE_INSTALL_LIBDIR ${CMAKE_INSTALL_LIBDIR})
+            set(WORMHOLE_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake)
+            set(WORMHOLE_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR})
+        elseif(CMAKE_INSTALL_LIBDIR MATCHES ${CMAKE_LIBRARY_ARCHITECTURE} OR CMAKE_INSTALL_PREFIX MATCHES "/usr/local")
+            set(WORMHOLE_INSTALL_LIBDIR ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}-${${PROJECT_NAME}_VERSION})
+            set(WORMHOLE_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}-${${PROJECT_NAME}_VERSION})
+            set(WORMHOLE_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}-${${PROJECT_NAME}_VERSION})
+        else()
+            set(WORMHOLE_INSTALL_LIBDIR ${CMAKE_INSTALL_LIBDIR}/${CMAKE_LIBRARY_ARCHITECTURE}/${PROJECT_NAME}-${${PROJECT_NAME}_VERSION})
+            set(WORMHOLE_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/${CMAKE_LIBRARY_ARCHITECTURE}/cmake/${PROJECT_NAME}-${${PROJECT_NAME}_VERSION})
+            set(WORMHOLE_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}-${${PROJECT_NAME}_VERSION})
+        endif()
+    else()
+        set(WORMHOLE_INSTALL_LIBDIR ${PROJECT_NAME}/${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_LIBDIR})
+        set(WORMHOLE_INSTALL_CMAKEDIR ${PROJECT_NAME}/${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_LIBDIR}/cmake)
+        set(WORMHOLE_INSTALL_INCLUDEDIR ${PROJECT_NAME}/${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_INCLUDEDIR})
+    endif()
 endif()
 
+string(REGEX REPLACE "[^/\\]+" ".." WORMHOLE_INSTALL_CMAKEDIR_REVERSE ${WORMHOLE_INSTALL_CMAKEDIR})
+
+set(Boost_USE_STATIC_LIBS ON)
+
 if(BUILD_TESTING)
-    find_package(Boost REQUIRED COMPONENTS system thread filesystem program_options unit_test_framework)
+    find_package(Boost 1.81 REQUIRED COMPONENTS system program_options unit_test_framework)
 else()
-    find_package(Boost REQUIRED COMPONENTS system thread filesystem program_options)
+    find_package(Boost 1.81 REQUIRED COMPONENTS system program_options)
 endif()
 
 message(status "* Boost Version: ${Boost_VERSION}")
@@ -38,33 +70,45 @@ include_directories(tubus)
 include_directories(${Boost_INCLUDE_DIRS})
 link_directories(${Boost_LIBRARY_DIRS})
 
-set(WORMHOLE_OBJECT ${PROJECT_NAME}_object)
+set(WORMHOLE_STATIC ${PROJECT_NAME}_static)
+set(WORMHOLE_SHARED ${PROJECT_NAME}_shared)
 
 if(NOT PROJECT_IS_TOP_LEVEL)
     set(TUBUS_STATIC ${TUBUS_STATIC} PARENT_SCOPE)
     set(TUBUS_SHARED ${TUBUS_SHARED} PARENT_SCOPE)
-    set(WORMHOLE_OBJECT ${WORMHOLE_OBJECT} PARENT_SCOPE)
+    set(WORMHOLE_STATIC ${WORMHOLE_STATIC} PARENT_SCOPE)
+    set(WORMHOLE_SHARED ${WORMHOLE_SHARED} PARENT_SCOPE)
 endif()
 
-add_library(${WORMHOLE_OBJECT} OBJECT reactor.cpp logger.cpp wormhole.cpp)
+add_library(${WORMHOLE_SHARED} SHARED logger.cpp wormhole.cpp)
+target_link_libraries(${WORMHOLE_SHARED} ${TUBUS_SHARED})
+target_compile_definitions(${WORMHOLE_SHARED} PRIVATE WORMHOLE_EXPORTS)
+set_target_properties(${WORMHOLE_SHARED} PROPERTIES DEBUG_POSTFIX "d" IMPORT_PREFIX "lib")
+set_target_properties(${WORMHOLE_SHARED} PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
 
-add_executable(${PROJECT_NAME} main.cpp)
-target_link_libraries(${PROJECT_NAME} ${TUBUS_STATIC} ${WORMHOLE_OBJECT})
+add_library(${WORMHOLE_STATIC} STATIC $<TARGET_OBJECTS:${WORMHOLE_SHARED}>)
+set_target_properties(${WORMHOLE_STATIC} PROPERTIES DEBUG_POSTFIX "d")
+set_target_properties(${WORMHOLE_STATIC} PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
 
+add_executable(${PROJECT_NAME} main.cpp $<TARGET_OBJECTS:${WORMHOLE_SHARED}>)
+target_link_libraries(${PROJECT_NAME} ${TUBUS_STATIC})
 set_target_properties(${PROJECT_NAME} PROPERTIES DEBUG_POSTFIX "d")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall -fPIC -fvisibility=hidden")
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)
-    target_link_libraries(${PROJECT_NAME} Threads::Threads Boost::system Boost::thread Boost::filesystem Boost::program_options)
+    target_link_libraries(${PROJECT_NAME} Threads::Threads Boost::system Boost::program_options)
+    target_link_libraries(${WORMHOLE_SHARED} Boost::system)
 endif()
 
-if(APPLE AND Boost_USE_STATIC_LIBS)
+if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
+    target_link_libraries(${WORMHOLE_SHARED} Boost::system)
 endif()
 
 if(NOT WORMHOLE_SKIP_INSTALL)
+    # install executable
     if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
         install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> CONFIGURATIONS "Debug" "RelWithDebInfo" DESTINATION ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
@@ -73,17 +117,37 @@ if(NOT WORMHOLE_SKIP_INSTALL)
     else()
         install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${PROJECT_NAME}/${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_BINDIR})
     endif()
+
+    # install library
+    install(TARGETS ${WORMHOLE_STATIC} DESTINATION ${WORMHOLE_INSTALL_LIBDIR})
+    install(TARGETS ${WORMHOLE_SHARED} DESTINATION ${WORMHOLE_INSTALL_LIBDIR})
+
+    include(CMakePackageConfigHelpers)
+
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/wormhole-config-version.cmake"
+        VERSION "${CMAKE_PROJECT_VERSION}"
+        COMPATIBILITY AnyNewerVersion)
+
+    install(FILES ${HEADERS} DESTINATION ${WORMHOLE_INSTALL_INCLUDEDIR}/${PROJECT_NAME})
+    configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/wormhole-config.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/wormhole-config.cmake"
+        INSTALL_DESTINATION ${WORMHOLE_INSTALL_CMAKEDIR}
+        PATH_VARS WORMHOLE_INSTALL_CMAKEDIR_REVERSE WORMHOLE_INSTALL_INCLUDEDIR WORMHOLE_INSTALL_LIBDIR)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/wormhole-config.cmake" "${CMAKE_CURRENT_BINARY_DIR}/wormhole-config-version.cmake" DESTINATION ${WORMHOLE_INSTALL_CMAKEDIR})
+    if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+        install(FILES $<TARGET_PDB_FILE:${WORMHOLE_SHARED}> CONFIGURATIONS "Debug" "RelWithDebInfo" DESTINATION ${WORMHOLE_INSTALL_LIBDIR})
+    endif()
 endif()
 
 if(BUILD_TESTING)
     set(TESTS_NAME wormhole_ut)
-    add_executable(${TESTS_NAME} tests/logger.cpp tests/reactor.cpp tests/wormhole.cpp)
-    target_link_libraries(${TESTS_NAME} ${TUBUS_STATIC} ${WORMHOLE_OBJECT})
+    add_executable(${TESTS_NAME} tests/logger.cpp tests/io.cpp tests/wormhole.cpp)
+    target_link_libraries(${TESTS_NAME} ${WORMHOLE_STATIC} ${TUBUS_STATIC})
 
     set_target_properties(${TESTS_NAME} PROPERTIES DEBUG_POSTFIX "d")
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        target_link_libraries(${TESTS_NAME} Threads::Threads Boost::system Boost::thread Boost::filesystem Boost::unit_test_framework)
+        target_link_libraries(${TESTS_NAME} Threads::Threads Boost::system Boost::unit_test_framework)
     endif()
 
     enable_testing()

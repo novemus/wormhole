@@ -9,7 +9,6 @@
  */
 
 #include "wormhole.h"
-#include "reactor.h"
 #include "logger.h"
 #include <buffer.h>
 #include <channel.h>
@@ -24,7 +23,7 @@ class tcp : public std::enable_shared_from_this<tcp>
     typedef std::function<void(const boost::system::error_code&)> callback;
     typedef std::function<void(const boost::system::error_code&, size_t)> io_callback;
 
-    reactor_ptr m_reactor;
+    boost::asio::io_context& m_io;
     boost::asio::ip::tcp::socket m_socket;
     std::list<std::pair<tubus::mutable_buffer, io_callback>> m_rq;
     std::list<std::pair<tubus::const_buffer, io_callback>> m_wq;
@@ -36,13 +35,13 @@ class tcp : public std::enable_shared_from_this<tcp>
 
         std::for_each(m_wq.begin(), m_wq.end(), [this, error](const auto& item)
         {
-            m_reactor->io().post(std::bind(item.second, error, 0));
+            m_io.post(std::bind(item.second, error, 0));
         });
         m_wq.clear();
 
         std::for_each(m_rq.begin(), m_rq.end(), [this, error](const auto& item)
         {
-            m_reactor->io().post(std::bind(item.second, error, 0));
+            m_io.post(std::bind(item.second, error, 0));
         });
         m_rq.clear();
     }
@@ -95,7 +94,7 @@ class tcp : public std::enable_shared_from_this<tcp>
 
 public:
 
-    tcp(reactor_ptr reactor) : m_reactor(reactor), m_socket(m_reactor->io())
+    tcp(boost::asio::io_context& io) : m_io(io), m_socket(io)
     {
     }
 
@@ -211,7 +210,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
     friend class importer;
     friend class exporter;
 
-    reactor_ptr m_reactor;
+    boost::asio::io_context& m_io;
     tubus::channel_ptr m_tunnel;
     udp_endpoint m_gateway;
     udp_endpoint m_faraway;
@@ -419,29 +418,21 @@ class engine : public router, public std::enable_shared_from_this<engine>
 
 public:
 
-    engine(const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
-        : m_reactor(std::make_shared<reactor>())
-        , m_tunnel(tubus::create_channel(m_reactor->io(), secret))
+    engine(boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
+        : m_io(io)
+        , m_tunnel(tubus::create_channel(io, secret))
         , m_gateway(gateway)
         , m_faraway(faraway)
         , m_top(std::numeric_limits<uint32_t>::max())
     {
     }
 
-    void employ() noexcept(false) override
-    {
-        m_reactor->execute();
-    }
-
     void cancel() noexcept(true) override
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_tunnel->shutdown([reactor = m_reactor](const boost::system::error_code& error)
+        m_tunnel->shutdown([](const boost::system::error_code& error)
         {
             if (error && error != boost::asio::error::interrupted && error != boost::asio::error::in_progress)
                 _err_ << error.message();
-
-            reactor->terminate();
         });
     }
 };
@@ -452,17 +443,16 @@ class importer : public engine
 
 public:
 
-    importer(const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
-        : engine(gateway, faraway, secret)
-        , m_server(m_reactor->io(), server)
+    importer(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
+        : engine(io, gateway, faraway, secret)
+        , m_server(io, server)
     {
         m_server.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
     }
 
-    void employ() noexcept(false) override
+    void launch() noexcept(true) override
     {
         connect_tunnel();
-        engine::employ();
     }
 
     void cancel() noexcept(true) override
@@ -507,7 +497,7 @@ private:
 
         _inf_ << "accepting client " << id;
 
-        auto client = std::make_shared<tcp>(m_reactor);
+        auto client = std::make_shared<tcp>(m_io);
         m_bunch.emplace(id, client);
 
         std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(shared_from_this());
@@ -548,16 +538,15 @@ class exporter : public engine
 
 public:
 
-    exporter(const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
-        : engine(gateway, faraway, secret)
+    exporter(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
+        : engine(io, gateway, faraway, secret)
         , m_server(server)
     {
     }
 
-    void employ() noexcept(false) override
+    void launch() noexcept(true) override
     {
         accept_tunnel();
-        engine::employ();
     }
 
 private:
@@ -596,7 +585,7 @@ private:
 
             _inf_ << "connecting client " << id;
 
-            auto client = std::make_shared<tcp>(m_reactor);
+            auto client = std::make_shared<tcp>(m_io);
             m_bunch.emplace(id, client);
             
             std::weak_ptr<engine> weak = shared_from_this();
@@ -630,14 +619,14 @@ private:
     }
 };
 
-router_ptr create_exporter(const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false)
+router_ptr create_exporter(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false)
 {
-    return std::make_shared<exporter>(server, gateway, faraway, secret);
+    return std::make_shared<exporter>(io, server, gateway, faraway, secret);
 }
 
-router_ptr create_importer(const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false)
+router_ptr create_importer(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false)
 {
-    return std::make_shared<importer>(server, gateway, faraway, secret);
+    return std::make_shared<importer>(io, server, gateway, faraway, secret);
 }
 
 }

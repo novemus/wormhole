@@ -13,9 +13,11 @@ cd ~
 git clone --recurse-submodules https://github.com/novemus/wormhole.git
 cd ~/wormhole
 cmake -B ./build [-DBOOST_ROOT=...]
-cmake --build ./build --target wormhole [wormhole_ut]
+cmake --build ./build --target wormhole [wormhole_shared] [wormhole_static] [wormhole_ut]
 cmake --build ./build --target install
 ```
+
+To build libraries, specify the *wormhole_static* and *wormhole_shared* targets.
 
 ## Using
 
@@ -38,6 +40,10 @@ wormhole --purpose=import --service=<ip:port> --gateway=<ip:port> --faraway=<ip:
 `--faraway` - endpoint of the transport tunnel on the remote public interface: "ip:port"
 
 `--obscure` - pre-shared key to obscure the transport tunnel: "64-bit-number"
+
+## Library
+
+The `wormhole` library API is described in the [wormhole.h](https://github.com/novemus/wormhole/blob/master/wormhole.h) header.
 
 ## Bugs and improvements
 

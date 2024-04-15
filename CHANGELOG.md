@@ -1,8 +1,8 @@
 # Change Log
 
-## 1.2.0 (March 30, 2024)
+## 1.2.0 (April 15, 2024)
 
-- Migration to improved `tubus` library.
+- The `wormhole` library implementation.
 
 ## 1.1.1 (December 18, 2023)
 

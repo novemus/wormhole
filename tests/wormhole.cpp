@@ -8,16 +8,14 @@
  * 
  */
 
-#include <future>
-#include <iostream>
-#include <boost/shared_array.hpp>
+#include "../wormhole.h"
+#include "../logger.h"
+#include "../io.h"
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/test/unit_test.hpp>
-#include "../wormhole.h"
-#include "../logger.h"
 
 namespace {
 
@@ -75,14 +73,14 @@ protected:
 
 class tcp_echo_server
 {
-    boost::asio::io_service m_io;
+    boost::asio::io_service& m_io;
     boost::asio::ip::tcp::acceptor m_acceptor;
-    std::future<void> m_work;
 
 public:
 
-    tcp_echo_server(const boost::asio::ip::tcp::endpoint& ep)
-        : m_acceptor(m_io, ep)
+    tcp_echo_server(boost::asio::io_service& io, const boost::asio::ip::tcp::endpoint& ep)
+        : m_io(io)
+        , m_acceptor(io, ep)
     {
     }
 
@@ -94,27 +92,11 @@ public:
     void start()
     {
         accept();
-
-        m_work = std::async(std::launch::async, [this]()
-        {
-            m_io.run();
-        });
     }
 
     void stop()
     {
-        if (!m_io.stopped())
-            m_io.stop();
-
-        if (m_work.valid())
-            m_work.wait();
-
         m_acceptor.close();
-    }
-
-    boost::asio::io_service& io()
-    {
-        return m_io;
     }
 
 protected:
@@ -132,9 +114,9 @@ protected:
     }
 };
 
-std::shared_ptr<tcp_echo_server> create_tcp_server(const boost::asio::ip::tcp::endpoint& ep)
+std::shared_ptr<tcp_echo_server> create_tcp_server(boost::asio::io_service& io, const boost::asio::ip::tcp::endpoint& ep)
 {
-    return std::make_shared<tcp_echo_server>(ep);
+    return std::make_shared<tcp_echo_server>(io, ep);
 }
 
 const char HELLO_WORMHOLE[] = "Hello, Wormhold!";
@@ -151,23 +133,21 @@ BOOST_AUTO_TEST_CASE(hello_wormhole)
 {
     wormhole::log::set(wormhole::log::debug);
 
-    auto server = create_tcp_server(SERVER);
+    wormhole::asio_engine io;
+
+    auto server = create_tcp_server(io, SERVER);
     BOOST_REQUIRE_NO_THROW(server->start());
 
-    auto exporter = wormhole::create_exporter(SERVER, SERVER_GATEWAY, CLIENT_GATEWAY, 0);
-    auto exp = std::async(std::launch::async, [exporter]()
-    {
-        exporter->employ();
-    });
+    io.activate(3);
 
-    auto importer = wormhole::create_importer(PROXY, CLIENT_GATEWAY, SERVER_GATEWAY, 0);
-    auto imp = std::async(std::launch::async, [importer]()
-    {
-        importer->employ();
-    });
+    auto exporter = wormhole::create_exporter(io, SERVER, SERVER_GATEWAY, CLIENT_GATEWAY, 0);
+    BOOST_REQUIRE_NO_THROW(exporter->launch());
 
-    boost::asio::ip::tcp::socket client1(server->io(), boost::asio::ip::tcp::v4());
-    boost::asio::ip::tcp::socket client2(server->io(), boost::asio::ip::tcp::v4());
+    auto importer = wormhole::create_importer(io, PROXY, CLIENT_GATEWAY, SERVER_GATEWAY, 0);
+    BOOST_REQUIRE_NO_THROW(importer->launch());
+
+    boost::asio::ip::tcp::socket client1(io, boost::asio::ip::tcp::v4());
+    boost::asio::ip::tcp::socket client2(io, boost::asio::ip::tcp::v4());
 
     BOOST_REQUIRE_NO_THROW(client1.connect(PROXY));
     BOOST_REQUIRE_NO_THROW(client2.connect(PROXY));
@@ -199,10 +179,7 @@ BOOST_AUTO_TEST_CASE(hello_wormhole)
     BOOST_REQUIRE_NO_THROW(client2.close());
 
     BOOST_REQUIRE_NO_THROW(importer->cancel());
-    BOOST_REQUIRE_NO_THROW(imp.wait());
-
     BOOST_REQUIRE_NO_THROW(exporter->cancel());
-    BOOST_REQUIRE_NO_THROW(exp.wait());
 
     BOOST_REQUIRE_NO_THROW(server->stop());
 }

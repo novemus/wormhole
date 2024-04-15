@@ -88,11 +88,13 @@ int main(int argc, char *argv[])
 
         _inf_ << "starting wormhole for purpose=" << purpose << " service=" << service << " gateway=" << gateway << " faraway=" << faraway << " obscure=" << (obscure != 0);
 
+        boost::asio::io_service io;
         auto router = purpose == "import"
-                    ? wormhole::create_importer(service, gateway, faraway, obscure)
-                    : wormhole::create_exporter(service, gateway, faraway, obscure);
+                    ? wormhole::create_importer(io, service, gateway, faraway, obscure)
+                    : wormhole::create_exporter(io, service, gateway, faraway, obscure);
 
-        router->employ();
+        router->launch();
+        io.run();
     }
     catch (const std::exception& e)
     {

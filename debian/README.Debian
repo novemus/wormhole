@@ -1,13 +1,13 @@
 wormhole for Debian
 =================
 
-This package contains the 'wormhole' network tool.
+This package contains the 'wormhole' network utility.
 
-The 'wormhole' tool provides the ability to make UDP tunnel to remote
+The 'wormhole' utility provides the ability to make UDP tunnel to remote
 machine and forward a remote TCP service to a local interface
 with optional ability to obfuscate the channel protocol by
 a pre-shared key.
 
 https://github.com/novemus/wormhole
 
- -- Novemus Band <nineletters@mail.ru>  Tue, 26 Mar 2024 21:50:00 +0300
+ -- Novemus Band <nineletters@mail.ru>  Tue, 15 April 2024 23:27:00 +0300

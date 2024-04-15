@@ -12,5 +12,27 @@ Architecture: any
 Multi-Arch: foreign
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Description: The tool for tunneling TCP applications via UDP
- The 'wormhole' tool provides ability to forward a remote TCP
+ The 'wormhole' tool provides the ability to forward a remote TCP
+ service to a local interface via UDP tunnel.
+
+Package: libwormhole
+Section: libs
+Architecture: any
+Multi-Arch: same
+Depends: libtubus (>= 1.2), ${misc:Depends}, ${shlibs:Depends}
+Description: Runtime of the 'wormhole' library
+ The 'wormhole' library provides the ability to forward a remote TCP
+ service to a local interface via UDP tunnel.
+
+Package: libwormhole-dev
+Section: libdevel
+Architecture: any
+Multi-Arch: same
+Depends: libwormhole (= ${binary:Version}),
+         libtubus-dev (>= 1.2),
+         libboost-dev (>= 1.81),
+         ${misc:Depends},
+         ${shlibs:Depends}
+Description: Development files of the 'wormhole' library
+ The 'wormhole' library provides the ability to forward a remote TCP
  service to a local interface via UDP tunnel.

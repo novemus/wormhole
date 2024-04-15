@@ -13,9 +13,8 @@
 #include <stdio.h>
 #include <mutex>
 #include <regex>
+#include <filesystem>
 #include <sys/types.h>
-#include <boost/filesystem.hpp>
-#include <boost/thread/thread.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 
 #if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
@@ -111,7 +110,7 @@ line::line(severity sev, const char* func, const char* file, int line) noexcept(
         stream << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << level << ": ";
         if (log::level() > severity::info)
         {
-            auto name = boost::filesystem::path(file).filename().string();
+            auto name = std::filesystem::path(file).filename().string();
             stream << "[" << func << " in " << name << ":" << line << "] ";
         }
     }
