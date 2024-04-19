@@ -71,7 +71,7 @@ protected:
     }
 };
 
-class tcp_echo_server
+class tcp_echo_server : public std::enable_shared_from_this<tcp_echo_server>
 {
     boost::asio::io_service& m_io;
     boost::asio::ip::tcp::acceptor m_acceptor;
@@ -104,12 +104,12 @@ protected:
     void accept()
     {
         auto session = std::make_shared<tcp_echo_session>(m_io);
-        m_acceptor.async_accept(session->socket(), [this, session](const boost::system::error_code &error)
+        m_acceptor.async_accept(session->socket(), [self = shared_from_this(), session](const boost::system::error_code &error)
         {
             if (!error)
                 session->start();
 
-            accept();
+            self->accept();
         });
     }
 };
