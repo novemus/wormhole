@@ -8,13 +8,13 @@
  * 
  */
 
-#include "../io.h"
+#include "../executor.h"
 #include <boost/test/unit_test.hpp>
 #include <future>
 
-BOOST_AUTO_TEST_CASE(io_attached)
+BOOST_AUTO_TEST_CASE(executor_produce)
 {
-    wormhole::asio_engine io;
+    wormhole::executor io;
 
     std::promise<void> p1;
     std::future<void> f1 = p1.get_future();
@@ -33,7 +33,7 @@ BOOST_AUTO_TEST_CASE(io_attached)
     BOOST_CHECK(f1.wait_for(std::chrono::milliseconds(10)) == std::future_status::timeout);
     BOOST_CHECK(f2.wait_for(std::chrono::milliseconds(10)) == std::future_status::timeout);
 
-    BOOST_REQUIRE_NO_THROW(io.activate(1, true));
+    BOOST_REQUIRE_NO_THROW(io.produce(1));
 
     BOOST_CHECK(f1.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready);
     BOOST_CHECK(f2.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready);
@@ -48,9 +48,9 @@ BOOST_AUTO_TEST_CASE(io_attached)
     BOOST_CHECK(f3.wait_for(std::chrono::milliseconds(10)) == std::future_status::timeout);
 }
 
-BOOST_AUTO_TEST_CASE(io_detached)
+BOOST_AUTO_TEST_CASE(executor_operate)
 {
-    wormhole::asio_engine io;
+    wormhole::executor io;
 
     std::promise<void> p1;
     std::future<void> f1 = p1.get_future();
@@ -69,7 +69,7 @@ BOOST_AUTO_TEST_CASE(io_detached)
     BOOST_CHECK(f1.wait_for(std::chrono::milliseconds(10)) == std::future_status::timeout);
     BOOST_CHECK(f2.wait_for(std::chrono::milliseconds(10)) == std::future_status::timeout);
 
-    BOOST_REQUIRE_NO_THROW(io.activate(1, false));
+    BOOST_REQUIRE_NO_THROW(io.operate(1));
 
     BOOST_REQUIRE_NO_THROW(f1.get());
     BOOST_REQUIRE_NO_THROW(f2.get());
@@ -81,5 +81,5 @@ BOOST_AUTO_TEST_CASE(io_detached)
         p3.set_value();
     });
 
-    BOOST_CHECK(f3.wait_for(std::chrono::milliseconds(10)) == std::future_status::timeout);
+    BOOST_REQUIRE_NO_THROW(f3.get());
 }

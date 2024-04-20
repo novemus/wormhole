@@ -9,12 +9,14 @@
  */
 
 #include "logger.h"
-#include <stdexcept>
-#include <stdio.h>
+#include "executor.h"
 #include <mutex>
 #include <regex>
+#include <future>
+#include <memory>
 #include <filesystem>
 #include <sys/types.h>
+#include <boost/asio.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 
 #if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
@@ -42,11 +44,14 @@ uint64_t gettid()
 
 namespace wormhole { namespace log {
 
-int         g_out = dup(1);
-int         g_err = dup(2);
-FILE*       g_file = nullptr;
-severity    g_level = severity::info;
-std::mutex  g_mutex;
+const int STDOUT_FD = dup(1);
+const int STDERR_FD = dup(2);
+
+std::once_flag     g_flag;
+wormhole::executor g_writer;
+FILE*              g_file = nullptr;
+severity           g_level = severity::none;
+std::mutex         g_mutex;
 
 std::ostream& operator<<(std::ostream& out, severity level)
 {
@@ -99,34 +104,48 @@ severity level() noexcept(true)
     return g_level;
 }
 
-line::line(severity sev, const char* func, const char* file, int line) noexcept(true) 
-    : std::ostream(nullptr)
-    , level(sev <= log::level() ? sev : severity::none)
+line::line()
 {
-    if (level != severity::none)
-    {
-        rdbuf(stream.rdbuf());
+    std::ostream::rdbuf(nullptr);
+}
 
-        stream << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << level << ": ";
-        if (log::level() > severity::info)
-        {
-            auto name = std::filesystem::path(file).filename().string();
-            stream << "[" << func << " in " << name << ":" << line << "] ";
-        }
+line::line(severity kind, const char* func, const char* file, int line)
+{
+    *this << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << kind << ": ";
+    if (log::level() > severity::info)
+    {
+        auto name = std::filesystem::path(file).filename().string();
+        *this << "[" << func << " in " << name << ":" << line << "] ";
     }
 }
 
-line::~line() noexcept(true)
+line::~line()
 {
-    if (level != severity::none)
+    if (std::ostream::rdbuf())
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        std::cout << stream.rdbuf() << std::endl;
+        g_writer.post([line = str()]()
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            std::cout << line << std::endl;
+        });
     }
 }
 
 void set(severity level, const std::string& file) noexcept(false)
 {
+    std::call_once(g_flag, []()
+    {
+        g_writer.operate(1);
+    });
+
+    // wait for writing pended lines
+    auto promise = std::make_shared<std::promise<void>>();
+    g_writer.post([promise]()
+    {
+        promise->set_value();
+    });
+    promise->get_future().wait();
+
     fflush(stdout);
     fflush(stderr);
 
@@ -155,8 +174,8 @@ void set(severity level, const std::string& file) noexcept(false)
         fclose(g_file);
         g_file = nullptr;
 
-        dup2(g_out, 1);
-        dup2(g_err, 2);
+        dup2(STDOUT_FD, 1);
+        dup2(STDERR_FD, 2);
     }
 }
 

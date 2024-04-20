@@ -45,22 +45,19 @@ enum severity
 LOGGER_CLASS_DECLSPEC std::ostream& operator<<(std::ostream& out, severity level);
 LOGGER_CLASS_DECLSPEC std::istream& operator>>(std::istream& in, severity& level);
 
-struct line : public std::ostream
+struct line : public std::stringstream
 {
-    LOGGER_CLASS_DECLSPEC line(severity sev, const char* func, const char* file, int line) noexcept(true);
-    LOGGER_CLASS_DECLSPEC ~line() noexcept(true);
-
-private:
-
-    severity level;
-    std::stringstream stream;
+    LOGGER_CLASS_DECLSPEC line();
+    LOGGER_CLASS_DECLSPEC line(severity kind, const char* func, const char* file, int line);
+    LOGGER_CLASS_DECLSPEC ~line() override;
 };
 
 LOGGER_CLASS_DECLSPEC void set(severity level, const std::string& file = "") noexcept(false);
+LOGGER_CLASS_DECLSPEC severity level() noexcept(true);
 
 }}
 
-#define MAKE_LOG_LINE(severity) wormhole::log::line(severity, __FUNCTION__, __FILE__, __LINE__)
+#define MAKE_LOG_LINE(kind) (kind <= wormhole::log::level() ? wormhole::log::line(kind, __FUNCTION__, __FILE__, __LINE__) : wormhole::log::line())
 
 #define _ftl_ MAKE_LOG_LINE(wormhole::log::fatal)
 #define _err_ MAKE_LOG_LINE(wormhole::log::error)

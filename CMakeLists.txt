@@ -11,7 +11,7 @@ include(GNUInstallDirs)
 
 add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
 
-set(HEADERS io.h logger.h wormhole.h)
+set(HEADERS executor.h logger.h wormhole.h)
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     add_definitions(
         -D_CRT_NO_VA_START_VALIDATION
@@ -141,7 +141,7 @@ endif()
 
 if(BUILD_TESTING)
     set(TESTS_NAME wormhole_ut)
-    add_executable(${TESTS_NAME} tests/logger.cpp tests/io.cpp tests/wormhole.cpp)
+    add_executable(${TESTS_NAME} tests/logger.cpp tests/executor.cpp tests/wormhole.cpp)
     target_link_libraries(${TESTS_NAME} ${WORMHOLE_STATIC} ${TUBUS_STATIC})
 
     set_target_properties(${TESTS_NAME} PROPERTIES DEBUG_POSTFIX "d")

@@ -40,6 +40,8 @@ BOOST_AUTO_TEST_CASE(stdlog)
     _dbg_ << "line " << 5;
     _trc_ << "line " << 6;
 
+    wormhole::log::set(wormhole::log::none);
+
     std::string text = out.str();
     out.clear();
     std::cout.rdbuf(coutbuf);
@@ -59,7 +61,7 @@ BOOST_AUTO_TEST_CASE(filelog)
     _dbg_ << "line " << 5;
     _trc_ << "line " << 6;
 
-    wormhole::log::set(wormhole::log::info);
+    wormhole::log::set(wormhole::log::none);
 
     std::ifstream file("log.txt");
     std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());

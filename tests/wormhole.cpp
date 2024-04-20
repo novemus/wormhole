@@ -10,7 +10,7 @@
 
 #include "../wormhole.h"
 #include "../logger.h"
-#include "../io.h"
+#include "../executor.h"
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -133,12 +133,12 @@ BOOST_AUTO_TEST_CASE(hello_wormhole)
 {
     wormhole::log::set(wormhole::log::debug);
 
-    wormhole::asio_engine io;
+    wormhole::executor io;
 
     auto server = create_tcp_server(io, SERVER);
     BOOST_REQUIRE_NO_THROW(server->start());
 
-    io.activate(3);
+    io.operate(3);
 
     auto exporter = wormhole::create_exporter(io, SERVER, SERVER_GATEWAY, CLIENT_GATEWAY, 0);
     BOOST_REQUIRE_NO_THROW(exporter->launch());
