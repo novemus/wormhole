@@ -98,7 +98,7 @@ int main(int argc, char *argv[])
     }
     catch (const std::exception& e)
     {
-        std::cerr << e.what() << std::endl;
+        _ftl_ << e.what();
         return 1;
     }
 

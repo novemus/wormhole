@@ -15,6 +15,7 @@
 #include <list>
 #include <map>
 #include <boost/asio.hpp>
+#include <boost/date_time/posix_time/posix_time_types.hpp>
 
 namespace wormhole {
 
@@ -211,6 +212,9 @@ class engine : public router, public std::enable_shared_from_this<engine>
     friend class exporter;
 
     boost::asio::io_context& m_io;
+    boost::asio::deadline_timer m_timer;
+    boost::posix_time::ptime m_start;
+    uint64_t m_secret;
     tubus::channel_ptr m_tunnel;
     udp_endpoint m_gateway;
     udp_endpoint m_faraway;
@@ -416,10 +420,47 @@ class engine : public router, public std::enable_shared_from_this<engine>
 
     virtual void notify_client(uint32_t id) = 0;
 
+    void delay()
+    {
+        static const boost::posix_time::seconds connection_timeout(30);
+        static const boost::posix_time::seconds reconnect_timeout(2);
+
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        if (boost::posix_time::second_clock::universal_time() - m_start > connection_timeout)
+        {
+            _err_ << "can't create tunnel";
+            return;
+        }
+
+        m_tunnel = tubus::create_channel(m_io, m_secret);
+
+        std::weak_ptr<engine> weak = std::static_pointer_cast<engine>(shared_from_this());
+        m_timer.expires_from_now(reconnect_timeout);
+        m_timer.async_wait([weak](const boost::system::error_code& error)
+        {
+            auto ptr = weak.lock();
+            if (error)
+            {
+                _err_ << error.message();
+
+                if (ptr)
+                    ptr->cancel();
+            }
+            else if (ptr)
+            {
+                ptr->launch();
+            }
+        });
+    }
+
 public:
 
     engine(boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
         : m_io(io)
+        , m_timer(io)
+        , m_start(boost::posix_time::second_clock::universal_time())
+        , m_secret(secret)
         , m_tunnel(tubus::create_channel(io, secret))
         , m_gateway(gateway)
         , m_faraway(faraway)
@@ -429,11 +470,17 @@ public:
 
     void cancel() noexcept(true) override
     {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
         m_tunnel->shutdown([](const boost::system::error_code& error)
         {
             if (error && error != boost::asio::error::interrupted && error != boost::asio::error::in_progress)
                 _err_ << error.message();
         });
+
+        boost::system::error_code ec;
+        for (auto& tcp : m_bunch)
+            tcp.second->socket().cancel(ec);
     }
 };
 
@@ -452,22 +499,9 @@ public:
 
     void launch() noexcept(true) override
     {
-        connect_tunnel();
-    }
+        std::unique_lock<std::mutex> lock(m_mutex);
 
-    void cancel() noexcept(true) override
-    {
-        boost::system::error_code ec;
-        m_server.cancel(ec);
-        engine::cancel();
-    }
-
-private:
-
-    void connect_tunnel()
-    {
         std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(shared_from_this());
-
         m_tunnel->open(m_gateway);
         m_tunnel->connect(m_faraway, [weak](const boost::system::error_code& error)
         {
@@ -475,9 +509,14 @@ private:
             if (error)
             {
                 _err_ << error.message();
-                
+
                 if (ptr)
-                    ptr->cancel();
+                {
+                    if (error.value() == boost::asio::error::connection_refused)
+                        ptr->delay();
+                    else
+                        ptr->cancel();
+                }
             }
             else if (ptr)
             {
@@ -489,9 +528,24 @@ private:
         });
     }
 
+    void cancel() noexcept(true) override
+    {
+        engine::cancel();
+
+        std::unique_lock<std::mutex> lock(m_mutex);
+        boost::system::error_code ec;
+        m_server.cancel(ec);
+        m_server.close(ec);
+    }
+
+private:
+
     void accept_client()
     {
         std::unique_lock<std::mutex> lock(m_mutex);
+
+        if (!m_server.is_open())
+            return;
 
         uint32_t id = ++m_top;
 
@@ -546,15 +600,9 @@ public:
 
     void launch() noexcept(true) override
     {
-        accept_tunnel();
-    }
+        std::unique_lock<std::mutex> lock(m_mutex);
 
-private:
-
-    void accept_tunnel()
-    {
         std::weak_ptr<engine> weak = shared_from_this();
-
         m_tunnel->open(m_gateway);
         m_tunnel->accept(m_faraway, [weak](const boost::system::error_code& error)
         {
@@ -564,7 +612,12 @@ private:
                 _err_ << error.message();
 
                 if (ptr)
-                    ptr->cancel();
+                {
+                    if (error.value() == boost::asio::error::connection_refused)
+                        ptr->delay();
+                    else
+                        ptr->cancel();
+                }
             }
             else if (ptr)
             {
@@ -574,6 +627,8 @@ private:
             }
         });
     }
+
+private:
 
     void notify_client(uint32_t id) override
     {
@@ -587,7 +642,7 @@ private:
 
             auto client = std::make_shared<tcp>(m_io);
             m_bunch.emplace(id, client);
-            
+
             std::weak_ptr<engine> weak = shared_from_this();
             client->async_connect(m_server, [weak, client, id](const boost::system::error_code& error)
             {

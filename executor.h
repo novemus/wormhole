@@ -52,7 +52,6 @@ public:
 
     ~executor()
     {
-        boost::asio::io_context::stop();
         m_work.reset();
         for(auto& thread : m_pool)
         {

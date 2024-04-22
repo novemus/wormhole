@@ -16,6 +16,8 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/test/unit_test.hpp>
+#include <mutex>
+#include <set>
 
 namespace {
 
@@ -75,6 +77,8 @@ class tcp_echo_server : public std::enable_shared_from_this<tcp_echo_server>
 {
     boost::asio::io_service& m_io;
     boost::asio::ip::tcp::acceptor m_acceptor;
+    std::set<std::shared_ptr<tcp_echo_session>> m_sessions;
+    std::mutex m_mutex;
 
 public:
 
@@ -96,21 +100,33 @@ public:
 
     void stop()
     {
-        m_acceptor.close();
+        std::lock_guard<std::mutex> lock(m_mutex);
+
+        boost::system::error_code ec;
+        m_acceptor.cancel(ec);
+        m_acceptor.close(ec);
+
+        for(auto& session : m_sessions)
+            session->socket().cancel(ec);
     }
 
 protected:
 
     void accept()
     {
-        auto session = std::make_shared<tcp_echo_session>(m_io);
-        m_acceptor.async_accept(session->socket(), [self = shared_from_this(), session](const boost::system::error_code &error)
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_acceptor.is_open())
         {
-            if (!error)
-                session->start();
+            auto session = std::make_shared<tcp_echo_session>(m_io);
+            m_sessions.emplace(session);
+            m_acceptor.async_accept(session->socket(), [self = shared_from_this(), session](const boost::system::error_code &error)
+            {
+                if (!error)
+                    session->start();
 
-            self->accept();
-        });
+                self->accept();
+            });
+        }
     }
 };
 
