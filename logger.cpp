@@ -48,10 +48,10 @@ const int STDOUT_FD = dup(1);
 const int STDERR_FD = dup(2);
 
 std::once_flag     g_flag;
-wormhole::executor g_writer;
 FILE*              g_file = nullptr;
 severity           g_level = severity::none;
 std::mutex         g_mutex;
+wormhole::executor g_writer;
 
 std::ostream& operator<<(std::ostream& out, severity level)
 {

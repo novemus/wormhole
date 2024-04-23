@@ -138,8 +138,8 @@ std::shared_ptr<tcp_echo_server> create_tcp_server(boost::asio::io_service& io, 
 const char HELLO_WORMHOLE[] = "Hello, Wormhold!";
 const char WORMHOLE_HELLO[] = "Wormhold, Hello!";
 
-const boost::asio::ip::tcp::endpoint SERVER(boost::asio::ip::address::from_string("127.0.0.1"), 8765);
-const boost::asio::ip::tcp::endpoint PROXY(boost::asio::ip::address::from_string("127.0.0.1"), 5678);
+const boost::asio::ip::tcp::endpoint SERVER(boost::asio::ip::address::from_string("127.0.0.1"), 18765);
+const boost::asio::ip::tcp::endpoint PROXY(boost::asio::ip::address::from_string("127.0.0.1"), 15678);
 const boost::asio::ip::udp::endpoint SERVER_GATEWAY(boost::asio::ip::address::from_string("127.0.0.1"), 7777);
 const boost::asio::ip::udp::endpoint CLIENT_GATEWAY(boost::asio::ip::address::from_string("127.0.0.1"), 8888);
 

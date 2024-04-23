@@ -34,7 +34,8 @@ class executor : public boost::asio::io_context
         {
             boost::system::error_code code;
             boost::asio::io_context::run(code);
-            _err_ << code.message();
+            if (code)
+                _err_ << code.message();
         };
 
         for(size_t i = 0; i < (produce ? size - 1 : size); ++i)
