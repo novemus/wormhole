@@ -56,9 +56,9 @@ string(REGEX REPLACE "[^/\\]+" ".." WORMHOLE_INSTALL_CMAKEDIR_REVERSE ${WORMHOLE
 set(Boost_USE_STATIC_LIBS ON)
 
 if(BUILD_TESTING)
-    find_package(Boost 1.81 REQUIRED COMPONENTS system program_options unit_test_framework)
+    find_package(Boost REQUIRED COMPONENTS system program_options unit_test_framework)
 else()
-    find_package(Boost 1.81 REQUIRED COMPONENTS system program_options)
+    find_package(Boost REQUIRED COMPONENTS system program_options)
 endif()
 
 message(status "* Boost Version: ${Boost_VERSION}")
