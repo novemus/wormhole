@@ -1,3 +1,9 @@
+wormhole (1.2-2+deb12u3) unstable; urgency=low
+
+  * Build with default boost library.
+
+ -- Novemus Band <nineletters@mail.ru>  Fri, 31 May 2024 23:47:00 +0300
+
 wormhole (1.2-1+deb12u3) unstable; urgency=low
 
   * Initial debian package.

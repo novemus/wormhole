@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.2.1 (May 31, 2024)
+
+- Build with default boost library.
+
 ## 1.2.0 (April 15, 2024)
 
 - The `wormhole` library implementation.
