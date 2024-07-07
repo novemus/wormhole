@@ -1,6 +1,6 @@
 message("***** wormhole *****")
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16)
 
 project(wormhole)
 project(${PROJECT_NAME} VERSION 1.2)
@@ -22,6 +22,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         -D_SILENCE_CXX17_ALLOCATOR_VOID_DEPRECATION_WARNING
         -D_SILENCE_CXX17_OLD_ALLOCATOR_MEMBERS_DEPRECATION_WARNING
     )
+    set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO RELEASE)
     set(WORMHOLE_INSTALL_LIBDIR ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_LIBDIR})
     set(WORMHOLE_INSTALL_CMAKEDIR ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_LIBDIR}/cmake)
     set(WORMHOLE_INSTALL_INCLUDEDIR ${PROJECT_NAME}-${${PROJECT_NAME}_VERSION}/${CMAKE_INSTALL_INCLUDEDIR})
@@ -81,7 +82,7 @@ if(NOT PROJECT_IS_TOP_LEVEL)
 endif()
 
 add_library(${WORMHOLE_SHARED} SHARED logger.cpp wormhole.cpp)
-target_link_libraries(${WORMHOLE_SHARED} ${TUBUS_SHARED})
+target_link_libraries(${WORMHOLE_SHARED} PRIVATE ${TUBUS_SHARED})
 target_compile_definitions(${WORMHOLE_SHARED} PRIVATE WORMHOLE_EXPORTS)
 set_target_properties(${WORMHOLE_SHARED} PROPERTIES DEBUG_POSTFIX "d" IMPORT_PREFIX "lib")
 set_target_properties(${WORMHOLE_SHARED} PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
@@ -91,15 +92,15 @@ set_target_properties(${WORMHOLE_STATIC} PROPERTIES DEBUG_POSTFIX "d")
 set_target_properties(${WORMHOLE_STATIC} PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
 
 add_executable(${PROJECT_NAME} main.cpp $<TARGET_OBJECTS:${WORMHOLE_SHARED}>)
-target_link_libraries(${PROJECT_NAME} ${TUBUS_STATIC})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${TUBUS_STATIC} Boost::program_options)
 set_target_properties(${PROJECT_NAME} PROPERTIES DEBUG_POSTFIX "d")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall -fPIC -fvisibility=hidden")
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)
-    target_link_libraries(${PROJECT_NAME} Threads::Threads Boost::system Boost::program_options)
-    target_link_libraries(${WORMHOLE_SHARED} Boost::system)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads Boost::system)
+    target_link_libraries(${WORMHOLE_SHARED} PRIVATE Boost::system)
 endif()
 
 if(NOT WORMHOLE_SKIP_INSTALL)
@@ -137,12 +138,12 @@ endif()
 if(BUILD_TESTING)
     set(TESTS_NAME wormhole_ut)
     add_executable(${TESTS_NAME} tests/logger.cpp tests/executor.cpp tests/wormhole.cpp)
-    target_link_libraries(${TESTS_NAME} ${WORMHOLE_STATIC} ${TUBUS_STATIC})
+    target_link_libraries(${TESTS_NAME} PRIVATE ${WORMHOLE_STATIC} ${TUBUS_STATIC} Boost::unit_test_framework)
 
     set_target_properties(${TESTS_NAME} PROPERTIES DEBUG_POSTFIX "d")
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        target_link_libraries(${TESTS_NAME} Threads::Threads Boost::system Boost::unit_test_framework)
+        target_link_libraries(${TESTS_NAME} PRIVATE Threads::Threads Boost::system)
     endif()
 
     enable_testing()

@@ -1,3 +1,3 @@
-usr/include
-usr/lib/*/*/*.a
-usr/lib/*/cmake/*/*.cmake
+opt/wormhole/*/include
+opt/wormhole/*/lib/*/*.a
+opt/wormhole/*/lib/*/cmake/*.cmake
