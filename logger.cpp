@@ -44,14 +44,18 @@ uint64_t gettid()
 
 namespace wormhole { namespace log {
 
-const int STDOUT_FD = dup(1);
-const int STDERR_FD = dup(2);
+namespace
+{
+    const int STDOUT_FD = dup(1);
+    const int STDERR_FD = dup(2);
 
-std::once_flag     g_flag;
-FILE*              g_file = nullptr;
-severity           g_level = severity::none;
-std::mutex         g_mutex;
-wormhole::executor g_writer;
+    std::once_flag     g_flag;
+    std::string        g_path;
+    FILE*              g_file = nullptr;
+    severity           g_level = severity::none;
+    std::mutex         g_mutex;
+    wormhole::executor g_writer;
+}
 
 std::ostream& operator<<(std::ostream& out, severity level)
 {
@@ -154,6 +158,11 @@ void set(severity level, const std::string& file) noexcept(false)
 
     if (!file.empty())
     {
+        if (g_path == file)
+            return;
+
+        g_path = file;
+
         if (g_file)
         {
             fclose(g_file);
@@ -172,6 +181,8 @@ void set(severity level, const std::string& file) noexcept(false)
     else if (g_file)
     {
         fclose(g_file);
+
+        g_path.clear();
         g_file = nullptr;
 
         dup2(STDOUT_FD, 1);
