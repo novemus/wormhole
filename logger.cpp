@@ -154,29 +154,33 @@ void set(severity level, const std::string& file) noexcept(false)
     fflush(stderr);
 
     std::lock_guard<std::mutex> lock(g_mutex);
+
+    if (level == g_level && file == g_path)
+        return;
+
     g_level = level;
 
     if (!file.empty())
     {
-        if (g_path == file)
-            return;
-
-        g_path = file;
-
-        if (g_file)
+        if (file != g_path)
         {
-            fclose(g_file);
-            g_file = nullptr;
+            g_path = file;
+
+            if (g_file)
+            {
+                fclose(g_file);
+                g_file = nullptr;
+            }
+
+            auto path = std::regex_replace(file, std::regex("%p"), std::to_string(getpid()));
+
+            g_file = fopen(path.c_str(), "a");
+            if(!g_file)
+                throw std::runtime_error("can't open log file");
+
+            dup2(fileno(g_file), 1);
+            dup2(fileno(g_file), 2);
         }
-
-        auto path = std::regex_replace(file, std::regex("%p"), std::to_string(getpid()));
-
-        g_file = fopen(path.c_str(), "a");
-        if(!g_file)
-            throw std::runtime_error("can't open log file");
-
-        dup2(fileno(g_file), 1);
-        dup2(fileno(g_file), 2);
     }
     else if (g_file)
     {
@@ -188,6 +192,8 @@ void set(severity level, const std::string& file) noexcept(false)
         dup2(STDOUT_FD, 1);
         dup2(STDERR_FD, 2);
     }
+    
+    std::cout << "********** " <<  boost::posix_time::to_iso_string(boost::posix_time::microsec_clock::local_time()) << " " << g_level << " " << getpid() << " **********" << std::endl;
 }
 
 }}
