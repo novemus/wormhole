@@ -3,7 +3,7 @@
 *.d
 *.o
 obj/**
-tubus
+src/tubus
 tubus.exe
 config.json
 build/**

@@ -1,3 +1,0 @@
-opt/wormhole/*/include
-opt/wormhole/*/lib/*/*.a
-opt/wormhole/*/lib/*/cmake/*.cmake
