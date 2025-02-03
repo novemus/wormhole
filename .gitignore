@@ -2,9 +2,4 @@
 .cache/**
 *.d
 *.o
-obj/**
-src/tubus
-tubus.exe
-config.json
 build/**
-*.log

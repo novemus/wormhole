@@ -8,8 +8,8 @@
  * 
  */
 
-#include "logger.h"
-#include "executor.h"
+#include <wormhole/logger.h>
+#include <wormhole/executor.h>
 #include <mutex>
 #include <regex>
 #include <future>
@@ -119,7 +119,7 @@ line::line(severity kind, const char* func, const char* file, int line)
     if (log::level() > severity::info)
     {
         auto name = std::filesystem::path(file).filename().string();
-        *this << "[" << func << " in " << name << ":" << line << "] ";
+        *this << "[" << func << " at " << name << ":" << line << "] ";
     }
 }
 

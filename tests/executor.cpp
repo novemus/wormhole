@@ -8,7 +8,7 @@
  * 
  */
 
-#include "../executor.h"
+#include <wormhole/executor.h>
 #include <boost/test/unit_test.hpp>
 #include <future>
 

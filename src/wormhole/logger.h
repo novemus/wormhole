@@ -10,22 +10,7 @@
 
 #pragma once
 
-#ifdef _MSC_VER
-#define LOGGER_CLASS_EXPORT_DECLSPEC __declspec(dllexport)
-#define LOGGER_CLASS_IMPORT_DECLSPEC
-#endif // _MSC_VER
-
-#ifdef __GNUC__
-#define LOGGER_CLASS_EXPORT_DECLSPEC __attribute__ ((visibility("default")))
-#define LOGGER_CLASS_IMPORT_DECLSPEC 
-#endif
-
-#ifdef WORMHOLE_EXPORTS
-#define LOGGER_CLASS_DECLSPEC LOGGER_CLASS_EXPORT_DECLSPEC
-#else
-#define LOGGER_CLASS_DECLSPEC LOGGER_CLASS_IMPORT_DECLSPEC
-#endif
-
+#include <wormhole/export.h>
 #include <iostream>
 #include <sstream>
 
@@ -42,18 +27,18 @@ enum severity
     trace
 };
 
-LOGGER_CLASS_DECLSPEC std::ostream& operator<<(std::ostream& out, severity level);
-LOGGER_CLASS_DECLSPEC std::istream& operator>>(std::istream& in, severity& level);
+LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& out, severity level);
+LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& in, severity& level);
 
 struct line : public std::stringstream
 {
-    LOGGER_CLASS_DECLSPEC line();
-    LOGGER_CLASS_DECLSPEC line(severity kind, const char* func, const char* file, int line);
-    LOGGER_CLASS_DECLSPEC ~line() override;
+    LIBWORMHOLE_EXPORT line();
+    LIBWORMHOLE_EXPORT line(severity kind, const char* func, const char* file, int line);
+    LIBWORMHOLE_EXPORT ~line() override;
 };
 
-LOGGER_CLASS_DECLSPEC void set(severity level, const std::string& file = "") noexcept(false);
-LOGGER_CLASS_DECLSPEC severity level() noexcept(true);
+LIBWORMHOLE_EXPORT void set(severity level, const std::string& file = "") noexcept(false);
+LIBWORMHOLE_EXPORT severity level() noexcept(true);
 
 }}
 

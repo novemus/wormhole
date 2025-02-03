@@ -10,22 +10,7 @@
 
 #pragma once
 
-#ifdef _MSC_VER
-#define ROUTER_CLASS_EXPORT_DECLSPEC __declspec(dllexport)
-#define ROUTER_CLASS_IMPORT_DECLSPEC
-#endif // _MSC_VER
-
-#ifdef __GNUC__
-#define ROUTER_CLASS_EXPORT_DECLSPEC __attribute__ ((visibility("default")))
-#define ROUTER_CLASS_IMPORT_DECLSPEC 
-#endif
-
-#ifdef WORMHOLE_EXPORTS
-#define ROUTER_CLASS_DECLSPEC ROUTER_CLASS_EXPORT_DECLSPEC
-#else
-#define ROUTER_CLASS_DECLSPEC ROUTER_CLASS_IMPORT_DECLSPEC
-#endif
-
+#include <wormhole/export.h>
 #include <boost/asio.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -35,7 +20,7 @@ namespace wormhole {
 typedef boost::asio::ip::udp::endpoint udp_endpoint;
 typedef boost::asio::ip::tcp::endpoint tcp_endpoint;
 
-struct ROUTER_CLASS_DECLSPEC router
+struct LIBWORMHOLE_EXPORT router
 {
     virtual ~router() {}
     virtual void launch() noexcept(true) = 0;
@@ -44,7 +29,7 @@ struct ROUTER_CLASS_DECLSPEC router
 
 typedef std::shared_ptr<router> router_ptr;
 
-ROUTER_CLASS_DECLSPEC router_ptr create_exporter(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false);
-ROUTER_CLASS_DECLSPEC router_ptr create_importer(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false);
+LIBWORMHOLE_EXPORT router_ptr create_exporter(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false);
+LIBWORMHOLE_EXPORT router_ptr create_importer(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false);
 
 }

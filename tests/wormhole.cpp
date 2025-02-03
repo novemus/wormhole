@@ -8,9 +8,9 @@
  * 
  */
 
-#include "../wormhole.h"
-#include "../logger.h"
-#include "../executor.h"
+#include <wormhole/wormhole.h>
+#include <wormhole/logger.h>
+#include <wormhole/executor.h>
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -147,8 +147,6 @@ const boost::asio::ip::udp::endpoint CLIENT_GATEWAY(boost::asio::ip::address::fr
 
 BOOST_AUTO_TEST_CASE(hello_wormhole)
 {
-    wormhole::log::set(wormhole::log::debug);
-
     wormhole::executor io;
 
     auto server = create_tcp_server(io, SERVER);

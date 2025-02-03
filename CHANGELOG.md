@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.2.2 (Feb 5, 2025)
+
+- CMake project structure reform.
+
 ## 1.2.1 (May 31, 2024)
 
 - Build with default boost library.

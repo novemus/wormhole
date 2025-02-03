@@ -6,29 +6,27 @@ The [wormhole](https://github.com/novemus/wormhole) is a tool for forwarding a r
 
 You can download [prebuild packages](https://github.com/novemus/wormhole/releases) for Debian and Windows platforms.
 
-Project depends on `boost` library. Clone repository and run the following commands:
+Project depends on `boost` and `tubus` library. Clone repository and run the following commands:
 
 ```console
-cd ~
-git clone --recurse-submodules https://github.com/novemus/wormhole.git
-cd ~/wormhole
-cmake -B ./build [-DBOOST_ROOT=...]
-cmake --build ./build --target wormhole [wormhole_shared] [wormhole_static] [wormhole_ut]
-cmake --build ./build --target install
+$ cd ~
+$ git clone --recurse-submodules https://github.com/novemus/wormhole.git
+$ cd ~/wormhole
+$ [CMAKE_PREFIX_PATH=...] cmake -B ./build -DCMAKE_BUILD_TYPE=Release [-DBOOST_ROOT=...] [-DBUILD_SHARED_LIBS=ON] [-DWORMHOLE_SKIP_TEST_RULES=OFF]
+$ cmake --build ./build --config Release --target all
+$ cmake --build ./build --target install
 ```
-
-To build libraries, specify the *wormhole_static* and *wormhole_shared* targets.
 
 ## Using
 
 Launch following command with your arguments on the host that exports some service:
 ```console
-wormhole --purpose=export --service=<ip:port> --gateway=<ip:port> --faraway=<ip:port> [--obscure=<64-bit-number>]
+$ wormhole --purpose=export --service=<ip:port> --gateway=<ip:port> --faraway=<ip:port> [--obscure=<64-bit-number>]
 ```
 
 Launch following command with your arguments on the host that imports alien service:
 ```console
-wormhole --purpose=import --service=<ip:port> --gateway=<ip:port> --faraway=<ip:port> [--obscure=<64-bit-number>]
+$ wormhole --purpose=import --service=<ip:port> --gateway=<ip:port> --faraway=<ip:port> [--obscure=<64-bit-number>]
 ```
 
 `--purpose` - how to use the application in relation to the specified service: "export|import"

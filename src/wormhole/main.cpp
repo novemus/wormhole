@@ -8,8 +8,8 @@
  * 
  */
 
-#include "wormhole.h"
-#include "logger.h"
+#include <wormhole/wormhole.h>
+#include <wormhole/logger.h>
 #include <regex>
 #include <iostream>
 #include <boost/program_options.hpp>

@@ -8,10 +8,10 @@
  * 
  */
 
-#include "wormhole.h"
-#include "logger.h"
-#include <buffer.h>
-#include <channel.h>
+#include <wormhole/wormhole.h>
+#include <wormhole/logger.h>
+#include <tubus/buffer.h>
+#include <tubus/channel.h>
 #include <list>
 #include <map>
 #include <boost/asio.hpp>
