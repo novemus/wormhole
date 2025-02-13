@@ -8,16 +8,16 @@
  * 
  */
 
-#include <wormhole/logger.h>
-#include <wormhole/executor.h>
-#include <mutex>
-#include <regex>
-#include <future>
-#include <memory>
-#include <filesystem>
-#include <sys/types.h>
-#include <boost/asio.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
+ #include <mutex>
+ #include <regex>
+ #include <future>
+ #include <memory>
+ #include <filesystem>
+ #include <sys/types.h>
+ #include <boost/asio.hpp>
+ #include <boost/asio/executor_work_guard.hpp>
+ #include <boost/date_time/posix_time/posix_time.hpp>
+ #include <wormhole/logger.h>
 
 #if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
 #include <sys/syscall.h>
@@ -49,12 +49,111 @@ namespace
     const int STDOUT_FD = dup(1);
     const int STDERR_FD = dup(2);
 
-    std::once_flag     g_flag;
-    std::string        g_path;
-    FILE*              g_file = nullptr;
-    severity           g_level = severity::none;
-    std::mutex         g_mutex;
-    wormhole::executor g_writer;
+    class sink
+    {
+        using executor_work_guard = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
+
+        std::string m_path;
+        FILE* m_file = nullptr;
+        severity m_scope = severity::none;
+        boost::asio::io_context m_io;
+        executor_work_guard m_work;
+        std::thread m_thread;
+        std::mutex m_mutex;
+
+    public:
+
+        sink() : m_work(boost::asio::make_work_guard(m_io))
+        {
+            m_thread = std::thread([&]()
+            {
+                boost::system::error_code ec;
+                m_io.run(ec);
+                if (ec)
+                    std::cout << "LOGGER: " << ec.message() << std::endl;
+            });
+        }
+
+        ~sink()
+        {
+            m_work.reset();
+            m_io.stop();
+            if (m_thread.joinable())
+                m_thread.join();
+        }
+
+        void set(severity scope, const std::string& path) noexcept(false)
+        {
+            // wait for writing pended lines
+            auto promise = std::make_shared<std::promise<void>>();
+            m_io.post([promise]()
+            {
+                promise->set_value();
+            });
+            promise->get_future().wait();
+
+            fflush(stdout);
+            fflush(stderr);
+
+            std::lock_guard<std::mutex> lock(m_mutex);
+
+            if (scope == m_scope && path == m_path)
+                return;
+
+            m_scope = scope;
+
+            if (!path.empty())
+            {
+                if (path != m_path)
+                {
+                    m_path = path;
+
+                    if (m_file)
+                    {
+                        fclose(m_file);
+                        m_file = nullptr;
+                    }
+
+                    auto file = std::regex_replace(path, std::regex("%p"), std::to_string(getpid()));
+
+                    m_file = fopen(file.c_str(), "a");
+                    if(!m_file)
+                        throw std::runtime_error("can't open log file");
+
+                    dup2(fileno(m_file), 1);
+                    dup2(fileno(m_file), 2);
+                }
+            }
+            else if (m_file)
+            {
+                fclose(m_file);
+
+                m_path.clear();
+                m_file = nullptr;
+
+                dup2(STDOUT_FD, 1);
+                dup2(STDERR_FD, 2);
+            }
+            
+            std::cout << "LOGGER: " <<  boost::posix_time::to_iso_string(boost::posix_time::microsec_clock::local_time()) << " " << m_scope << " " << getpid() << std::endl;
+        }
+
+        void put(const std::string& line)
+        {
+            m_io.post([this, line]()
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                std::cout << line << std::endl;
+            });
+        }
+
+        severity scope() noexcept(true) 
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            return m_scope;
+        }
+    }
+    g_log;
 }
 
 std::ostream& operator<<(std::ostream& out, severity level)
@@ -102,98 +201,35 @@ std::istream& operator>>(std::istream& in, severity& level)
     return in;
 }
 
-severity level() noexcept(true) 
+void line::start(std::stringstream& out, severity level, const char* func, const char* file, int line)
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    return g_level;
-}
-
-line::line()
-{
-    std::ostream::rdbuf(nullptr);
-}
-
-line::line(severity kind, const char* func, const char* file, int line)
-{
-    *this << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << kind << ": ";
-    if (log::level() > severity::info)
+    auto scope = g_log.scope();
+    if (level > scope)
     {
-        auto name = std::filesystem::path(file).filename().string();
-        *this << "[" << func << " at " << name << ":" << line << "] ";
+        out.std::ostream::rdbuf(nullptr);
     }
-}
-
-line::~line()
-{
-    if (std::ostream::rdbuf())
+    else 
     {
-        g_writer.post([line = str()]()
+        out << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << level << ": ";
+        if (scope > severity::info)
         {
-            std::lock_guard<std::mutex> lock(g_mutex);
-            std::cout << line << std::endl;
-        });
-    }
-}
-
-void set(severity level, const std::string& file) noexcept(false)
-{
-    std::call_once(g_flag, []()
-    {
-        g_writer.operate(1);
-    });
-
-    // wait for writing pended lines
-    auto promise = std::make_shared<std::promise<void>>();
-    g_writer.post([promise]()
-    {
-        promise->set_value();
-    });
-    promise->get_future().wait();
-
-    fflush(stdout);
-    fflush(stderr);
-
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    if (level == g_level && file == g_path)
-        return;
-
-    g_level = level;
-
-    if (!file.empty())
-    {
-        if (file != g_path)
-        {
-            g_path = file;
-
-            if (g_file)
-            {
-                fclose(g_file);
-                g_file = nullptr;
-            }
-
-            auto path = std::regex_replace(file, std::regex("%p"), std::to_string(getpid()));
-
-            g_file = fopen(path.c_str(), "a");
-            if(!g_file)
-                throw std::runtime_error("can't open log file");
-
-            dup2(fileno(g_file), 1);
-            dup2(fileno(g_file), 2);
+            auto name = std::filesystem::path(file).filename().string();
+            out << "[" << func << " at " << name << ":" << line << "] ";
         }
     }
-    else if (g_file)
+}
+
+void line::flush(std::stringstream& out)
+{
+    if (out.std::ostream::rdbuf())
     {
-        fclose(g_file);
-
-        g_path.clear();
-        g_file = nullptr;
-
-        dup2(STDOUT_FD, 1);
-        dup2(STDERR_FD, 2);
+        g_log.put(out.str());
     }
-    
-    std::cout << "********** " <<  boost::posix_time::to_iso_string(boost::posix_time::microsec_clock::local_time()) << " " << g_level << " " << getpid() << " **********" << std::endl;
+}
+
+void set(severity scope, const std::string& file) noexcept(false)
+{
+    g_log.set(scope, file);
 }
 
 }}

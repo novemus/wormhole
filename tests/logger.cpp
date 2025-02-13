@@ -38,12 +38,12 @@ BOOST_AUTO_TEST_CASE(stdlog)
     out.clear();
     std::cout.rdbuf(coutbuf);
 
-    std::regex pattern("\\*{10} \\d{8}T\\d{6}\\.\\d{1,6} INFO \\d+ \\*{10}\\n"
+    std::regex pattern("\\LOGGER: \\d{8}T\\d{6}\\.\\d{1,6} INFO \\d+\\n"
                        "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} INFO: line 1\\n"
                        "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} WARN: line 2\\n"
                        "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} ERROR: line 3\\n"
                        "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} FATAL: line 4\\n"
-                       "\\*{10} \\d{8}T\\d{6}\\.\\d{1,6} NONE \\d+ \\*{10}\\n");
+                       "\\LOGGER: \\d{8}T\\d{6}\\.\\d{1,6} NONE \\d+\\n");
 
     std::smatch match;
     BOOST_CHECK(std::regex_match(text, match, pattern));
@@ -65,11 +65,11 @@ BOOST_AUTO_TEST_CASE(filelog)
     std::ifstream file("log.txt");
     std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
-    std::regex pattern("\\*{10} \\d{8}T\\d{6}\\.\\d{1,6} INFO \\d+ \\*{10}\\n"
-                      "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} INFO: line 1\\n"
-                      "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} WARN: line 2\\n"
-                      "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} ERROR: line 3\\n"
-                      "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} FATAL: line 4\\n");
+    std::regex pattern("\\LOGGER: \\d{8}T\\d{6}\\.\\d{1,6} INFO \\d+\\n"
+                       "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} INFO: line 1\\n"
+                       "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} WARN: line 2\\n"
+                       "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} ERROR: line 3\\n"
+                       "\\[\\d+\\] \\d{4}-\\w{2,3}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{1,6} FATAL: line 4\\n");
 
     std::smatch match;
     BOOST_CHECK(std::regex_match(text, match, pattern));

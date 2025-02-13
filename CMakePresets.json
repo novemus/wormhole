@@ -4,53 +4,53 @@
         {
             "name": "config-base",
             "hidden": true,
-            "displayName": "Basic Config",
+            "displayName": "Basic",
             "description": "Basic Configure Preset",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
                 "WORMHOLE_SKIP_TEST_RULES": "OFF",
                 "WORMHOLE_SKIP_INSTALL_RULES": "OFF",
                 "WORMHOLE_SKIP_PACKAGE_RULES": "OFF",
-                "Boost_USE_STATIC_LIBS": "ON",
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install"
             }
         },
         {
             "name": "windows-shared",
-            "displayName": "Shared Config",
+            "displayName": "Shared",
             "description": "Configure shared build context",
-            "binaryDir": "${sourceDir}/build/shared",
             "inherits": "config-base",
             "cacheVariables": {
-                "BUILD_SHARED_LIBS": "ON"
+                "BUILD_SHARED_LIBS": "ON",
+                "VCPKG_TARGET_TRIPLET": "x64-windows"
             },
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
                 "rhs": "Windows"
-            }
+            },
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
         },
         {
             "name": "windows-static",
-            "displayName": "Static Config",
+            "displayName": "Static",
             "description": "Configure static build context",
-            "binaryDir": "${sourceDir}/build/static",
             "inherits": "config-base",
             "cacheVariables": {
                 "BUILD_SHARED_LIBS": "OFF",
-                "CMAKE_STATIC_LIBRARY_SUFFIX_CXX": "-static.lib"
+                "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+                "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>"
             },
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
                 "rhs": "Windows"
-            }
+            },
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
         },
         {
             "name": "linux-shared-debug",
-            "displayName": "Shared Debug Config",
+            "displayName": "Shared (Debug)",
             "description": "Configure shared Debug build context",
-            "binaryDir": "${sourceDir}/build/shared-debug",
             "inherits": "config-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
@@ -64,9 +64,8 @@
         },
         {
             "name": "linux-shared-release",
-            "displayName": "Shared Release Config",
+            "displayName": "Shared (Release)",
             "description": "Configure shared Release build context",
-            "binaryDir": "${sourceDir}/build/shared-release",
             "inherits": "config-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
@@ -80,9 +79,8 @@
         },
         {
             "name": "linux-static-debug",
-            "displayName": "Static Debug Config",
+            "displayName": "Static (Debug)",
             "description": "Configure static Debug build context",
-            "binaryDir": "${sourceDir}/build/static-debug",
             "inherits": "config-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
@@ -96,9 +94,8 @@
         },
         {
             "name": "linux-static-release",
-            "displayName": "Static Release Config",
+            "displayName": "Static (Release)",
             "description": "Configure static Release build context",
-            "binaryDir": "${sourceDir}/build/static-release",
             "inherits": "config-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
@@ -163,116 +160,75 @@
     ],
     "testPresets": [
         {
-            "name": "linux-static-release",
-            "configurePreset": "linux-static-release",
-            "displayName": "All",
-            "description": "All project tests",
-            "configuration": "Release",
+            "name": "test-base",
             "output": {
                 "outputOnFailure": true
             },
             "execution": {
                 "noTestsAction": "error",
                 "stopOnFailure": true
-            }
+            },
+            "hidden": true
+        },
+        {
+            "name": "linux-static-release",
+            "description": "All project tests",
+            "displayName": "Test",
+            "configurePreset": "linux-static-release",
+            "inherits": "test-base"
         },
         {
             "name": "linux-static-debug",
-            "configurePreset": "linux-static-debug",
-            "displayName": "All",
             "description": "All project tests",
-            "configuration": "Debug",
-            "output": {
-                "outputOnFailure": true
-            },
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": true
-            }
+            "displayName": "Test",
+            "configurePreset": "linux-static-debug",
+            "inherits": "test-base"
         },
         {
             "name": "linux-shared-release",
-            "configurePreset": "linux-shared-release",
-            "displayName": "All",
             "description": "All project tests",
-            "configuration": "Release",
-            "output": {
-                "outputOnFailure": true
-            },
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": true
-            }
+            "displayName": "Test",
+            "configurePreset": "linux-shared-release",
+            "inherits": "test-base"
         },
         {
             "name": "linux-shared-debug",
-            "configurePreset": "linux-shared-debug",
-            "displayName": "All",
             "description": "All project tests",
-            "configuration": "Debug",
-            "output": {
-                "outputOnFailure": true
-            },
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": true
-            }
+            "displayName": "Test",
+            "configurePreset": "linux-shared-debug",
+            "inherits": "test-base"
         },
         {
             "name": "windows-static-release",
             "configurePreset": "windows-static",
-            "displayName": "Release",
+            "displayName": "Test (Release)",
             "description": "All project tests",
             "configuration": "Release",
-            "output": {
-                "outputOnFailure": true
-            },
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": true
-            }
+            "inherits": "test-base"
         },
         {
             "name": "windows-static-debug",
             "configurePreset": "windows-static",
-            "displayName": "Debug",
+            "displayName": "Test (Debug)",
             "description": "All project tests",
             "configuration": "Debug",
-            "output": {
-                "outputOnFailure": true
-            },
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": true
-            }
+            "inherits": "test-base"
         },
         {
             "name": "windows-shared-release",
             "configurePreset": "windows-shared",
-            "displayName": "Release",
+            "displayName": "Test (Release)",
             "description": "All project tests",
             "configuration": "Release",
-            "output": {
-                "outputOnFailure": true
-            },
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": true
-            }
+            "inherits": "test-base"
         },
         {
             "name": "windows-shared-debug",
             "configurePreset": "windows-shared",
-            "displayName": "Debug",
+            "displayName": "Test (Debug)",
             "description": "All project tests",
             "configuration": "Debug",
-            "output": {
-                "outputOnFailure": true
-            },
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": true
-            }
+            "inherits": "test-base"
         }
     ],
     "packagePresets": [

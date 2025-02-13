@@ -57,7 +57,6 @@ generate_export_header(${LIBWORMHOLE} EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DI
 
 set(SOURCES ${CMAKE_CURRENT_BINARY_DIR}/export_header/wormhole/${EXPORT_FILE}
     src/wormhole/export.h
-    src/wormhole/executor.h
     src/wormhole/logger.h
     src/wormhole/wormhole.h
     src/wormhole/logger.cpp
@@ -66,12 +65,14 @@ set(SOURCES ${CMAKE_CURRENT_BINARY_DIR}/export_header/wormhole/${EXPORT_FILE}
 
 set(HEADERS ${CMAKE_CURRENT_BINARY_DIR}/export_header/wormhole/${EXPORT_FILE}
     src/wormhole/export.h
-    src/wormhole/executor.h
     src/wormhole/logger.h
     src/wormhole/wormhole.h
     )
 
 if(MSVC)
+    set(CMAKE_STATIC_LIBRARY_PREFIX "lib")
+    set(CMAKE_SHARED_LIBRARY_PREFIX "lib")
+    set(CMAKE_STATIC_LIBRARY_SUFFIX "-static.lib")
     add_definitions(-D_WIN32_WINNT=0x0601)
 endif()
 
@@ -110,7 +111,7 @@ target_include_directories(${LIBWORMHOLE} PUBLIC
         PRIVATE ${Boost_INCLUDE_DIRS})
 
 set_target_properties(${BINWORMHOLE} PROPERTIES DEBUG_POSTFIX "d")
-set_target_properties(${LIBWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" OUTPUT_NAME ${PROJECT_NAME})
+set_target_properties(${LIBWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" OUTPUT_NAME ${PROJECT_NAME} IMPORT_PREFIX "lib")
 set_target_properties(${LIBWORMHOLE} PROPERTIES SOVERSION ${PROJECT_VERSION_MAJOR} VERSION ${PROJECT_VERSION})
 
 ########## install ##########
@@ -203,7 +204,7 @@ endif()
 
 if(NOT WORMHOLE_SKIP_TEST_RULES)
     set(WORMHOLE_TEST wormhole_ut)
-    add_executable(${WORMHOLE_TEST} tests/logger.cpp tests/executor.cpp tests/wormhole.cpp)
+    add_executable(${WORMHOLE_TEST} tests/logger.cpp tests/wormhole.cpp)
     target_link_libraries(${WORMHOLE_TEST} PRIVATE wormhole::libwormhole tubus::libtubus Boost::unit_test_framework)
     target_compile_definitions(${WORMHOLE_TEST} PUBLIC "$<$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>:LIBWORMHOLE_STATIC_DEFINE>")
 

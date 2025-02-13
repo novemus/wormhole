@@ -10,7 +10,7 @@
 
 #include <wormhole/wormhole.h>
 #include <wormhole/logger.h>
-#include <wormhole/executor.h>
+#include <boost/asio/thread_pool.hpp>
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -147,12 +147,16 @@ const boost::asio::ip::udp::endpoint CLIENT_GATEWAY(boost::asio::ip::address::fr
 
 BOOST_AUTO_TEST_CASE(hello_wormhole)
 {
-    wormhole::executor io;
+    boost::asio::io_context io;
+    boost::asio::thread_pool pool;
+
+    auto work = boost::asio::make_work_guard(io);
+    boost::asio::post(pool, [&io] { io.run(); });
+    boost::asio::post(pool, [&io] { io.run(); });
+    boost::asio::post(pool, [&io] { io.run(); });
 
     auto server = create_tcp_server(io, SERVER);
     BOOST_REQUIRE_NO_THROW(server->start());
-
-    io.operate(3);
 
     auto exporter = wormhole::create_exporter(io, SERVER, SERVER_GATEWAY, CLIENT_GATEWAY, 0);
     BOOST_REQUIRE_NO_THROW(exporter->launch());
@@ -196,4 +200,7 @@ BOOST_AUTO_TEST_CASE(hello_wormhole)
     BOOST_REQUIRE_NO_THROW(exporter->cancel());
 
     BOOST_REQUIRE_NO_THROW(server->stop());
+
+    work.reset();
+    pool.join();
 }

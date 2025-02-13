@@ -32,17 +32,27 @@ LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& in, severity& level);
 
 struct line : public std::stringstream
 {
-    LIBWORMHOLE_EXPORT line();
-    LIBWORMHOLE_EXPORT line(severity kind, const char* func, const char* file, int line);
-    LIBWORMHOLE_EXPORT ~line() override;
+    line(severity level, const char* func, const char* file, int line)
+    {
+        line::start(*this, level, func, file, line);
+    }
+
+    ~line() override
+    { 
+        line::flush(*this);
+    }
+
+private:
+
+    LIBWORMHOLE_EXPORT static void start(std::stringstream& out, severity level, const char* func, const char* file, int line);
+    LIBWORMHOLE_EXPORT static void flush(std::stringstream& out);
 };
 
-LIBWORMHOLE_EXPORT void set(severity level, const std::string& file = "") noexcept(false);
-LIBWORMHOLE_EXPORT severity level() noexcept(true);
+LIBWORMHOLE_EXPORT void set(severity scope, const std::string& file = "") noexcept(false);
 
 }}
 
-#define MAKE_LOG_LINE(kind) (kind <= wormhole::log::level() ? wormhole::log::line(kind, __FUNCTION__, __FILE__, __LINE__) : wormhole::log::line())
+#define MAKE_LOG_LINE(level) (wormhole::log::line(level, __FUNCTION__, __FILE__, __LINE__))
 
 #define _ftl_ MAKE_LOG_LINE(wormhole::log::fatal)
 #define _err_ MAKE_LOG_LINE(wormhole::log::error)
