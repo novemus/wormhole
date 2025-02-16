@@ -10,101 +10,118 @@
             "cacheVariables": {
                 "WORMHOLE_SKIP_TEST_RULES": "OFF",
                 "WORMHOLE_SKIP_INSTALL_RULES": "OFF",
-                "WORMHOLE_SKIP_PACKAGE_RULES": "OFF",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install"
+                "WORMHOLE_SKIP_PACKAGE_RULES": "OFF"
             }
         },
         {
-            "name": "windows-shared",
-            "displayName": "Shared",
-            "description": "Configure shared build context",
+            "name": "windows-shared-debug",
+            "displayName": "Shared (Debug)",
+            "description": "Configure Debug shared build",
             "inherits": "config-base",
             "cacheVariables": {
                 "BUILD_SHARED_LIBS": "ON",
-                "VCPKG_TARGET_TRIPLET": "x64-windows"
+                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebugDLL",
+                "CMAKE_CONFIGURATION_TYPES": "Debug",
+                "CMAKE_BUILD_TYPE": "Debug"
             },
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
                 "rhs": "Windows"
             },
-            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "installDir": "${sourceParentDir}/install/x64"
         },
         {
-            "name": "windows-static",
-            "displayName": "Static",
-            "description": "Configure static build context",
+            "name": "windows-shared-release",
+            "displayName": "Shared (Release)",
+            "description": "Configure Release shared build",
+            "inherits": "windows-shared-debug",
+            "cacheVariables": {
+                "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDLL",
+                "CMAKE_CONFIGURATION_TYPES": "Release",
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "windows-static-debug",
+            "displayName": "Static (Debug)",
+            "description": "Configure Debug static build",
             "inherits": "config-base",
             "cacheVariables": {
                 "BUILD_SHARED_LIBS": "OFF",
                 "VCPKG_TARGET_TRIPLET": "x64-windows-static",
-                "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+                "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>",
+                "CMAKE_CONFIGURATION_TYPES": "Debug",
+                "CMAKE_BUILD_TYPE": "Debug"
             },
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
                 "rhs": "Windows"
             },
-            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "installDir": "${sourceParentDir}/install/x64-static"
         },
         {
-            "name": "linux-shared-debug",
-            "displayName": "Shared (Debug)",
-            "description": "Configure shared Debug build context",
-            "inherits": "config-base",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "BUILD_SHARED_LIBS": "ON"
-            },
-            "condition": {
-                "type": "equals",
-                "lhs": "${hostSystemName}",
-                "rhs": "Linux"
-            }
-        },
-        {
-            "name": "linux-shared-release",
-            "displayName": "Shared (Release)",
-            "description": "Configure shared Release build context",
-            "inherits": "config-base",
+            "name": "windows-static-release",
+            "displayName": "Static (Release)",
+            "description": "Configure Release static build",
+            "inherits": "windows-static-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "BUILD_SHARED_LIBS": "ON"
-            },
-            "condition": {
-                "type": "equals",
-                "lhs": "${hostSystemName}",
-                "rhs": "Linux"
-            }
-        },
-        {
-            "name": "linux-static-debug",
-            "displayName": "Static (Debug)",
-            "description": "Configure static Debug build context",
-            "inherits": "config-base",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "BUILD_SHARED_LIBS": "OFF"
-            },
-            "condition": {
-                "type": "equals",
-                "lhs": "${hostSystemName}",
-                "rhs": "Linux"
+                "CMAKE_CONFIGURATION_TYPES": "Release"
             }
         },
         {
             "name": "linux-static-release",
             "displayName": "Static (Release)",
-            "description": "Configure static Release build context",
+            "description": "Configure static Release build",
             "inherits": "config-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "BUILD_SHARED_LIBS": "OFF"
+                "BUILD_SHARED_LIBS": "OFF",
+                "CMAKE_BUILD_TYPE": "Release"
             },
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
                 "rhs": "Linux"
+            },
+            "installDir": "${sourceParentDir}/install/x64-static"
+        },
+        {
+            "name": "linux-static-debug",
+            "displayName": "Static (Debug)",
+            "description": "Configure static Debug build",
+            "inherits": "linux-static-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "linux-shared-release",
+            "displayName": "Shared (Release)",
+            "description": "Configure static Release build",
+            "inherits": "config-base",
+            "cacheVariables": {
+                "BUILD_SHARED_LIBS": "ON",
+                "CMAKE_BUILD_TYPE": "Release"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "installDir": "${sourceParentDir}/install/x64"
+        },
+        {
+            "name": "linux-shared-debug",
+            "displayName": "Shared (Debug)",
+            "description": "Configure static Debug build",
+            "inherits": "linux-shared-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
             }
         }
     ],
@@ -113,25 +130,25 @@
             "name": "windows-shared-debug",
             "displayName": "Debug",
             "configuration": "Debug",
-            "configurePreset": "windows-shared"
+            "configurePreset": "windows-shared-debug"
         },
         {
             "name": "windows-shared-release",
             "displayName": "Release",
             "configuration": "Release",
-            "configurePreset": "windows-shared"
+            "configurePreset": "windows-shared-release"
         },
         {
             "name": "windows-static-debug",
             "displayName": "Debug",
             "configuration": "Debug",
-            "configurePreset": "windows-static"
+            "configurePreset": "windows-static-debug"
         },
         {
             "name": "windows-static-release",
             "displayName": "Release",
             "configuration": "Release",
-            "configurePreset": "windows-static"
+            "configurePreset": "windows-static-release"
         },
         {
             "name": "linux-shared-debug",
@@ -200,7 +217,7 @@
         },
         {
             "name": "windows-static-release",
-            "configurePreset": "windows-static",
+            "configurePreset": "windows-static-release",
             "displayName": "Test (Release)",
             "description": "All project tests",
             "configuration": "Release",
@@ -208,7 +225,7 @@
         },
         {
             "name": "windows-static-debug",
-            "configurePreset": "windows-static",
+            "configurePreset": "windows-static-debug",
             "displayName": "Test (Debug)",
             "description": "All project tests",
             "configuration": "Debug",
@@ -216,7 +233,7 @@
         },
         {
             "name": "windows-shared-release",
-            "configurePreset": "windows-shared",
+            "configurePreset": "windows-shared-release",
             "displayName": "Test (Release)",
             "description": "All project tests",
             "configuration": "Release",
@@ -224,7 +241,7 @@
         },
         {
             "name": "windows-shared-debug",
-            "configurePreset": "windows-shared",
+            "configurePreset": "windows-shared-debug",
             "displayName": "Test (Debug)",
             "description": "All project tests",
             "configuration": "Debug",
@@ -255,7 +272,7 @@
                 "CPACK_DEBIAN_PACKAGE_MAINTAINER": "Community",
                 "CPACK_PACKAGE_DESCRIPTION_SUMMARY": "The tool for tunneling TCP streams via UDP",
                 "CPACK_PACKAGE_DESCRIPTION": "The 'wormhole' tool provides the ability to forward a TCP\nservice via UDP tunnel.",
-                "CPACK_COMPONENTS_ALL": "binary_files;bin_doc_files",
+                "CPACK_COMPONENTS_ALL": "binary_files;bin_deb_files",
                 "CPACK_DEBIAN_FILE_NAME": "DEB-DEFAULT",
                 "CPACK_DEBIAN_PACKAGE_SHLIBDEPS": "ON",
                 "CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS": "ON",
@@ -291,7 +308,7 @@
                 "CPACK_DEBIAN_PACKAGE_DEPENDS": "libtubus (>= 1.2)",
                 "CPACK_PACKAGE_DESCRIPTION_SUMMARY": "The 'wormhole' library runtime",
                 "CPACK_PACKAGE_DESCRIPTION": "The 'wormhole' library provides the ability to forward a TCP\nservice via UDP tunnel.",
-                "CPACK_COMPONENTS_ALL": "library_files;lib_doc_files",
+                "CPACK_COMPONENTS_ALL": "library_files;lib_deb_files",
                 "CPACK_DEBIAN_FILE_NAME": "DEB-DEFAULT",
                 "CPACK_DEBIAN_PACKAGE_SHLIBDEPS": "ON",
                 "CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS": "ON",
@@ -326,7 +343,7 @@
                 "CPACK_DEBIAN_PACKAGE_DEPENDS": "libboost-dev (>= 1.74) | libboost1.81-dev, libtubus-dev (>= 1.2), libwormhole (= 1.2.2-1)",
                 "CPACK_PACKAGE_DESCRIPTION_SUMMARY": "Development files of the 'wormhole' library",
                 "CPACK_PACKAGE_DESCRIPTION": "The 'wormhole' library provides the ability to forward a TCP\nservice via UDP tunnel.",
-                "CPACK_COMPONENTS_ALL": "archive_files;header_files;cmake_files;dev_doc_files",
+                "CPACK_COMPONENTS_ALL": "archive_files;header_files;cmake_files;dev_deb_files;dev_doc_files",
                 "CPACK_DEBIAN_FILE_NAME": "DEB-DEFAULT",
                 "CPACK_DEBIAN_PACKAGE_SHLIBDEPS": "ON",
                 "CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS": "ON",
@@ -341,7 +358,7 @@
             "name": "windows-archive",
             "displayName": "wormhole (ZIP)",
             "description": "Portable ZIP archive",
-            "configurePreset": "windows-static",
+            "configurePreset": "windows-static-release",
             "generators": [
                 "ZIP"
             ],
@@ -350,7 +367,7 @@
                 "Debug"
             ],
             "variables": {
-                "CPACK_COMPONENTS_ALL": "runtime_files;library_files;archive_files;header_files;cmake_files;lib_doc_files;pdb_files",
+                "CPACK_COMPONENTS_ALL": "runtime_files;library_files;archive_files;pdb_files;header_files;cmake_files;dev_doc_files",
                 "CPACK_ARCHIVE_COMPONENT_INSTALL": "ON",
                 "CPACK_COMPONENTS_ALL_IN_ONE_PACKAGE": "ON"
             },
@@ -366,7 +383,7 @@
             "steps": [
                 {
                     "type": "configure",
-                    "name": "windows-static"
+                    "name": "windows-static-release"
                 },
                 {
                     "type": "build",

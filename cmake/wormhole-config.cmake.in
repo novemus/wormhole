@@ -39,7 +39,5 @@ if(NOT TARGET wormhole::wormhole AND NOT TARGET wormhole::libwormhole)
     set(wormhole_BINRARY wormhole::wormhole)
 
     set(wormhole_FOUND ON)
-
-    unset(_build)
     unset(_type)
 endif()
