@@ -10,7 +10,7 @@ Project depends on `boost` and `tubus` library. Clone repository and run the fol
 
 ```console
 $ cd ~
-$ git clone --recurse-submodules https://github.com/novemus/wormhole.git
+$ git clone https://github.com/novemus/wormhole.git
 $ cd ~/wormhole
 $ [CMAKE_PREFIX_PATH=...] cmake -B ./build -DCMAKE_BUILD_TYPE=Release [-DBOOST_ROOT=...] [-DBUILD_SHARED_LIBS=ON] [-DWORMHOLE_SKIP_TEST_RULES=OFF]
 $ cmake --build ./build --config Release --target all
