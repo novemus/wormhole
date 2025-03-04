@@ -120,7 +120,7 @@ if(NOT WORMHOLE_SKIP_INSTALL_RULES AND NOT CMAKE_SKIP_INSTALL_RULES)
 
     write_basic_package_version_file(wormhole-config-version.cmake COMPATIBILITY SameMajorVersion)
 
-    install(TARGETS ${BINWORMHOLE} EXPORT wormhole_export RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT binary_files)
+    install(TARGETS ${BINWORMHOLE} RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT binary_files)
 
     install(TARGETS ${LIBWORMHOLE} EXPORT wormhole_export
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime_files

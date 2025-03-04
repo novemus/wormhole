@@ -10,7 +10,7 @@ macro(import_targets type)
     include("${CMAKE_CURRENT_LIST_DIR}/wormhole-${type}-targets.cmake")
 endmacro()
 
-if(NOT TARGET wormhole::wormhole AND NOT TARGET wormhole::libwormhole)
+if(NOT TARGET wormhole::libwormhole)
     set(_type "")
 
     if(DEFINED WORMHOLE_USE_SHARED_LIB)
@@ -36,7 +36,6 @@ if(NOT TARGET wormhole::wormhole AND NOT TARGET wormhole::libwormhole)
 
     get_target_property(wormhole_INCLUDE_DIRS wormhole::libwormhole INTERFACE_INCLUDE_DIRECTORIES)
     set(wormhole_LIBRARY wormhole::libwormhole)
-    set(wormhole_BINRARY wormhole::wormhole)
 
     set(wormhole_FOUND ON)
     unset(_type)
