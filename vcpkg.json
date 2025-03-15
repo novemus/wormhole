@@ -1,0 +1,11 @@
+{
+  "dependencies": [
+    "boost-system",
+    "boost-asio",
+    "boost-test",
+    "boost-program-options",
+    "boost-bind",
+    "boost-date-time"
+  ],
+  "builtin-baseline": "1de2026f28ead93ff1773e6e680387643e914ea1"
+}

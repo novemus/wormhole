@@ -13,7 +13,6 @@
 #include <regex>
 #include <iostream>
 #include <boost/program_options.hpp>
-#include <boost/lexical_cast.hpp>
 
 namespace boost { namespace asio { namespace ip {
 
