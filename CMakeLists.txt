@@ -22,9 +22,9 @@ if (NOT MSVC AND NOT BUILD_SHARED_LIBS)
 endif()
 
 if(NOT WORMHOLE_SKIP_TEST_RULES)
-    find_package(Boost 1.74...1.85 REQUIRED COMPONENTS system program_options unit_test_framework)
+    find_package(Boost 1.74...1.85 CONFIG REQUIRED COMPONENTS system program_options unit_test_framework)
 else()
-    find_package(Boost 1.74...1.85 REQUIRED COMPONENTS system program_options)
+    find_package(Boost 1.74...1.85 CONFIG REQUIRED COMPONENTS system program_options)
 endif()
 
 message("* Boost Version: ${Boost_VERSION}")
@@ -104,8 +104,10 @@ target_include_directories(${LIBWORMHOLE} PUBLIC
         PRIVATE "${Boost_INCLUDE_DIRS}")
 
 set_target_properties(${BINWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" COMPILE_FLAGS -DLIBWORMHOLE_STATIC_DEFINE)
+set_target_properties(${BINWORMHOLE} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 set_target_properties(${LIBWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" OUTPUT_NAME ${PROJECT_NAME} IMPORT_PREFIX "lib")
 set_target_properties(${LIBWORMHOLE} PROPERTIES SOVERSION ${PROJECT_VERSION_MAJOR} VERSION ${PROJECT_VERSION})
+set_target_properties(${LIBWORMHOLE} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
 ########## install ##########
 

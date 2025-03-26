@@ -31,7 +31,7 @@ if(NOT TARGET wormhole::libwormhole)
     check_required_components(wormhole)
 
     include(CMakeFindDependencyMacro)
-    find_dependency(Boost COMPONENTS system)
+    find_dependency(Boost CONFIG COMPONENTS system)
     find_dependency(tubus COMPONENTS libtubus)
 
     get_target_property(wormhole_INCLUDE_DIRS wormhole::libwormhole INTERFACE_INCLUDE_DIRECTORIES)
