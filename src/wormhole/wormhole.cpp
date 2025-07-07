@@ -13,6 +13,7 @@
 #include <tubus/buffer.h>
 #include <tubus/channel.h>
 #include <list>
+#include <queue>
 #include <map>
 #include <boost/asio.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
@@ -219,6 +220,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
     udp_endpoint m_gateway;
     udp_endpoint m_faraway;
     std::map<uint32_t, tcp_ptr> m_bunch;
+    std::queue<packet> m_queue;
     uint32_t m_top;
     std::mutex m_mutex;
 
@@ -289,8 +291,8 @@ class engine : public router, public std::enable_shared_from_this<engine>
             {
                 if (size > 0)
                     ptr->write_tunnel(id, data.slice(0, size));
-
-                ptr->read_client(id);
+                else
+                    ptr->read_client(id);
             }
         });
     }
@@ -335,6 +337,14 @@ class engine : public router, public std::enable_shared_from_this<engine>
     void write_tunnel(uint32_t id, const tubus::const_buffer& data)
     {
         packet pack(id, data);
+
+        std::unique_lock<std::mutex> lock(m_mutex);
+        if (m_tunnel->writable() < pack.size())
+        {
+            m_queue.push(pack);
+            return;
+        }
+
         std::weak_ptr<engine> weak = shared_from_this();
         m_tunnel->write(pack, [weak, pack](const boost::system::error_code& error, size_t size)
         {
@@ -352,14 +362,39 @@ class engine : public router, public std::enable_shared_from_this<engine>
             else if (size < pack.size())
             {
                 _err_ << "can't write packet, client=" << pack.id();
-                
+
                 if (ptr)
                 {
                     ptr->notify_client(pack.id());
                     ptr->cancel();
                 }
             }
+            else if (ptr)
+            {
+                ptr->awake_queue();
+            }
         });
+
+        if (data.size() > 0)
+        {
+            lock.unlock();
+            read_client(id);
+        }
+    }
+
+    void awake_queue()
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        if (m_queue.empty())
+            return;
+
+        auto pack = m_queue.front();
+        m_queue.pop();
+
+        lock.unlock();
+
+        write_tunnel(pack.id(), pack.payload());
     }
 
     void read_tunnel(uint32_t id, uint32_t size)
