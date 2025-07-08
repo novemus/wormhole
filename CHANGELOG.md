@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.2.3 (Jul 8, 2025)
+
+- Fix: prevent to flood transport tunnel.
+
 ## 1.2.2 (Feb 26, 2025)
 
 - The CMake project has been reorganized.

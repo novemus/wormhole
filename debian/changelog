@@ -1,3 +1,9 @@
+wormhole (1.2.3-1) unstable; urgency=low
+
+  * Fix: prevent to flood transport tunnel.
+
+ -- Novemus Band <nineletters@mail.ru>  Tue, 8 Jul 2025 19:36:00 +0300
+
 wormhole (1.2.2-1) unstable; urgency=low
 
   * The CMake project has been reorganized.

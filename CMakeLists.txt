@@ -4,7 +4,7 @@ message("***** wormhole ***** ")
 
 cmake_minimum_required(VERSION 3.21)
 
-project(wormhole VERSION 1.2.2 DESCRIPTION "The tool for tunneling TCP streams via UDP" LANGUAGES CXX)
+project(wormhole VERSION 1.2.3 DESCRIPTION "The tool for tunneling TCP streams via UDP" LANGUAGES CXX)
 
 option(WORMHOLE_USE_SHARED_LIB "Build shared library" ${BUILD_SHARED_LIBS})
 option(WORMHOLE_SKIP_TEST_RULES "Don't generate test rules" ON)
