@@ -37,13 +37,13 @@ class tcp : public std::enable_shared_from_this<tcp>
 
         std::for_each(m_wq.begin(), m_wq.end(), [this, error](const auto& item)
         {
-            m_io.post(std::bind(item.second, error, 0));
+            boost::asio::post(m_io, std::bind(item.second, error, 0));
         });
         m_wq.clear();
 
         std::for_each(m_rq.begin(), m_rq.end(), [this, error](const auto& item)
         {
-            m_io.post(std::bind(item.second, error, 0));
+            boost::asio::post(m_io, std::bind(item.second, error, 0));
         });
         m_rq.clear();
     }

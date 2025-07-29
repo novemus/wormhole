@@ -30,7 +30,7 @@ class tcp_echo_session : public std::enable_shared_from_this<tcp_echo_session>
 
 public:
 
-    tcp_echo_session(boost::asio::io_service& io)
+    tcp_echo_session(boost::asio::io_context& io)
         : m_socket(io)
     {
     }
@@ -75,14 +75,14 @@ protected:
 
 class tcp_echo_server : public std::enable_shared_from_this<tcp_echo_server>
 {
-    boost::asio::io_service& m_io;
+    boost::asio::io_context& m_io;
     boost::asio::ip::tcp::acceptor m_acceptor;
     std::set<std::shared_ptr<tcp_echo_session>> m_sessions;
     std::mutex m_mutex;
 
 public:
 
-    tcp_echo_server(boost::asio::io_service& io, const boost::asio::ip::tcp::endpoint& ep)
+    tcp_echo_server(boost::asio::io_context& io, const boost::asio::ip::tcp::endpoint& ep)
         : m_io(io)
         , m_acceptor(io, ep)
     {
@@ -130,18 +130,18 @@ protected:
     }
 };
 
-std::shared_ptr<tcp_echo_server> create_tcp_server(boost::asio::io_service& io, const boost::asio::ip::tcp::endpoint& ep)
+std::shared_ptr<tcp_echo_server> create_tcp_server(boost::asio::io_context& io, const boost::asio::ip::tcp::endpoint& ep)
 {
     return std::make_shared<tcp_echo_server>(io, ep);
 }
 
-const char HELLO_WORMHOLE[] = "Hello, Wormhold!";
-const char WORMHOLE_HELLO[] = "Wormhold, Hello!";
+const char HELLO_WORMHOLE[] = "Hello, Wormhole!";
+const char WORMHOLE_HELLO[] = "Wormhole, Hello!";
 
-const boost::asio::ip::tcp::endpoint SERVER(boost::asio::ip::address::from_string("127.0.0.1"), 18765);
-const boost::asio::ip::tcp::endpoint PROXY(boost::asio::ip::address::from_string("127.0.0.1"), 15678);
-const boost::asio::ip::udp::endpoint SERVER_GATEWAY(boost::asio::ip::address::from_string("127.0.0.1"), 7777);
-const boost::asio::ip::udp::endpoint CLIENT_GATEWAY(boost::asio::ip::address::from_string("127.0.0.1"), 8888);
+const boost::asio::ip::tcp::endpoint SERVER(boost::asio::ip::make_address("127.0.0.1"), 18765);
+const boost::asio::ip::tcp::endpoint PROXY(boost::asio::ip::make_address("127.0.0.1"), 15678);
+const boost::asio::ip::udp::endpoint SERVER_GATEWAY(boost::asio::ip::make_address("127.0.0.1"), 7777);
+const boost::asio::ip::udp::endpoint CLIENT_GATEWAY(boost::asio::ip::make_address("127.0.0.1"), 8888);
 
 }
 

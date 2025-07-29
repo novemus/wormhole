@@ -29,11 +29,11 @@ void validate(boost::any& result, const std::vector<std::string>& values, basic_
 
         std::smatch match;
         if (std::regex_search(url, match, std::regex("^(\\w+://)?([^/]+):(\\d+)?$")))
-            result = boost::any(basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[3].str())));
+            result = boost::any(basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[3].str()).begin()));
         else if (std::regex_search(url, match, std::regex("^(\\w+)://([^/]+).*$")))
-            result = boost::any(basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[1].str())));
+            result = boost::any(basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[1].str()).begin()));
         else
-            result = boost::any(basic_endpoint<proto>(*resolver.resolve(url)));
+            result = boost::any(basic_endpoint<proto>(*resolver.resolve(url, "0").begin()));
     }
     catch(const boost::system::system_error&)
     {
@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
 
         _inf_ << "starting wormhole for purpose=" << purpose << " service=" << service << " gateway=" << gateway << " faraway=" << faraway << " obscure=" << (obscure != 0);
 
-        boost::asio::io_service io;
+        boost::asio::io_context io;
         auto router = purpose == "import"
                     ? wormhole::create_importer(io, service, gateway, faraway, obscure)
                     : wormhole::create_exporter(io, service, gateway, faraway, obscure);

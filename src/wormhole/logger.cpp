@@ -67,10 +67,14 @@ namespace
         {
             m_thread = std::thread([&]()
             {
-                boost::system::error_code ec;
-                m_io.run(ec);
-                if (ec)
-                    std::cout << "LOGGER: " << ec.message() << std::endl;
+                try
+                {
+                    m_io.run();
+                }
+                catch(const std::exception& ex)
+                {
+                    std::cout << "LOGGER: " << ex.what() << std::endl;
+                }
             });
         }
 
@@ -86,7 +90,7 @@ namespace
         {
             // wait for writing pended lines
             auto promise = std::make_shared<std::promise<void>>();
-            m_io.post([promise]()
+            boost::asio::post(m_io, [promise]()
             {
                 promise->set_value();
             });
@@ -140,7 +144,7 @@ namespace
 
         void put(const std::string& line)
         {
-            m_io.post([this, line]()
+            boost::asio::post(m_io, [this, line]()
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 std::cout << line << std::endl;
