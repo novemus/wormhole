@@ -4,7 +4,7 @@ message("***** wormhole ***** ")
 
 cmake_minimum_required(VERSION 3.21)
 
-project(wormhole VERSION 1.2.3 DESCRIPTION "The tool for tunneling TCP streams via UDP" LANGUAGES CXX)
+project(wormhole VERSION 1.2.4 DESCRIPTION "The tool for tunneling TCP streams via UDP" LANGUAGES CXX)
 
 option(WORMHOLE_USE_SHARED_LIB "Build shared library" ${BUILD_SHARED_LIBS})
 option(WORMHOLE_SKIP_TEST_RULES "Don't generate test rules" ON)
@@ -32,7 +32,7 @@ message("* Boost Include Dirs: ${Boost_INCLUDE_DIRS}")
 message("* Boost Library Dirs: ${Boost_LIBRARY_DIRS}")
 message("* Boost Libraries: ${Boost_LIBRARIES}")
 
-find_package(tubus REQUIRED COMPONENTS libtubus)
+find_package(tubus 1.2.3 REQUIRED COMPONENTS libtubus)
 
 message("* tubus Version: ${tubus_VERSION}")
 message("* tubus Include Dirs: ${tubus_INCLUDE_DIRS}")

@@ -1,3 +1,9 @@
+wormhole (1.2.4-1) unstable; urgency=low
+
+  * Changed the minimal version of the 'tubus' dependency library.
+
+ -- Novemus Band <nineletters@mail.ru>  Thu, 4 Sep 2025 18:53:00 +0300
+
 wormhole (1.2.3-1) unstable; urgency=low
 
   * Fix: prevent to flood transport tunnel.
