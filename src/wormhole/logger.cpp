@@ -8,16 +8,15 @@
  * 
  */
 
- #include <mutex>
- #include <regex>
- #include <future>
- #include <memory>
- #include <filesystem>
- #include <sys/types.h>
- #include <boost/asio.hpp>
- #include <boost/asio/executor_work_guard.hpp>
- #include <boost/date_time/posix_time/posix_time.hpp>
- #include <wormhole/logger.h>
+#include <mutex>
+#include <regex>
+#include <memory>
+#include <fstream>
+#include <filesystem>
+#include <boost/asio.hpp>
+#include <boost/asio/executor_work_guard.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+#include <wormhole/logger.h>
 
 #if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
 #include <sys/syscall.h>
@@ -37,33 +36,24 @@ uint64_t gettid()
 #include <io.h>
 #define gettid() GetCurrentThreadId()
 #define getpid() GetCurrentProcessId()
-#define dup(handle) _dup(handle)
-#define dup2(src, dst) _dup2(src, dst)
-#define fileno(file) _fileno(file)
 #endif
 
 namespace wormhole { namespace log {
 
 namespace
 {
-    const int STDOUT_FD = dup(1);
-    const int STDERR_FD = dup(2);
-
     class sink
     {
         using executor_work_guard = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
 
-        std::string m_path;
-        FILE* m_file = nullptr;
-        severity m_scope = severity::none;
+        std::ofstream m_file;
         boost::asio::io_context m_io;
         executor_work_guard m_work;
         std::thread m_thread;
-        std::mutex m_mutex;
 
     public:
 
-        sink() : m_work(boost::asio::make_work_guard(m_io))
+        sink(const std::string& path) : m_work(boost::asio::make_work_guard(m_io))
         {
             m_thread = std::thread([&]()
             {
@@ -73,82 +63,80 @@ namespace
                 }
                 catch(const std::exception& ex)
                 {
-                    std::cout << "LOGGER: " << ex.what() << std::endl;
+                    std::cout << ex.what() << std::endl;
                 }
             });
+
+            if (!path.empty())
+            {
+                auto file = std::regex_replace(path, std::regex("%p"), std::to_string(getpid()));
+
+                m_file = std::ofstream(file.c_str(), std::ios_base::app);
+                if(!m_file.good())
+                    throw std::runtime_error("can't open log file");
+            }
         }
 
         ~sink()
         {
             m_work.reset();
-            m_io.stop();
+            
             if (m_thread.joinable())
                 m_thread.join();
+
+            if (m_file.is_open())
+                m_file.flush();
+            else
+                std::cout.flush();
         }
+
+        void append(const std::string& line)
+        {
+            boost::asio::post(m_io, [this, line]()
+            {
+                if (m_file.is_open())
+                    m_file << line << std::endl;
+                else
+                    std::cout << line << std::endl;
+            });
+        }
+    };
+
+    class logger
+    {
+        std::shared_ptr<sink> m_sink;
+        severity m_scope = severity::none;
+        std::string m_path;
+        std::mutex m_mutex;
+
+    public:
 
         void set(severity scope, const std::string& path) noexcept(false)
         {
-            // wait for writing pended lines
-            auto promise = std::make_shared<std::promise<void>>();
-            boost::asio::post(m_io, [promise]()
-            {
-                promise->set_value();
-            });
-            promise->get_future().wait();
-
-            fflush(stdout);
-            fflush(stderr);
-
             std::lock_guard<std::mutex> lock(m_mutex);
 
-            if (scope == m_scope && path == m_path)
-                return;
+            if (scope == severity::none)
+                m_sink.reset();
+            else if (path != m_path || !m_sink)
+                m_sink = std::make_shared<sink>(path);
+
+            if (m_sink && (path != m_path || scope != m_scope))
+            {
+                std::stringstream line;
+                line << "LOGGER: " <<  boost::posix_time::to_iso_string(boost::posix_time::microsec_clock::local_time()) << " " << scope << " " << getpid();
+                m_sink->append(line.str());
+            }
 
             m_scope = scope;
-
-            if (!path.empty())
-            {
-                if (path != m_path)
-                {
-                    m_path = path;
-
-                    if (m_file)
-                    {
-                        fclose(m_file);
-                        m_file = nullptr;
-                    }
-
-                    auto file = std::regex_replace(path, std::regex("%p"), std::to_string(getpid()));
-
-                    m_file = fopen(file.c_str(), "a");
-                    if(!m_file)
-                        throw std::runtime_error("can't open log file");
-
-                    dup2(fileno(m_file), 1);
-                    dup2(fileno(m_file), 2);
-                }
-            }
-            else if (m_file)
-            {
-                fclose(m_file);
-
-                m_path.clear();
-                m_file = nullptr;
-
-                dup2(STDOUT_FD, 1);
-                dup2(STDERR_FD, 2);
-            }
-            
-            std::cout << "LOGGER: " <<  boost::posix_time::to_iso_string(boost::posix_time::microsec_clock::local_time()) << " " << m_scope << " " << getpid() << std::endl;
+            m_path = path;
         }
 
         void put(const std::string& line)
         {
-            boost::asio::post(m_io, [this, line]()
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                std::cout << line << std::endl;
-            });
+            std::lock_guard<std::mutex> lock(m_mutex);
+
+            if (m_sink)
+                m_sink->append(line);
         }
 
         severity scope() noexcept(true) 
@@ -215,7 +203,7 @@ void line::start(std::stringstream& out, severity level, const char* func, const
     else 
     {
         out << "[" << gettid() << "] " << boost::posix_time::microsec_clock::local_time() << " " << level << ": ";
-        if (scope > severity::info)
+        if (scope == severity::trace)
         {
             auto name = std::filesystem::path(file).filename().string();
             out << "[" << func << " at " << name << ":" << line << "] ";
