@@ -53,6 +53,10 @@ add_library(${PROJECT_NAME}::${LIBWORMHOLE} ALIAS ${LIBWORMHOLE})
 
 generate_export_header(${LIBWORMHOLE} EXPORT_FILE_NAME export_header/wormhole/export.h)
 
+if (NOT BUILD_SHARED_LIBS)
+    target_compile_definitions(${LIBWORMHOLE} PRIVATE LIBWORMHOLE_STATIC_DEFINE)
+endif()
+
 set(SOURCES "${CMAKE_CURRENT_BINARY_DIR}/export_header/wormhole/export.h"
     src/wormhole/logger.h
     src/wormhole/wormhole.h
@@ -103,7 +107,7 @@ target_include_directories(${LIBWORMHOLE} PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export_header>"
         PRIVATE "${Boost_INCLUDE_DIRS}")
 
-set_target_properties(${BINWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" COMPILE_FLAGS -DLIBWORMHOLE_STATIC_DEFINE)
+set_target_properties(${BINWORMHOLE} PROPERTIES DEBUG_POSTFIX "d")
 set_target_properties(${BINWORMHOLE} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 set_target_properties(${LIBWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" OUTPUT_NAME ${PROJECT_NAME} IMPORT_PREFIX "lib")
 set_target_properties(${LIBWORMHOLE} PROPERTIES SOVERSION ${PROJECT_VERSION_MAJOR} VERSION ${PROJECT_VERSION})
@@ -154,17 +158,10 @@ if(NOT WORMHOLE_SKIP_INSTALL_RULES AND NOT CMAKE_SKIP_INSTALL_RULES)
             CONFIGURATIONS Debug RelWithDebInfo
             DESTINATION "${CMAKE_INSTALL_LIBDIR}"
             OPTIONAL)
-        if(BUILD_SHARED_LIBS)
-            install(FILES "$<TARGET_PDB_FILE:${LIBWORMHOLE}>" COMPONENT pdb_files
-                CONFIGURATIONS Debug RelWithDebInfo
-                DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-                OPTIONAL)
-        else()
-            install(FILES "$<TARGET_FILE_DIR:${LIBWORMHOLE}>/$<TARGET_FILE_PREFIX:${LIBWORMHOLE}>$<TARGET_FILE_BASE_NAME:${LIBWORMHOLE}>-static.pdb" COMPONENT pdb_files
-                CONFIGURATIONS Debug RelWithDebInfo
-                DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-                OPTIONAL)
-        endif()
+        install(FILES "$<TARGET_PDB_FILE:${LIBWORMHOLE}>" COMPONENT pdb_files
+            CONFIGURATIONS Debug RelWithDebInfo
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+            OPTIONAL)
     endif()
 endif()
 
@@ -178,7 +175,7 @@ if(NOT WORMHOLE_SKIP_TEST_RULES)
 
     target_include_directories(${WORMHOLE_TEST} PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>" "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export_header>")
     target_compile_features(${WORMHOLE_TEST} PRIVATE cxx_std_17)
-    set_target_properties(${WORMHOLE_TEST} PROPERTIES DEBUG_POSTFIX "d" COMPILE_FLAGS -DLIBWORMHOLE_STATIC_DEFINE)
+    set_target_properties(${WORMHOLE_TEST} PROPERTIES DEBUG_POSTFIX "d")
 
     enable_testing()
     add_test(NAME ${WORMHOLE_TEST} COMMAND ${WORMHOLE_TEST} WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests")
