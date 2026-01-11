@@ -1,5 +1,12 @@
 # Change Log
 
+## 1.2.5 (Jan 11, 2026)
+
+- Added RelWithDebInfo presets.
+- Added RPM package presets.
+- Improved build scripts.
+- Introduced Github workflow.
+
 ## 1.2.4 (September 4, 2025)
 
 - Changed the minimal version of the 'tubus' dependency library.

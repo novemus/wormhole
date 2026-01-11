@@ -4,7 +4,7 @@ message("***** wormhole ***** ")
 
 cmake_minimum_required(VERSION 3.21)
 
-project(wormhole VERSION 1.2.4 DESCRIPTION "The tool for tunneling TCP streams via UDP" LANGUAGES CXX)
+project(wormhole VERSION 1.2.5 DESCRIPTION "The tool for tunneling TCP streams via UDP" LANGUAGES CXX)
 
 option(WORMHOLE_USE_SHARED_LIB "Build shared library" ${BUILD_SHARED_LIBS})
 option(WORMHOLE_SKIP_TEST_RULES "Don't generate test rules" ON)
@@ -54,7 +54,7 @@ add_library(${PROJECT_NAME}::${LIBWORMHOLE} ALIAS ${LIBWORMHOLE})
 generate_export_header(${LIBWORMHOLE} EXPORT_FILE_NAME export_header/wormhole/export.h)
 
 if (NOT BUILD_SHARED_LIBS)
-    target_compile_definitions(${LIBWORMHOLE} PRIVATE LIBWORMHOLE_STATIC_DEFINE)
+    target_compile_definitions(${LIBWORMHOLE} PUBLIC LIBWORMHOLE_STATIC_DEFINE)
 endif()
 
 set(SOURCES "${CMAKE_CURRENT_BINARY_DIR}/export_header/wormhole/export.h"
@@ -107,7 +107,7 @@ target_include_directories(${LIBWORMHOLE} PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export_header>"
         PRIVATE "${Boost_INCLUDE_DIRS}")
 
-set_target_properties(${BINWORMHOLE} PROPERTIES DEBUG_POSTFIX "d")
+set_target_properties(${BINWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" COMPILE_FLAGS -DLIBWORMHOLE_STATIC_DEFINE)
 set_target_properties(${BINWORMHOLE} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 set_target_properties(${LIBWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" OUTPUT_NAME ${PROJECT_NAME} IMPORT_PREFIX "lib")
 set_target_properties(${LIBWORMHOLE} PROPERTIES SOVERSION ${PROJECT_VERSION_MAJOR} VERSION ${PROJECT_VERSION})
@@ -158,10 +158,17 @@ if(NOT WORMHOLE_SKIP_INSTALL_RULES AND NOT CMAKE_SKIP_INSTALL_RULES)
             CONFIGURATIONS Debug RelWithDebInfo
             DESTINATION "${CMAKE_INSTALL_LIBDIR}"
             OPTIONAL)
-        install(FILES "$<TARGET_PDB_FILE:${LIBWORMHOLE}>" COMPONENT pdb_files
-            CONFIGURATIONS Debug RelWithDebInfo
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-            OPTIONAL)
+        if(BUILD_SHARED_LIBS)
+            install(FILES "$<TARGET_PDB_FILE:${LIBWORMHOLE}>" COMPONENT pdb_files
+                CONFIGURATIONS Debug RelWithDebInfo
+                DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+                OPTIONAL)
+        else()
+            install(FILES "$<TARGET_FILE_DIR:${LIBWORMHOLE}>/$<TARGET_FILE_PREFIX:${LIBWORMHOLE}>$<TARGET_FILE_BASE_NAME:${LIBWORMHOLE}>-static.pdb" COMPONENT pdb_files
+                CONFIGURATIONS Debug RelWithDebInfo
+                DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+                OPTIONAL)
+        endif()
     endif()
 endif()
 
@@ -175,7 +182,7 @@ if(NOT WORMHOLE_SKIP_TEST_RULES)
 
     target_include_directories(${WORMHOLE_TEST} PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>" "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export_header>")
     target_compile_features(${WORMHOLE_TEST} PRIVATE cxx_std_17)
-    set_target_properties(${WORMHOLE_TEST} PROPERTIES DEBUG_POSTFIX "d")
+    set_target_properties(${WORMHOLE_TEST} PROPERTIES DEBUG_POSTFIX "d" COMPILE_FLAGS -DLIBWORMHOLE_STATIC_DEFINE)
 
     enable_testing()
     add_test(NAME ${WORMHOLE_TEST} COMMAND ${WORMHOLE_TEST} WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests")
@@ -185,16 +192,26 @@ endif()
 
 if(NOT WORMHOLE_SKIP_PACKAGE_RULES AND NOT WORMHOLE_SKIP_INSTALL_RULES AND NOT CMAKE_SKIP_INSTALL_RULES)
     if(CMAKE_HOST_SYSTEM_NAME MATCHES "Linux")
+        set(CPACK_PACKAGE_RELEASE "1")
+        set(CPACK_PACKAGING_INSTALL_PREFIX "/opt")
+        set(CPACK_COMPONENTS_ALL_IN_ONE_PACKAGE ON)
         cmake_host_system_information(RESULT DISTR QUERY DISTRIB_ID)
         if(DISTR MATCHES "(debian)|(ubuntu)|(kali)|(astra)")
-            add_custom_command(DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/debian/changelog"
-                COMMAND gzip -cn9 "${CMAKE_CURRENT_SOURCE_DIR}/debian/changelog" > "${CMAKE_CURRENT_BINARY_DIR}/changelog.gz"
+            set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Community")
+            set(CPACK_DEBIAN_PACKAGE_RELEASE "${CPACK_PACKAGE_RELEASE}")
+            set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+            set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+            set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS ON)
+            set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
+            set(CPACK_DEB_COMPONENT_INSTALL ON)
+            add_custom_command(DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/linux/changelog"
+                COMMAND gzip -cn9 "${CMAKE_CURRENT_SOURCE_DIR}/linux/changelog" > "${CMAKE_CURRENT_BINARY_DIR}/changelog.gz"
                 OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/changelog.gz")
             add_custom_target(changelog ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/changelog.gz")
             set(DEBIAN_DOC_FILES
                 "${CMAKE_CURRENT_BINARY_DIR}/changelog.gz"
-                "${CMAKE_CURRENT_SOURCE_DIR}/debian/copyright"
-                "${CMAKE_CURRENT_SOURCE_DIR}/debian/README.Debian"
+                "${CMAKE_CURRENT_SOURCE_DIR}/linux/copyright"
+                "${CMAKE_CURRENT_SOURCE_DIR}/linux/README.Debian"
                 )
             install(FILES ${DEBIAN_DOC_FILES} DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/${BINWORMHOLE}" COMPONENT bin_deb_files)
             if(BUILD_SHARED_LIBS)
@@ -203,6 +220,19 @@ if(NOT WORMHOLE_SKIP_PACKAGE_RULES AND NOT WORMHOLE_SKIP_INSTALL_RULES AND NOT C
                 install(FILES ${DEBIAN_DOC_FILES} DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/${LIBWORMHOLE}-dev" COMPONENT dev_deb_files)
             endif()
         endif()
+
+        set(CPACK_RPM_PACKAGE_RELEASE "${CPACK_PACKAGE_RELEASE}")
+        set(CPACK_RPM_CHANGELOG_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linux/changelog.rpm)
+        set(CPACK_RPM_PACKAGE_VENDOR "Community")
+        set(CPACK_RPM_PACKAGE_AUTOREQ "1")
+        set(CPACK_RPM_PACKAGE_LICENSE "Apache 2.0")
+        set(CPACK_RPM_COMPONENT_INSTALL ON)
+        set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX "/novemus/wormhole")
+
+        configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rpm-binary.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/rpm-binary.cmake" @ONLY)
+        configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rpm-library.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/rpm-library.cmake" @ONLY)
+        configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rpm-devel.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/rpm-devel.cmake" @ONLY)
+
     endif()
 
     if(NOT BUILD_SHARED_LIBS)
