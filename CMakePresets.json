@@ -247,7 +247,7 @@
                 "RelWithDebInfo"
             ],
             "variables": {
-                "CPACK_DEBIAN_PACKAGE_DEPENDS": "libboost-dev (>= 1.74) | libboost1.81-dev, libtubus-dev (>= 1.2.3), libwormhole (= 1.2.5-1)",
+                "CPACK_DEBIAN_PACKAGE_DEPENDS": "libboost-dev (>= 1.74) | libboost1.81-dev, libtubus-dev (>= 1.2.3), libwormhole (>= 1.2.5)",
                 "CPACK_PACKAGE_DESCRIPTION_SUMMARY": "C++ development files of the 'wormhole' library",
                 "CPACK_PACKAGE_DESCRIPTION": "The 'wormhole' library provides the ability to forward a TCP\nservice via UDP tunnel.",
                 "CPACK_COMPONENTS_ALL": "archive_files;header_files;cmake_files;dev_deb_files;dev_doc_files"
