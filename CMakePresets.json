@@ -271,7 +271,13 @@
             "configurations": [
                 "RelWithDebInfo"
             ],
-            "configFile": "${sourceDir}/out/$env{TARGET_OS}/$env{TARGET_ARCH}/build/static-relwithdebinfo/rpm-binary.cmake",
+            "variables": {
+                "CPACK_RPM_DEBUGINFO_PACKAGE": "ON",
+                "CPACK_RPM_DEBUGINFO_SINGLE_PACKAGE": "ON",
+                "CPACK_RPM_PACKAGE_SUMMARY": "A tool for tunneling TCP streams via UDP",
+                "CPACK_RPM_PACKAGE_DESCRIPTION": "The 'wormhole' tool provides the ability to forward a TCP\nservice via UDP tunnel.",
+                "CPACK_COMPONENTS_ALL": "binary_files"
+            },
             "packageName": "wormhole",
             "packageDirectory": ".."
         },
@@ -291,7 +297,13 @@
             "configurations": [
                 "RelWithDebInfo"
             ],
-            "configFile": "${sourceDir}/out/$env{TARGET_OS}/$env{TARGET_ARCH}/build/shared-relwithdebinfo/rpm-library.cmake",
+            "variables": {
+                "CPACK_RPM_DEBUGINFO_PACKAGE": "ON",
+                "CPACK_RPM_DEBUGINFO_SINGLE_PACKAGE": "ON",
+                "CPACK_RPM_PACKAGE_SUMMARY": "Library for tunneling TCP streams via UDP",
+                "CPACK_RPM_PACKAGE_DESCRIPTION": "The 'wormhole' library provides the ability to forward a TCP\nservice via UDP tunnel.",
+                "CPACK_COMPONENTS_ALL": "library_files"
+            },
             "packageName": "libwormhole",
             "packageDirectory": ".."
         },
@@ -311,7 +323,12 @@
             "configurations": [
                 "RelWithDebInfo"
             ],
-            "configFile": "${sourceDir}/out/$env{TARGET_OS}/$env{TARGET_ARCH}/build/static-relwithdebinfo/rpm-devel.cmake",
+            "variables": {
+                "CPACK_RPM_PACKAGE_SUMMARY": "C++ development files of the 'wormhole' library",
+                "CPACK_RPM_PACKAGE_DESCRIPTION": "The 'wormhole' library provides the ability to forward a TCP\nservice via UDP tunnel.",
+                "CPACK_RPM_PACKAGE_REQUIRES": "boost-devel, openssl-devel, libtubus-devel >= 1.2.3, libwormhole = %{version}-%{release}",
+                "CPACK_COMPONENTS_ALL": "archive_files;header_files;cmake_files;dev_doc_files"
+            },
             "packageName": "libwormhole-devel",
             "packageDirectory": ".."
         },

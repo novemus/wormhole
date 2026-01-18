@@ -1,8 +1,0 @@
-include("@CMAKE_CURRENT_BINARY_DIR@/CPackConfig.cmake")
-
-set(CPACK_PACKAGE_NAME "@LIBWORMHOLE@-devel")
-set(CPACK_PACKAGE_FILE_NAME "@LIBWORMHOLE@-devel-@PROJECT_VERSION@-@CPACK_RPM_PACKAGE_RELEASE@.@CMAKE_HOST_SYSTEM_PROCESSOR@")
-set(CPACK_RPM_PACKAGE_SUMMARY "C++ development files of the 'wormhole' library")
-set(CPACK_RPM_PACKAGE_DESCRIPTION "The 'wormhole' library provides the ability to forward a TCP\nservice via UDP tunnel.")
-set(CPACK_RPM_PACKAGE_REQUIRES "boost-devel, openssl-devel, libtubus-devel >= 1.2.3, libwormhole = %{version}-%{release}")
-set(CPACK_COMPONENTS_ALL "archive_files;header_files;cmake_files")
