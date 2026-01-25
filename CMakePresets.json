@@ -250,7 +250,8 @@
                 "CPACK_DEBIAN_PACKAGE_DEPENDS": "libboost-dev (>= 1.74) | libboost1.81-dev, libtubus-dev (>= 1.2.3), libwormhole (>= 1.2.5)",
                 "CPACK_PACKAGE_DESCRIPTION_SUMMARY": "C++ development files of the 'wormhole' library",
                 "CPACK_PACKAGE_DESCRIPTION": "The 'wormhole' library provides the ability to forward a TCP\nservice via UDP tunnel.",
-                "CPACK_COMPONENTS_ALL": "archive_files;header_files;cmake_files;dev_deb_files;dev_doc_files"
+                "CPACK_COMPONENTS_ALL": "archive_files;header_files;cmake_files;dev_deb_files;dev_doc_files",
+                "CPACK_INSTALL_CMAKE_PROJECTS": "../static-relwithdebinfo;tubus;ALL;/;../shared-relwithdebinfo;tubus;ALL;/"
             },
             "packageName": "libwormhole-dev",
             "packageDirectory": ".."
@@ -327,7 +328,8 @@
                 "CPACK_RPM_PACKAGE_SUMMARY": "C++ development files of the 'wormhole' library",
                 "CPACK_RPM_PACKAGE_DESCRIPTION": "The 'wormhole' library provides the ability to forward a TCP\nservice via UDP tunnel.",
                 "CPACK_RPM_PACKAGE_REQUIRES": "boost-devel, openssl-devel, libtubus-devel >= 1.2.3, libwormhole = %{version}-%{release}",
-                "CPACK_COMPONENTS_ALL": "archive_files;header_files;cmake_files;dev_doc_files"
+                "CPACK_COMPONENTS_ALL": "archive_files;header_files;cmake_files;dev_doc_files",
+                "CPACK_INSTALL_CMAKE_PROJECTS": "../static-relwithdebinfo;tubus;ALL;/;../shared-relwithdebinfo;tubus;ALL;/"
             },
             "packageName": "libwormhole-devel",
             "packageDirectory": ".."
@@ -346,7 +348,8 @@
             "variables": {
                 "CPACK_COMPONENTS_ALL": "binary_files;runtime_files;library_files;archive_files;pdb_files;header_files;cmake_files;dev_doc_files",
                 "CPACK_ARCHIVE_COMPONENT_INSTALL": "ON",
-                "CPACK_COMPONENTS_ALL_IN_ONE_PACKAGE": "ON"
+                "CPACK_COMPONENTS_ALL_IN_ONE_PACKAGE": "ON",
+                "CPACK_INSTALL_CMAKE_PROJECTS": "../static-relwithdebinfo;tubus;ALL;/;../shared-relwithdebinfo;tubus;ALL;/"
             },
             "packageName": "wormhole",
             "packageDirectory": ".."
