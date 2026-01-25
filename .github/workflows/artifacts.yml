@@ -9,7 +9,7 @@ on:
 env:
   PACKAGE_RELEASE: ${{ github.run_number }}
   MAINTAINER: "${{ vars.MAINTAINER }}"
-  HOMEPAGE: "https://github.com/novemus/wormhole"
+  HOMEPAGE: "${{ github.server_url }}/${{ github.repository }}"
 
 jobs:
   ubuntu:
@@ -19,8 +19,9 @@ jobs:
     env:
       TARGET_OS: debian-trixie
       TARGET_ARCH: x64
-      DEPENDENCIES: "build-essential cmake curl debhelper devscripts fakeroot pkg-config libssl-dev libboost-system-dev libboost-test-dev"
-      TUBUS_PACKAGE: ${{ vars.TUBUS_DEB_PACKAGE }}
+      DEPENDENCIES: "build-essential cmake curl debhelper devscripts fakeroot pkg-config libssl-dev libboost-system-dev libboost-program-options-dev libboost-test-dev"
+      TUBUS_LIB_PACKAGE: ${{ vars.TUBUS_LIB_DEB_PACKAGE }}
+      TUBUS_DEV_PACKAGE: ${{ vars.TUBUS_DEV_DEB_PACKAGE }}
 
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +30,8 @@ jobs:
         run: |
           apt-get update
           apt-get install -y ${{ env.DEPENDENCIES }}
-          curl -sL -o /tmp/libtubus-dev.deb ${{ env.TUBUS_PACKAGE }} && apt-get install /tmp/libtubus-dev.deb
+          curl -sL -o /tmp/libtubus.deb ${{ env.TUBUS_LIB_PACKAGE }} && apt-get install -y /tmp/libtubus.deb
+          curl -sL -o /tmp/libtubus-dev.deb ${{ env.TUBUS_DEV_PACKAGE }} && apt-get install -y /tmp/libtubus-dev.deb
 
       - name: Build static
         run: |
@@ -71,8 +73,9 @@ jobs:
     env:
       TARGET_OS: fedora-42
       TARGET_ARCH: x64
-      DEPENDENCIES: "clang clang-tools-extra cmake curl rpmdevtools boost-devel boost-static libtubus-devel"
-      TUBUS_PACKAGE: ${{ vars.TUBUS_RPM_PACKAGE }}
+      DEPENDENCIES: "clang clang-tools-extra cmake curl rpmdevtools boost-devel boost-static"
+      TUBUS_LIB_PACKAGE: ${{ vars.TUBUS_LIB_RPM_PACKAGE }}
+      TUBUS_DEV_PACKAGE: ${{ vars.TUBUS_DEV_RPM_PACKAGE }}
 
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +83,8 @@ jobs:
       - name: Install dependencies
         run: |
           dnf -y --setopt=tsflags=nodocs install ${{ env.DEPENDENCIES }}
-          curl -sL -o /tmp/libtubus-dev.rpm ${{ env.TUBUS_PACKAGE }} && dnf -y install /tmp/libtubus-dev.rpm
+          curl -sL -o /tmp/libtubus.rpm ${{ env.TUBUS_LIB_PACKAGE }} && dnf -y install /tmp/libtubus.rpm
+          curl -sL -o /tmp/libtubus-devel.rpm ${{ env.TUBUS_DEV_PACKAGE }} && dnf -y install /tmp/libtubus-devel.rpm
 
       - name: Build static
         run: |
@@ -139,8 +143,9 @@ jobs:
       - name: Install dependencies
         shell: pwsh
         run: |
-          Expand-Archive -Path ${{ env.TUBUS_ARCHIVE }} -DestinationPath ${{ github.workspace }}\dependencies
-          $env:CMAKE_PREFIX_PATH = "$env:CMAKE_PREFIX_PATH;${{ github.workspace }}\dependencies\lib\cmake"
+          New-Item -ItemType Directory -Path C:\tmp -Force
+          Invoke-WebRequest -Uri ${{ env.TUBUS_ARCHIVE }} -OutFile C:\tmp\tubus.zip
+          Expand-Archive -Path C:\tmp\tubus.zip -DestinationPath "${{ github.workspace }}\out\${{ env.TARGET_OS }}\${{ env.TARGET_ARCH }}\install"
 
       - name: Build static
         shell: pwsh
@@ -183,7 +188,7 @@ jobs:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       VCPKG_TOOLCHAIN_FILE: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       VCPKG_FORCE_SYSTEM_BINARIES: 1
-      TUBUS_ARCHIVE: ${{ vars.TUBUS_WINDOWS_ARCHIVE }}
+      TUBUS_ARCHIVE: ${{ vars.TUBUS_DARWIN_ARCHIVE }}
 
     steps:
       - uses: actions/checkout@v4
@@ -205,8 +210,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          unzip ${{ env.TUBUS_ARCHIVE }} -d ${{ github.workspace }}\dependencies
-          export CMAKE_PREFIX_PATH="$MAKE_PREFIX_PATH:${{ github.workspace }}\dependencies\lib\cmake"
+          curl -sL -o /tmp/tubus.zip ${{ env.TUBUS_ARCHIVE }} && unzip /tmp/tubus.zip -d "${{ github.workspace }}/out/${{ env.TARGET_OS }}/${{ env.TARGET_ARCH }}/install"
 
       - name: Build static
         run: |
