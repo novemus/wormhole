@@ -13,7 +13,7 @@ env:
 
 jobs:
   ubuntu:
-    name: Ubuntu packages
+    name: Debian packages
     runs-on: ubuntu-latest
     container: debian:13
     env:
@@ -60,7 +60,7 @@ jobs:
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-packages
+          name: debian-packages
           path: |
             out/${{ env.TARGET_OS }}/${{ env.TARGET_ARCH }}/build/*.deb
             out/${{ env.TARGET_OS }}/${{ env.TARGET_ARCH }}/build/*.ddeb
@@ -146,6 +146,7 @@ jobs:
           New-Item -ItemType Directory -Path C:\tmp -Force
           Invoke-WebRequest -Uri ${{ env.TUBUS_ARCHIVE }} -OutFile C:\tmp\tubus.zip
           Expand-Archive -Path C:\tmp\tubus.zip -DestinationPath "${{ github.workspace }}\out\${{ env.TARGET_OS }}\${{ env.TARGET_ARCH }}\install"
+          echo "${{ github.workspace }}\out\${{ env.TARGET_OS }}\${{ env.TARGET_ARCH }}\build\shared-relwithdebinfo\vcpkg_installed\${{ env.TARGET_ARCH }}-windows\bin;${{ github.workspace }}\out\${{ env.TARGET_OS }}\${{ env.TARGET_ARCH }}\install\bin" >> $env:GITHUB_PATH
 
       - name: Build static
         shell: pwsh
@@ -210,7 +211,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          curl -sL -o /tmp/tubus.zip ${{ env.TUBUS_ARCHIVE }} && unzip /tmp/tubus.zip -d "${{ github.workspace }}/out/${{ env.TARGET_OS }}/${{ env.TARGET_ARCH }}/install"
+          curl -sL -o /tmp/tubus.zip ${{ env.TUBUS_ARCHIVE }} \
+            && mkdir -p "${{ github.workspace }}/out/${{ env.TARGET_OS }}/${{ env.TARGET_ARCH }}/install" \
+            && unzip /tmp/tubus.zip -d "${{ github.workspace }}/out/${{ env.TARGET_OS }}/${{ env.TARGET_ARCH }}/install"
 
       - name: Build static
         run: |
