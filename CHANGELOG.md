@@ -1,5 +1,10 @@
 # Change Log
 
+## 1.2.6 (Feb 10, 2026)
+
+- Link with libtubus 1.2.5
+- Build improvements.
+
 ## 1.2.5 (Jan 11, 2026)
 
 - Added RelWithDebInfo presets.
