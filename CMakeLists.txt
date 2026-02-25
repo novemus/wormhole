@@ -32,7 +32,7 @@ message("* Boost Include Dirs: ${Boost_INCLUDE_DIRS}")
 message("* Boost Library Dirs: ${Boost_LIBRARY_DIRS}")
 message("* Boost Libraries: ${Boost_LIBRARIES}")
 
-find_package(tubus 1.2.5 REQUIRED COMPONENTS libtubus)
+find_package(tubus 1.3.0 REQUIRED COMPONENTS libtubus)
 
 message("* tubus Version: ${tubus_VERSION}")
 message("* tubus Include Dirs: ${tubus_INCLUDE_DIRS}")

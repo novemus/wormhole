@@ -135,18 +135,19 @@ std::shared_ptr<tcp_echo_server> create_tcp_server(boost::asio::io_context& io, 
     return std::make_shared<tcp_echo_server>(io, ep);
 }
 
-const char HELLO_WORMHOLE[] = "Hello, Wormhole!";
-const char WORMHOLE_HELLO[] = "Wormhole, Hello!";
-
-const boost::asio::ip::tcp::endpoint SERVER(boost::asio::ip::make_address("127.0.0.1"), 18765);
-const boost::asio::ip::tcp::endpoint PROXY(boost::asio::ip::make_address("127.0.0.1"), 15678);
-const boost::asio::ip::udp::endpoint SERVER_GATEWAY(boost::asio::ip::make_address("127.0.0.1"), 7777);
-const boost::asio::ip::udp::endpoint CLIENT_GATEWAY(boost::asio::ip::make_address("127.0.0.1"), 8888);
-
-}
-
-BOOST_AUTO_TEST_CASE(hello_wormhole)
+template<class tunnel_proto> void test_tunnel()
 {
+    typedef boost::asio::ip::basic_endpoint<tunnel_proto> tunnel_endpoint;
+    typedef boost::asio::ip::tcp::endpoint                server_endpoint;
+
+    const char HELLO_WORMHOLE[] = "Hello, Wormhole!";
+    const char WORMHOLE_HELLO[] = "Wormhole, Hello!";
+
+    const server_endpoint SERVER(boost::asio::ip::make_address("127.0.0.1"), 18765);
+    const server_endpoint PROXY(boost::asio::ip::make_address("127.0.0.1"), 15678);
+    const tunnel_endpoint SERVER_GATEWAY(boost::asio::ip::make_address("127.0.0.1"), 7777);
+    const tunnel_endpoint CLIENT_GATEWAY(boost::asio::ip::make_address("127.0.0.1"), 8888);
+
     boost::asio::io_context io;
     boost::asio::thread_pool pool;
 
@@ -158,10 +159,10 @@ BOOST_AUTO_TEST_CASE(hello_wormhole)
     auto server = create_tcp_server(io, SERVER);
     BOOST_REQUIRE_NO_THROW(server->start());
 
-    auto exporter = wormhole::create_exporter(io, SERVER, SERVER_GATEWAY, CLIENT_GATEWAY, 0);
+    auto exporter = wormhole::router<tunnel_proto>::create_exporter(io, SERVER, SERVER_GATEWAY, CLIENT_GATEWAY, 1234567890);
     BOOST_REQUIRE_NO_THROW(exporter->launch());
 
-    auto importer = wormhole::create_importer(io, PROXY, CLIENT_GATEWAY, SERVER_GATEWAY, 0);
+    auto importer = wormhole::router<tunnel_proto>::create_importer(io, PROXY, CLIENT_GATEWAY, SERVER_GATEWAY, 1234567890);
     BOOST_REQUIRE_NO_THROW(importer->launch());
 
     boost::asio::ip::tcp::socket client1(io, boost::asio::ip::tcp::v4());
@@ -203,4 +204,16 @@ BOOST_AUTO_TEST_CASE(hello_wormhole)
 
     work.reset();
     pool.join();
+}
+
+}
+
+BOOST_AUTO_TEST_CASE(udp_wormhole)
+{
+    test_tunnel<boost::asio::ip::udp>();
+}
+
+BOOST_AUTO_TEST_CASE(tcp_wormhole)
+{
+    test_tunnel<boost::asio::ip::tcp>();
 }

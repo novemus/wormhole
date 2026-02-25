@@ -207,18 +207,21 @@ struct packet : public tubus::mutable_buffer
     }
 };
 
-class engine : public router, public std::enable_shared_from_this<engine>
+template<class proto> class importer;
+template<class proto> class exporter;
+
+template<class proto> class engine : public router<proto>, public std::enable_shared_from_this<engine<proto>>
 {
-    friend class importer;
-    friend class exporter;
+    friend class importer<proto>;
+    friend class exporter<proto>;
 
     boost::asio::io_context& m_io;
     boost::asio::deadline_timer m_timer;
     boost::posix_time::ptime m_start;
     uint64_t m_secret;
-    tubus::channel_ptr m_tunnel;
-    udp_endpoint m_gateway;
-    udp_endpoint m_faraway;
+    std::shared_ptr<tubus::channel<proto>> m_tunnel;
+    typename router<proto>::tunnel_endpoint m_gateway;
+    typename router<proto>::tunnel_endpoint m_faraway;
     std::map<uint32_t, tcp_ptr> m_bunch;
     std::queue<packet> m_queue;
     uint32_t m_top;
@@ -227,7 +230,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
     void listen_tunnel()
     {
         packet pack;
-        std::weak_ptr<engine> weak = shared_from_this();
+        std::weak_ptr<engine> weak = this->shared_from_this();
         m_tunnel->read(pack, [weak, pack](const boost::system::error_code& error, size_t size)
         {
             auto ptr = weak.lock();
@@ -272,7 +275,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
         }
 
         tubus::mutable_buffer data(1024 * 1024);
-        std::weak_ptr<engine> weak = shared_from_this();
+        std::weak_ptr<engine> weak = this->shared_from_this();
         client->async_read(data, [weak, id, data](const boost::system::error_code& error, size_t size)
         {
             auto ptr = weak.lock();
@@ -306,7 +309,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
             return;
         }
 
-        std::weak_ptr<engine> weak = shared_from_this();
+        std::weak_ptr<engine> weak = this->shared_from_this();
         client->async_write(data, [weak, id, data](const boost::system::error_code& error, size_t size)
         {
             auto ptr = weak.lock();
@@ -345,7 +348,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
             return;
         }
 
-        std::weak_ptr<engine> weak = shared_from_this();
+        std::weak_ptr<engine> weak = this->shared_from_this();
         m_tunnel->write(pack, [weak, pack](const boost::system::error_code& error, size_t size)
         {
             auto ptr = weak.lock();
@@ -400,7 +403,7 @@ class engine : public router, public std::enable_shared_from_this<engine>
     void read_tunnel(uint32_t id, uint32_t size)
     {
         tubus::mutable_buffer data(size);
-        std::weak_ptr<engine> weak = shared_from_this();
+        std::weak_ptr<engine> weak = this->shared_from_this();
         m_tunnel->read(data, [weak, id, data](const boost::system::error_code& error, size_t size)
         {
             auto ptr = weak.lock();
@@ -468,9 +471,9 @@ class engine : public router, public std::enable_shared_from_this<engine>
             return;
         }
 
-        m_tunnel = tubus::create_channel(m_io, m_secret);
+        m_tunnel = tubus::channel<proto>::create(m_io, m_secret);
 
-        std::weak_ptr<engine> weak = std::static_pointer_cast<engine>(shared_from_this());
+        std::weak_ptr<engine> weak = std::static_pointer_cast<engine>(this->shared_from_this());
         m_timer.expires_from_now(reconnect_timeout);
         m_timer.async_wait([weak](const boost::system::error_code& error)
         {
@@ -491,12 +494,14 @@ class engine : public router, public std::enable_shared_from_this<engine>
 
 public:
 
-    engine(boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
+    using tunnel_endpoint = typename router<proto>::tunnel_endpoint;
+
+    engine(boost::asio::io_context& io, const tunnel_endpoint& gateway, const tunnel_endpoint& faraway, uint64_t secret)
         : m_io(io)
         , m_timer(io)
         , m_start(boost::posix_time::second_clock::universal_time())
         , m_secret(secret)
-        , m_tunnel(tubus::create_channel(io, secret))
+        , m_tunnel(tubus::channel<proto>::create(io, secret))
         , m_gateway(gateway)
         , m_faraway(faraway)
         , m_top(std::numeric_limits<uint32_t>::max())
@@ -519,14 +524,14 @@ public:
     }
 };
 
-class importer : public engine
+template<class proto> class importer : public engine<proto>
 {
     boost::asio::ip::tcp::acceptor m_server;
 
 public:
 
-    importer(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
-        : engine(io, gateway, faraway, secret)
+    importer(boost::asio::io_context& io, const typename router<proto>::server_endpoint& server, const typename router<proto>::tunnel_endpoint& gateway, const typename router<proto>::tunnel_endpoint& faraway, uint64_t secret)
+        : engine<proto>(io, gateway, faraway, secret)
         , m_server(io, server)
     {
         m_server.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
@@ -534,11 +539,11 @@ public:
 
     void launch() noexcept(true) override
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        std::unique_lock<std::mutex> lock(this->m_mutex);
 
-        std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(shared_from_this());
-        m_tunnel->open(m_gateway);
-        m_tunnel->connect(m_faraway, [weak](const boost::system::error_code& error)
+        std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(this->shared_from_this());
+        this->m_tunnel->open(this->m_gateway);
+        this->m_tunnel->connect(this->m_faraway, [weak](const boost::system::error_code& error)
         {
             auto ptr = weak.lock();
             if (error)
@@ -565,9 +570,9 @@ public:
 
     void cancel() noexcept(true) override
     {
-        engine::cancel();
+        engine<proto>::cancel();
 
-        std::unique_lock<std::mutex> lock(m_mutex);
+        std::unique_lock<std::mutex> lock(this->m_mutex);
         boost::system::error_code ec;
         m_server.cancel(ec);
         m_server.close(ec);
@@ -577,19 +582,19 @@ private:
 
     void accept_client()
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        std::unique_lock<std::mutex> lock(this->m_mutex);
 
         if (!m_server.is_open())
             return;
 
-        uint32_t id = ++m_top;
+        uint32_t id = ++this->m_top;
 
         _inf_ << "accepting client " << id;
 
-        auto client = std::make_shared<tcp>(m_io);
-        m_bunch.emplace(id, client);
+        auto client = std::make_shared<tcp>(this->m_io);
+        this->m_bunch.emplace(id, client);
 
-        std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(shared_from_this());
+        std::weak_ptr<importer> weak = std::static_pointer_cast<importer>(this->shared_from_this());
         m_server.async_accept(client->socket(), [weak, client, id](const boost::system::error_code& error)
         {
             auto ptr = weak.lock();
@@ -614,32 +619,35 @@ private:
 
     void notify_client(uint32_t id) override
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        std::unique_lock<std::mutex> lock(this->m_mutex);
 
-        if (m_bunch.erase(id) != 0)
+        if (this->m_bunch.erase(id) != 0)
             _inf_ << "client " << id << " is disconnected";
     }
 };
 
-class exporter : public engine
+template<class proto> class exporter : public engine<proto>
 {
     boost::asio::ip::tcp::endpoint m_server;
 
 public:
 
-    exporter(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret)
-        : engine(io, gateway, faraway, secret)
+    using server_endpoint = typename router<proto>::server_endpoint;
+    using tunnel_endpoint = typename router<proto>::tunnel_endpoint;
+
+    exporter(boost::asio::io_context& io, const server_endpoint& server, const tunnel_endpoint& gateway, const tunnel_endpoint& faraway, uint64_t secret)
+        : engine<proto>(io, gateway, faraway, secret)
         , m_server(server)
     {
     }
 
     void launch() noexcept(true) override
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        std::unique_lock<std::mutex> lock(this->m_mutex);
 
-        std::weak_ptr<engine> weak = shared_from_this();
-        m_tunnel->open(m_gateway);
-        m_tunnel->accept(m_faraway, [weak](const boost::system::error_code& error)
+        std::weak_ptr<engine<proto>> weak = this->shared_from_this();
+        this->m_tunnel->open(this->m_gateway);
+        this->m_tunnel->accept(this->m_faraway, [weak](const boost::system::error_code& error)
         {
             auto ptr = weak.lock();
             if (error)
@@ -667,18 +675,18 @@ private:
 
     void notify_client(uint32_t id) override
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        std::unique_lock<std::mutex> lock(this->m_mutex);
 
-        if (id == m_top + 1)
+        if (id == this->m_top + 1)
         {
-            m_top = id;
+            this->m_top = id;
 
             _inf_ << "connecting client " << id;
 
-            auto client = std::make_shared<tcp>(m_io);
-            m_bunch.emplace(id, client);
+            auto client = std::make_shared<tcp>(this->m_io);
+            this->m_bunch.emplace(id, client);
 
-            std::weak_ptr<engine> weak = shared_from_this();
+            std::weak_ptr<engine<proto>> weak = this->shared_from_this();
             client->async_connect(m_server, [weak, client, id](const boost::system::error_code& error)
             {
                 auto ptr = weak.lock();
@@ -703,20 +711,38 @@ private:
         }
         else
         {
-            if (m_bunch.erase(id) != 0)
+            if (this->m_bunch.erase(id) != 0)
                 _inf_ << "client " << id << " is disconnected";
         }
     }
 };
 
-router_ptr create_exporter(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false)
+template <>
+std::shared_ptr<udp_router> udp_router::create_exporter(
+    boost::asio::io_context &io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false)
 {
-    return std::make_shared<exporter>(io, server, gateway, faraway, secret);
+    return std::make_shared<exporter<boost::asio::ip::udp>>(io, server, gateway, faraway, secret);
 }
 
-router_ptr create_importer(boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false)
+template <>
+std::shared_ptr<udp_router> udp_router::create_importer(
+    boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false)
 {
-    return std::make_shared<importer>(io, server, gateway, faraway, secret);
+    return std::make_shared<importer<boost::asio::ip::udp>>(io, server, gateway, faraway, secret);
+}
+
+template <>
+std::shared_ptr<tcp_router> tcp_router::create_exporter(
+    boost::asio::io_context& io, const tcp_endpoint& server, const tcp_endpoint& gateway, const tcp_endpoint& faraway, uint64_t secret) noexcept(false)
+{
+    return std::make_shared<exporter<boost::asio::ip::tcp>>(io, server, gateway, faraway, secret);
+}
+
+template <>
+std::shared_ptr<tcp_router> tcp_router::create_importer(
+    boost::asio::io_context& io, const tcp_endpoint& server, const tcp_endpoint& gateway, const tcp_endpoint& faraway, uint64_t secret) noexcept(false)
+{
+    return std::make_shared<importer<boost::asio::ip::tcp>>(io, server, gateway, faraway, secret);
 }
 
 }

@@ -14,34 +14,20 @@
 #include <iostream>
 #include <boost/program_options.hpp>
 
-namespace boost { namespace asio { namespace ip {
-
-template<class proto>
-void validate(boost::any& result, const std::vector<std::string>& values, basic_endpoint<proto>*, int)
+template<class proto> 
+boost::asio::ip::basic_endpoint<proto> endpoint(const std::string& url)
 {
-    boost::program_options::validators::check_first_occurrence(result);
-    const std::string& url = boost::program_options::validators::get_single_string(values);
+    boost::asio::io_context io;
+    typename proto::resolver resolver(io);
 
-    try
-    {
-        boost::asio::io_context io;
-        typename proto::resolver resolver(io);
+    std::smatch match;
+    if (std::regex_search(url, match, std::regex("^(\\w+://)?([^/]+):(\\d+)?$")))
+        return boost::asio::ip::basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[3].str()).begin());
+    else if (std::regex_search(url, match, std::regex("^(\\w+)://([^/]+).*$")))
+        return boost::asio::ip::basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[1].str()).begin());
 
-        std::smatch match;
-        if (std::regex_search(url, match, std::regex("^(\\w+://)?([^/]+):(\\d+)?$")))
-            result = boost::any(basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[3].str()).begin()));
-        else if (std::regex_search(url, match, std::regex("^(\\w+)://([^/]+).*$")))
-            result = boost::any(basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[1].str()).begin()));
-        else
-            result = boost::any(basic_endpoint<proto>(*resolver.resolve(url, "0").begin()));
-    }
-    catch(const boost::system::system_error&)
-    {
-         boost::throw_exception(boost::program_options::error("can't resolve " + url));
-    }
+    return boost::asio::ip::basic_endpoint<proto>(*resolver.resolve(url, "0").begin());
 }
-
-}}}
 
 int main(int argc, char *argv[])
 {
@@ -49,9 +35,10 @@ int main(int argc, char *argv[])
     desc.add_options()
         ("help", "produce help message")
         ("purpose", boost::program_options::value<std::string>()->required(), "wormhole purpose: <export|import>")
-        ("service", boost::program_options::value<boost::asio::ip::tcp::endpoint>()->required(), "endpoint of the exported/imported service: <ip:port>")
-        ("gateway", boost::program_options::value<boost::asio::ip::udp::endpoint>()->required(), "gateway endpoint of the transport tunnel: <ip:port>")
-        ("faraway", boost::program_options::value<boost::asio::ip::udp::endpoint>()->required(), "faraway endpoint of the transport tunnel: <ip:port>")
+        ("service", boost::program_options::value<std::string>()->required(), "endpoint of the exported/imported service: <ip:port>")
+        ("tunnel", boost::program_options::value<std::string>()->default_value("udp"), "tunnel base protocol: <udp|tcp>")
+        ("gateway", boost::program_options::value<std::string>()->required(), "gateway endpoint of the transport tunnel: <ip:port>")
+        ("faraway", boost::program_options::value<std::string>()->required(), "faraway endpoint of the transport tunnel: <ip:port>")
         ("obscure", boost::program_options::value<uint64_t>()->default_value(0), "pre-shared key to obscure the transport tunnel: <number>")
         ("log-file", boost::program_options::value<std::string>()->default_value(""), "log file path: <path>")
         ("log-level", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "log level: <fatal|error|warning|info|debug|trace>");
@@ -79,21 +66,35 @@ int main(int argc, char *argv[])
     {
         wormhole::log::set(vm["log-level"].as<wormhole::log::severity>(), vm["log-file"].as<std::string>());
 
+        auto tunnel = vm["tunnel"].as<std::string>();
         auto purpose = vm["purpose"].as<std::string>();
-        auto service = vm["service"].as<boost::asio::ip::tcp::endpoint>();
-        auto gateway = vm["gateway"].as<boost::asio::ip::udp::endpoint>();
-        auto faraway = vm["faraway"].as<boost::asio::ip::udp::endpoint>();
+        auto service = vm["service"].as<std::string>();
+        auto gateway = vm["gateway"].as<std::string>();
+        auto faraway = vm["faraway"].as<std::string>();
         auto obscure = vm["obscure"].as<uint64_t>();
 
-        _inf_ << "starting wormhole for purpose=" << purpose << " service=" << service << " gateway=" << gateway << " faraway=" << faraway << " obscure=" << (obscure != 0);
+        _inf_ << "starting wormhole for purpose=" << purpose << " service=" << service << " tunnel=" << tunnel << " gateway=" << gateway << " faraway=" << faraway << " obscure=" << (obscure != 0);
+
+        using tcp_proto = boost::asio::ip::tcp;
+        using udp_proto = boost::asio::ip::udp;
 
         boost::asio::io_context io;
-        auto router = purpose == "import"
-                    ? wormhole::create_importer(io, service, gateway, faraway, obscure)
-                    : wormhole::create_exporter(io, service, gateway, faraway, obscure);
-
-        router->launch();
-        io.run();
+        if (tunnel == "tcp")
+        {
+            auto router = purpose == "import"
+                ? wormhole::tcp_router::create_importer(io, endpoint<tcp_proto>(service), endpoint<tcp_proto>(gateway), endpoint<tcp_proto>(faraway), obscure)
+                : wormhole::tcp_router::create_exporter(io, endpoint<tcp_proto>(service), endpoint<tcp_proto>(gateway), endpoint<tcp_proto>(faraway), obscure);
+            router->launch();
+            io.run();
+        }
+        else
+        {
+            auto router = purpose == "import"
+                ? wormhole::udp_router::create_importer(io, endpoint<tcp_proto>(service), endpoint<udp_proto>(gateway), endpoint<udp_proto>(faraway), obscure)
+                : wormhole::udp_router::create_exporter(io, endpoint<tcp_proto>(service), endpoint<udp_proto>(gateway), endpoint<udp_proto>(faraway), obscure);
+            router->launch();
+            io.run();
+        }
     }
     catch (const std::exception& e)
     {
