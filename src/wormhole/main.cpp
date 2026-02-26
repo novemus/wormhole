@@ -10,38 +10,21 @@
 
 #include <wormhole/wormhole.h>
 #include <wormhole/logger.h>
-#include <regex>
-#include <iostream>
 #include <boost/program_options.hpp>
-
-template<class proto> 
-boost::asio::ip::basic_endpoint<proto> endpoint(const std::string& url)
-{
-    boost::asio::io_context io;
-    typename proto::resolver resolver(io);
-
-    std::smatch match;
-    if (std::regex_search(url, match, std::regex("^(\\w+://)?([^/]+):(\\d+)?$")))
-        return boost::asio::ip::basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[3].str()).begin());
-    else if (std::regex_search(url, match, std::regex("^(\\w+)://([^/]+).*$")))
-        return boost::asio::ip::basic_endpoint<proto>(*resolver.resolve(match[2].str(), match[1].str()).begin());
-
-    return boost::asio::ip::basic_endpoint<proto>(*resolver.resolve(url, "0").begin());
-}
 
 int main(int argc, char *argv[])
 {
     boost::program_options::options_description desc("wormhole options");
     desc.add_options()
         ("help", "produce help message")
-        ("purpose", boost::program_options::value<std::string>()->required(), "wormhole purpose: <export|import>")
-        ("service", boost::program_options::value<std::string>()->required(), "endpoint of the exported/imported service: <ip:port>")
-        ("tunnel", boost::program_options::value<std::string>()->default_value("udp"), "tunnel base protocol: <udp|tcp>")
-        ("gateway", boost::program_options::value<std::string>()->required(), "gateway endpoint of the transport tunnel: <ip:port>")
-        ("faraway", boost::program_options::value<std::string>()->required(), "faraway endpoint of the transport tunnel: <ip:port>")
+        ("purpose", boost::program_options::value<std::string>()->required(), "wormhole purpose: export|import")
+        ("service", boost::program_options::value<wormhole::endpoint>()->required(), "endpoint of the exported/imported tcp service: <ip:port>")
+        ("gateway", boost::program_options::value<wormhole::endpoint>()->required(), "gateway endpoint of the transport tunnel: <ip:port>")
+        ("faraway", boost::program_options::value<wormhole::endpoint>()->required(), "faraway endpoint of the transport tunnel: <ip:port>")
+        ("quality", boost::program_options::value<wormhole::quality>()->required(), "quality of the transport tunnel: udp:client|udp:server|tcp:client|tcp:server")
         ("obscure", boost::program_options::value<uint64_t>()->default_value(0), "pre-shared key to obscure the transport tunnel: <number>")
         ("log-file", boost::program_options::value<std::string>()->default_value(""), "log file path: <path>")
-        ("log-level", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "log level: <fatal|error|warning|info|debug|trace>");
+        ("log-level", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "log level: fatal|error|warning|info|debug|trace");
 
     boost::program_options::variables_map vm;
     try
@@ -66,35 +49,23 @@ int main(int argc, char *argv[])
     {
         wormhole::log::set(vm["log-level"].as<wormhole::log::severity>(), vm["log-file"].as<std::string>());
 
-        auto tunnel = vm["tunnel"].as<std::string>();
         auto purpose = vm["purpose"].as<std::string>();
-        auto service = vm["service"].as<std::string>();
-        auto gateway = vm["gateway"].as<std::string>();
-        auto faraway = vm["faraway"].as<std::string>();
+        auto service = vm["service"].as<wormhole::endpoint>();
+        auto gateway = vm["gateway"].as<wormhole::endpoint>();
+        auto faraway = vm["faraway"].as<wormhole::endpoint>();
+        auto quality = vm["quality"].as<wormhole::quality>();
         auto obscure = vm["obscure"].as<uint64_t>();
 
-        _inf_ << "starting wormhole for purpose=" << purpose << " service=" << service << " tunnel=" << tunnel << " gateway=" << gateway << " faraway=" << faraway << " obscure=" << (obscure != 0);
-
-        using tcp_proto = boost::asio::ip::tcp;
-        using udp_proto = boost::asio::ip::udp;
+        _inf_ << "starting wormhole for purpose=" << purpose << " service=" << service<< " gateway=" << gateway << " faraway=" << faraway << " quality=" << quality << " obscure=" << (obscure != 0);
 
         boost::asio::io_context io;
-        if (tunnel == "tcp")
-        {
-            auto router = purpose == "import"
-                ? wormhole::tcp_router::create_importer(io, endpoint<tcp_proto>(service), endpoint<tcp_proto>(gateway), endpoint<tcp_proto>(faraway), obscure)
-                : wormhole::tcp_router::create_exporter(io, endpoint<tcp_proto>(service), endpoint<tcp_proto>(gateway), endpoint<tcp_proto>(faraway), obscure);
-            router->launch();
-            io.run();
-        }
-        else
-        {
-            auto router = purpose == "import"
-                ? wormhole::udp_router::create_importer(io, endpoint<tcp_proto>(service), endpoint<udp_proto>(gateway), endpoint<udp_proto>(faraway), obscure)
-                : wormhole::udp_router::create_exporter(io, endpoint<tcp_proto>(service), endpoint<udp_proto>(gateway), endpoint<udp_proto>(faraway), obscure);
-            router->launch();
-            io.run();
-        }
+
+        auto router = purpose == "import"
+            ? wormhole::create_importer(io, service, gateway, faraway, quality, obscure)
+            : wormhole::create_exporter(io, service, gateway, faraway, quality, obscure);
+        router->launch();
+
+        io.run();
     }
     catch (const std::exception& e)
     {

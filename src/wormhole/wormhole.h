@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <iostream>
 #include <wormhole/export.h>
 #include <boost/asio.hpp>
 #include <boost/asio/ip/udp.hpp>
@@ -17,41 +18,37 @@
 
 namespace wormhole {
 
-typedef boost::asio::ip::udp::endpoint udp_endpoint;
-typedef boost::asio::ip::tcp::endpoint tcp_endpoint;
-
-template<class proto> struct LIBWORMHOLE_EXPORT router
+struct endpoint
 {
-    typedef boost::asio::ip::basic_endpoint<proto> tunnel_endpoint;
-    typedef boost::asio::ip::tcp::endpoint         server_endpoint;
+    std::string host;
+    uint16_t port;
+};
 
+enum protocol { udp, tcp };
+enum strategy { client, server };
+
+LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, endpoint& ep);
+LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const endpoint& ep);
+
+struct quality
+{
+    protocol proto;
+    strategy role;
+};
+
+LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, quality& qos);
+LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const quality& qos);
+
+struct LIBWORMHOLE_EXPORT router
+{
     virtual ~router() {}
     virtual void launch() noexcept(true) = 0;
     virtual void cancel() noexcept(true) = 0;
-
-    static std::shared_ptr<router<proto>> create_exporter(
-        boost::asio::io_context& io, const server_endpoint& server, const tunnel_endpoint& gateway, const tunnel_endpoint& faraway, uint64_t secret) noexcept(false);
-
-    static std::shared_ptr<router<proto>> create_importer(
-        boost::asio::io_context& io, const server_endpoint& server, const tunnel_endpoint& gateway, const tunnel_endpoint& faraway, uint64_t secret) noexcept(false);
 };
 
-typedef router<boost::asio::ip::udp> udp_router;
-typedef router<boost::asio::ip::tcp> tcp_router;
+LIBWORMHOLE_EXPORT std::shared_ptr<router> create_exporter(
+        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, uint64_t secret) noexcept(false);
 
-template <>
-std::shared_ptr<udp_router> udp_router::create_exporter(
-    boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false);
-
-template <>
-std::shared_ptr<udp_router> udp_router::create_importer(
-    boost::asio::io_context& io, const tcp_endpoint& server, const udp_endpoint& gateway, const udp_endpoint& faraway, uint64_t secret) noexcept(false);
-
-template <>
-std::shared_ptr<tcp_router> tcp_router::create_exporter(
-    boost::asio::io_context& io, const tcp_endpoint& server, const tcp_endpoint& gateway, const tcp_endpoint& faraway, uint64_t secret) noexcept(false);
-
-template <>
-std::shared_ptr<tcp_router> tcp_router::create_importer(
-    boost::asio::io_context& io, const tcp_endpoint& server, const tcp_endpoint& gateway, const tcp_endpoint& faraway, uint64_t secret) noexcept(false);
+LIBWORMHOLE_EXPORT std::shared_ptr<router> create_importer(
+        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, uint64_t secret) noexcept(false);
 }

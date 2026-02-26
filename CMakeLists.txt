@@ -59,13 +59,16 @@ endif()
 
 set(SOURCES "${CMAKE_CURRENT_BINARY_DIR}/export_header/wormhole/export.h"
     src/wormhole/logger.h
+    src/wormhole/tunnel.h
     src/wormhole/wormhole.h
     src/wormhole/logger.cpp
+    src/wormhole/tunnel.cpp
     src/wormhole/wormhole.cpp
     )
 
 set(HEADERS "${CMAKE_CURRENT_BINARY_DIR}/export_header/wormhole/export.h"
     src/wormhole/logger.h
+    src/wormhole/tunnel.h
     src/wormhole/wormhole.h
     )
 
