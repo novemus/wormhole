@@ -25,15 +25,15 @@ struct endpoint
 };
 
 enum protocol { udp, tcp };
-enum strategy { client, server };
+enum strategy { depend, client, server };
 
 LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, endpoint& ep);
 LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const endpoint& ep);
 
 struct quality
 {
-    protocol proto;
-    strategy role;
+    protocol proto = protocol::udp;
+    strategy role = strategy::depend;
 };
 
 LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, quality& qos);

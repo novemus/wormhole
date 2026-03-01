@@ -156,10 +156,10 @@ void test_tunnel(wormhole::protocol proto)
     auto server = create_tcp_server(io, boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), 18765));
     BOOST_REQUIRE_NO_THROW(server->start());
 
-    auto exporter = wormhole::create_exporter(io, wormhole::endpoint{SERVER.address().to_string(), SERVER.port()}, SERVER_GATEWAY, CLIENT_GATEWAY, wormhole::quality{ proto, wormhole::server }, 1234567890);
+    auto exporter = wormhole::create_exporter(io, wormhole::endpoint{SERVER.address().to_string(), SERVER.port()}, SERVER_GATEWAY, CLIENT_GATEWAY, wormhole::quality{ proto, wormhole::depend }, 1234567890);
     BOOST_REQUIRE_NO_THROW(exporter->launch());
 
-    auto importer = wormhole::create_importer(io, wormhole::endpoint{PROXY.address().to_string(), PROXY.port()}, CLIENT_GATEWAY, SERVER_GATEWAY, wormhole::quality{ proto, wormhole::client }, 1234567890);
+    auto importer = wormhole::create_importer(io, wormhole::endpoint{PROXY.address().to_string(), PROXY.port()}, CLIENT_GATEWAY, SERVER_GATEWAY, wormhole::quality{ proto, wormhole::depend }, 1234567890);
     BOOST_REQUIRE_NO_THROW(importer->launch());
 
     boost::asio::ip::tcp::socket client1(io, boost::asio::ip::tcp::v4());

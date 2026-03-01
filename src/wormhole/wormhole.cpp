@@ -60,8 +60,10 @@ std::istream& operator>>(std::istream& is, quality& qos)
 
     if (role == "server")
         qos.role = strategy::server;
-    else
+    else if (role == "client")
         qos.role = strategy::client;
+    else
+        qos.role = strategy::depend;
 
     return is;
 }
@@ -70,7 +72,7 @@ std::ostream& operator<<(std::ostream& os, const quality& qos)
 {
     switch(qos.proto)
     {
-        case protocol::udp:
+        case protocol::tcp:
             os << "tcp";
             break;
         default:
@@ -85,8 +87,11 @@ std::ostream& operator<<(std::ostream& os, const quality& qos)
         case strategy::server:
             os << "server";
             break;
-        default:
+        case strategy::client:
             os << "client";
+            break;
+        default:
+            os << "depend";
             break;
     }
 
@@ -597,23 +602,27 @@ private:
     }
 };
 
-std::shared_ptr<tunnel> create_tunnel(boost::asio::io_context& io, const endpoint& gateway, const endpoint& faraway, const quality& qos, uint64_t secret) noexcept(false)
+std::shared_ptr<tunnel> create_tunnel(boost::asio::io_context& io, const endpoint& gateway, const endpoint& faraway, protocol proto, strategy role, uint64_t secret) noexcept(false)
 {
-    if (qos.proto == protocol::tcp)
-        return create_tcp_tunnel(io, resolve<boost::asio::ip::tcp>(gateway), resolve<boost::asio::ip::tcp>(faraway), qos.role, secret);
-    return create_udp_tunnel(io, resolve<boost::asio::ip::udp>(gateway), resolve<boost::asio::ip::udp>(faraway), qos.role, secret);
+    if (proto == protocol::tcp)
+        return create_tcp_tunnel(io, resolve<boost::asio::ip::tcp>(gateway), resolve<boost::asio::ip::tcp>(faraway), role, secret);
+    return create_udp_tunnel(io, resolve<boost::asio::ip::udp>(gateway), resolve<boost::asio::ip::udp>(faraway), role, secret);
 }
 
 std::shared_ptr<router> create_exporter(
     boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, uint64_t secret) noexcept(false)
 {
-    return std::make_shared<exporter>(io, resolve<boost::asio::ip::tcp>(service), create_tunnel(io, gateway, faraway, qos, secret));
+    return std::make_shared<exporter>(
+        io, resolve<boost::asio::ip::tcp>(service), create_tunnel(io, gateway, faraway, qos.proto, qos.role == strategy::depend ? strategy::server : qos.role, secret)
+    );
 }
 
 std::shared_ptr<router> create_importer(
     boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, uint64_t secret) noexcept(false)
 {
-    return std::make_shared<importer>(io, resolve<boost::asio::ip::tcp>(service), create_tunnel(io, gateway, faraway, qos, secret));
+    return std::make_shared<importer>(
+        io, resolve<boost::asio::ip::tcp>(service), create_tunnel(io, gateway, faraway, qos.proto, qos.role == strategy::depend ? strategy::client : qos.role, secret)
+    );
 }
 
 }
