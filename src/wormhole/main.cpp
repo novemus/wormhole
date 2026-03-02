@@ -8,47 +8,55 @@
  * 
  */
 
-#include <iomanip>
 #include <wormhole/wormhole.h>
 #include <wormhole/logger.h>
 #include <boost/program_options.hpp>
 
+constexpr const char* envs = R"(environment options:
+  WORMHOLE_SECRET=<number>        pre-shared 64-bit key to obscure the tcp/udp tunnel
+  WORMHOLE_CERT=<path>            host certificate for ssl verification
+  WORMHOLE_KEY=<path>             host private key for ssl verification
+  WORMHOLE_CA=<path>              peer certificate for ssl verification)";
+
 int main(int argc, char *argv[])
 {
-    boost::program_options::options_description opts("command line options", 120, 60);
-    opts.add_options()
+    boost::program_options::options_description base("command line options", 120, 60);
+    base.add_options()
         ("help,h", "produce help message")
         ("purpose,p", boost::program_options::value<std::string>()->required(), "wormhole purpose: export|import")
         ("service,s", boost::program_options::value<wormhole::endpoint>()->required(), "endpoint of the exported/imported tcp service: <ip:port>")
         ("gateway,g", boost::program_options::value<wormhole::endpoint>()->required(), "gateway endpoint of the tunnel: <ip:port>")
         ("faraway,f", boost::program_options::value<wormhole::endpoint>()->required(), "faraway endpoint of the tunnel: <ip:port>")
-        ("quality,q", boost::program_options::value<wormhole::quality>()->default_value(wormhole::quality()), "quality of the tunnel: udp:client|udp:server|tcp:client|tcp:server")
+        ("quality,q", boost::program_options::value<wormhole::quality>()->default_value(wormhole::quality()), "quality of the tunnel: udp:client|udp:server|tcp:client|tcp:server|ssl:client|ssl:server")
         ("journal,j", boost::program_options::value<std::string>()->default_value(""), "journal file: <path>")
         ("logging,l", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "logging level: fatal|error|warning|info|debug|trace");
 
-    boost::program_options::options_description envs("environment options");
-    envs.add_options()
-        ("obscure", boost::program_options::value<uint64_t>()->default_value(0));
+    boost::program_options::options_description more("security options");
+    more.add_options()
+        ("secret", boost::program_options::value<uint64_t>()->default_value(0))
+        ("cert", boost::program_options::value<std::string>()->default_value(""))
+        ("key", boost::program_options::value<std::string>()->default_value(""))
+        ("ca", boost::program_options::value<std::string>()->default_value(""));
 
     boost::program_options::variables_map vm;
     try
     {
-        boost::program_options::store(boost::program_options::parse_command_line(argc, argv, opts), vm);
+        boost::program_options::store(boost::program_options::parse_command_line(argc, argv, base), vm);
         if (vm.count("help"))
         {
-            std::cout << opts << std::endl
-                      << "environment options:" << std::endl
-                      << std::setw(35) << "WORMHOLE_SECRET=<64-bit number>" 
-                      << std::setw(55) << "pre-shared key to obscure the tunnel (optional)" << std::endl;
+            std::cout << base << std::endl << envs << std::endl;
             return 0;
         }
 
         auto mapper = [](const std::string& env)
         {
-            return env == "WORMHOLE_SECRET" ? "obscure" : "";
+            return env == "WORMHOLE_SECRET" ? "secret" : 
+                   env == "WORMHOLE_CERT" ? "cert" : 
+                   env == "WORMHOLE_KEY" ? "key" : 
+                   env == "WORMHOLE_CA" ? "ca" : "";
         };
 
-        boost::program_options::store(boost::program_options::parse_environment(envs, mapper), vm);
+        boost::program_options::store(boost::program_options::parse_environment(more, mapper), vm);
         boost::program_options::notify(vm);
     }
     catch (const std::exception& e)
@@ -66,15 +74,23 @@ int main(int argc, char *argv[])
         auto gateway = vm["gateway"].as<wormhole::endpoint>();
         auto faraway = vm["faraway"].as<wormhole::endpoint>();
         auto quality = vm["quality"].as<wormhole::quality>();
-        auto obscure = vm["obscure"].as<uint64_t>();
 
-        _inf_ << "starting wormhole for purpose=" << purpose << " service=" << service<< " gateway=" << gateway << " faraway=" << faraway << " quality=" << quality << "obscure=" << (obscure != 0);
+        wormhole::security guard = { 
+            vm["secret"].as<uint64_t>(),
+            wormhole::security::crypto {
+                vm["cert"].as<std::string>(),
+                vm["key"].as<std::string>(),
+                vm["ca"].as<std::string>()
+            }
+        };
+
+        _inf_ << "starting wormhole for purpose=" << purpose << " service=" << service << " gateway=" << gateway << " faraway=" << faraway << " quality=" << quality;
 
         boost::asio::io_context io;
 
         auto router = purpose == "import"
-            ? wormhole::create_importer(io, service, gateway, faraway, quality, obscure)
-            : wormhole::create_exporter(io, service, gateway, faraway, quality, obscure);
+            ? wormhole::create_importer(io, service, gateway, faraway, quality, guard)
+            : wormhole::create_exporter(io, service, gateway, faraway, quality, guard);
         router->launch();
 
         io.run();

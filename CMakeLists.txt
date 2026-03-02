@@ -38,6 +38,12 @@ message("* tubus Version: ${tubus_VERSION}")
 message("* tubus Include Dirs: ${tubus_INCLUDE_DIRS}")
 message("* tubus Library: ${tubus_LIBRARY}")
 
+find_package(OpenSSL REQUIRED)
+
+message("* OpenSSL Version: ${OPENSSL_VERSION}")
+message("* OpenSSL Include Dir: ${OPENSSL_INCLUDE_DIR}")
+message("* OpenSSL Libraries: ${OPENSSL_LIBRARIES}")
+
 ########## build ##########
 
 include(GenerateExportHeader)
@@ -94,8 +100,8 @@ endif()
 target_sources(${LIBWORMHOLE} PRIVATE ${SOURCES})
 target_sources(${BINWORMHOLE} PRIVATE src/wormhole/main.cpp)
 
-target_link_libraries(${LIBWORMHOLE} PRIVATE tubus::libtubus)
-target_link_libraries(${BINWORMHOLE} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus Boost::program_options)
+target_link_libraries(${LIBWORMHOLE} PRIVATE tubus::libtubus OpenSSL::Crypto OpenSSL::SSL)
+target_link_libraries(${BINWORMHOLE} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus Boost::program_options OpenSSL::Crypto OpenSSL::SSL)
 
 target_compile_features(${LIBWORMHOLE} PRIVATE cxx_std_17)
 target_compile_features(${BINWORMHOLE} PRIVATE cxx_std_17)
@@ -180,8 +186,8 @@ endif()
 if(NOT WORMHOLE_SKIP_TEST_RULES)
     set(WORMHOLE_TEST wormhole_ut)
 
-    add_executable(${WORMHOLE_TEST} tests/logger.cpp tests/wormhole.cpp)
-    target_link_libraries(${WORMHOLE_TEST} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus Boost::unit_test_framework)
+    add_executable(${WORMHOLE_TEST} tests/logger.cpp tests/tunnel.cpp tests/wormhole.cpp)
+    target_link_libraries(${WORMHOLE_TEST} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus Boost::unit_test_framework OpenSSL::Crypto OpenSSL::SSL)
 
     target_include_directories(${WORMHOLE_TEST} PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>" "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export_header>")
     target_compile_features(${WORMHOLE_TEST} PRIVATE cxx_std_17)

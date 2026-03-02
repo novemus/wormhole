@@ -53,17 +53,21 @@ std::istream& operator>>(std::istream& is, quality& qos)
     auto proto = str.substr(0, delim);
     auto role = delim != std::string_view::npos ? str.substr(delim + 1) : "";
 
-    if (proto == "udp")
+    if (proto == "ssl")
+        qos.proto = protocol::ssl;
+    else if (proto == "tcp")
+        qos.proto = protocol::tcp;
+    else if (proto == "udp")
         qos.proto = protocol::udp;
     else
-        qos.proto = protocol::tcp;
+        qos.proto = protocol::any;
 
     if (role == "server")
         qos.role = strategy::server;
     else if (role == "client")
         qos.role = strategy::client;
     else
-        qos.role = strategy::depend;
+        qos.role = strategy::relate;
 
     return is;
 }
@@ -72,11 +76,17 @@ std::ostream& operator<<(std::ostream& os, const quality& qos)
 {
     switch(qos.proto)
     {
+        case protocol::udp:
+            os << "udp";
+            break;
         case protocol::tcp:
             os << "tcp";
             break;
+        case protocol::ssl:
+            os << "ssl";
+            break;
         default:
-            os << "udp";
+            os << "auto";
             break;
     }
 
@@ -91,7 +101,7 @@ std::ostream& operator<<(std::ostream& os, const quality& qos)
             os << "client";
             break;
         default:
-            os << "depend";
+            os << "auto";
             break;
     }
 
@@ -435,9 +445,8 @@ public:
 
     importer(boost::asio::io_context& io, const boost::asio::ip::tcp::endpoint& service, std::shared_ptr<tunnel> tunnel)
         : router_base(io, tunnel)
-        , m_server(io, service)
+        , m_server(io, service, true)
     {
-        m_server.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
     }
 
     void launch() noexcept(true) override
@@ -538,12 +547,12 @@ public:
     void launch() noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
-        m_tunnel->open([this, weak = weak_from_this()](const boost::system::error_code& error)
+        m_tunnel->open([this, weak = weak_from_this()](const boost::system::error_code& ec)
         {
             auto ptr = weak.lock();
-            if (error)
+            if (ec)
             {
-                _err_ << error.message();
+                _err_ << ec.message();
 
                 if (ptr)
                     cancel();
@@ -602,26 +611,28 @@ private:
     }
 };
 
-std::shared_ptr<tunnel> create_tunnel(boost::asio::io_context& io, const endpoint& gateway, const endpoint& faraway, protocol proto, strategy role, uint64_t secret) noexcept(false)
+std::shared_ptr<tunnel> create_tunnel(boost::asio::io_context& io, const endpoint& gateway, const endpoint& faraway, protocol proto, strategy role, const security& guard) noexcept(false)
 {
+    if (proto == protocol::ssl)
+        return create_ssl_tunnel(io, resolve<boost::asio::ip::tcp>(gateway), resolve<boost::asio::ip::tcp>(faraway), role, guard.identity);
     if (proto == protocol::tcp)
-        return create_tcp_tunnel(io, resolve<boost::asio::ip::tcp>(gateway), resolve<boost::asio::ip::tcp>(faraway), role, secret);
-    return create_udp_tunnel(io, resolve<boost::asio::ip::udp>(gateway), resolve<boost::asio::ip::udp>(faraway), role, secret);
+        return create_tcp_tunnel(io, resolve<boost::asio::ip::tcp>(gateway), resolve<boost::asio::ip::tcp>(faraway), role, guard.secret);
+    return create_udp_tunnel(io, resolve<boost::asio::ip::udp>(gateway), resolve<boost::asio::ip::udp>(faraway), role, guard.secret);
 }
 
 std::shared_ptr<router> create_exporter(
-    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, uint64_t secret) noexcept(false)
+    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& guard) noexcept(false)
 {
     return std::make_shared<exporter>(
-        io, resolve<boost::asio::ip::tcp>(service), create_tunnel(io, gateway, faraway, qos.proto, qos.role == strategy::depend ? strategy::server : qos.role, secret)
+        io, resolve<boost::asio::ip::tcp>(service), create_tunnel(io, gateway, faraway, qos.proto, qos.role == strategy::relate ? strategy::server : qos.role, guard)
     );
 }
 
 std::shared_ptr<router> create_importer(
-    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, uint64_t secret) noexcept(false)
+    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& guard) noexcept(false)
 {
     return std::make_shared<importer>(
-        io, resolve<boost::asio::ip::tcp>(service), create_tunnel(io, gateway, faraway, qos.proto, qos.role == strategy::depend ? strategy::client : qos.role, secret)
+        io, resolve<boost::asio::ip::tcp>(service), create_tunnel(io, gateway, faraway, qos.proto, qos.role == strategy::relate ? strategy::client : qos.role, guard)
     );
 }
 

@@ -87,4 +87,6 @@ LIBWORMHOLE_EXPORT std::shared_ptr<tunnel> create_udp_tunnel(
 LIBWORMHOLE_EXPORT std::shared_ptr<tunnel> create_tcp_tunnel(
     boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, strategy qos, uint64_t secret) noexcept(true);
 
+LIBWORMHOLE_EXPORT std::shared_ptr<tunnel> create_ssl_tunnel(
+    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, strategy role, const security::crypto& identity) noexcept(true);
 }

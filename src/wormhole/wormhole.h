@@ -13,8 +13,6 @@
 #include <iostream>
 #include <wormhole/export.h>
 #include <boost/asio.hpp>
-#include <boost/asio/ip/udp.hpp>
-#include <boost/asio/ip/tcp.hpp>
 
 namespace wormhole {
 
@@ -24,22 +22,33 @@ struct endpoint
     uint16_t port;
 };
 
-enum protocol { udp, tcp };
-enum strategy { depend, client, server };
+enum protocol { any, udp, tcp, ssl };
+enum strategy { relate, client, server };
 
 LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, endpoint& ep);
 LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const endpoint& ep);
 
 struct quality
 {
-    protocol proto = protocol::udp;
-    strategy role = strategy::depend;
+    protocol proto = protocol::any;
+    strategy role = strategy::relate;
 };
 
 LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, quality& qos);
 LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const quality& qos);
 
-struct LIBWORMHOLE_EXPORT router
+struct security
+{
+    uint64_t secret;
+    struct crypto
+    {
+        std::string cert;
+        std::string key;
+        std::string ca;
+    } identity;
+};
+
+struct router
 {
     virtual ~router() {}
     virtual void launch() noexcept(true) = 0;
@@ -47,8 +56,8 @@ struct LIBWORMHOLE_EXPORT router
 };
 
 LIBWORMHOLE_EXPORT std::shared_ptr<router> create_exporter(
-        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, uint64_t secret) noexcept(false);
+        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& guard) noexcept(false);
 
 LIBWORMHOLE_EXPORT std::shared_ptr<router> create_importer(
-        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, uint64_t secret) noexcept(false);
+        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& guard) noexcept(false);
 }

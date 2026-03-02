@@ -107,7 +107,7 @@ public:
         m_acceptor.close(ec);
 
         for(auto& session : m_sessions)
-            session->socket().cancel(ec);
+            session->socket().close(ec);
     }
 
 protected:
@@ -135,10 +135,30 @@ std::shared_ptr<tcp_echo_server> create_tcp_server(boost::asio::io_context& io, 
     return std::make_shared<tcp_echo_server>(io, ep);
 }
 
-void test_tunnel(wormhole::protocol proto)
+void test_wormhole(wormhole::protocol proto)
 {
     const char HELLO_WORMHOLE[] = "Hello, Wormhole!";
     const char WORMHOLE_HELLO[] = "Wormhole, Hello!";
+
+    wormhole::quality qos { proto, wormhole::relate };
+
+    wormhole::security for_import {
+        1234567890,
+        wormhole::security::crypto {
+            "./certs/client.crt",
+            "./certs/client.key",
+            "./certs/ca.crt"
+        }
+    };
+
+    wormhole::security for_export = {
+        1234567890,
+        wormhole::security::crypto {
+            "./certs/server.crt",
+            "./certs/server.key",
+            "./certs/ca.crt"
+        }
+    };
 
     const boost::asio::ip::tcp::endpoint SERVER(boost::asio::ip::make_address("127.0.0.1"), 18765);
     const boost::asio::ip::tcp::endpoint PROXY(boost::asio::ip::make_address("127.0.0.1"), 15678);
@@ -153,13 +173,13 @@ void test_tunnel(wormhole::protocol proto)
     boost::asio::post(pool, [&io] { io.run(); });
     boost::asio::post(pool, [&io] { io.run(); });
 
-    auto server = create_tcp_server(io, boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), 18765));
+    auto server = create_tcp_server(io, SERVER);
     BOOST_REQUIRE_NO_THROW(server->start());
 
-    auto exporter = wormhole::create_exporter(io, wormhole::endpoint{SERVER.address().to_string(), SERVER.port()}, SERVER_GATEWAY, CLIENT_GATEWAY, wormhole::quality{ proto, wormhole::depend }, 1234567890);
+    auto exporter = wormhole::create_exporter(io, wormhole::endpoint{SERVER.address().to_string(), SERVER.port()}, SERVER_GATEWAY, CLIENT_GATEWAY, qos, for_export);
     BOOST_REQUIRE_NO_THROW(exporter->launch());
 
-    auto importer = wormhole::create_importer(io, wormhole::endpoint{PROXY.address().to_string(), PROXY.port()}, CLIENT_GATEWAY, SERVER_GATEWAY, wormhole::quality{ proto, wormhole::depend }, 1234567890);
+    auto importer = wormhole::create_importer(io, wormhole::endpoint{PROXY.address().to_string(), PROXY.port()}, CLIENT_GATEWAY, SERVER_GATEWAY, qos, for_import);
     BOOST_REQUIRE_NO_THROW(importer->launch());
 
     boost::asio::ip::tcp::socket client1(io, boost::asio::ip::tcp::v4());
@@ -175,7 +195,7 @@ void test_tunnel(wormhole::protocol proto)
 
     BOOST_REQUIRE_NO_THROW(BOOST_REQUIRE_EQUAL(boost::asio::read(client1, boost::asio::buffer(buffer, sizeof(HELLO_WORMHOLE))), sizeof(HELLO_WORMHOLE)));
     BOOST_REQUIRE_EQUAL(std::memcmp(buffer, HELLO_WORMHOLE, sizeof(HELLO_WORMHOLE)), 0);
-    
+
     BOOST_REQUIRE_NO_THROW(BOOST_REQUIRE_EQUAL(boost::asio::read(client2, boost::asio::buffer(buffer, sizeof(WORMHOLE_HELLO))), sizeof(WORMHOLE_HELLO)));
     BOOST_REQUIRE_EQUAL(std::memcmp(buffer, WORMHOLE_HELLO, sizeof(WORMHOLE_HELLO)), 0);
 
@@ -184,7 +204,7 @@ void test_tunnel(wormhole::protocol proto)
 
     BOOST_REQUIRE_NO_THROW(BOOST_REQUIRE_EQUAL(boost::asio::read(client1, boost::asio::buffer(buffer, sizeof(HELLO_WORMHOLE))), sizeof(HELLO_WORMHOLE)));
     BOOST_REQUIRE_EQUAL(std::memcmp(buffer, HELLO_WORMHOLE, sizeof(HELLO_WORMHOLE)), 0);
-    
+
     BOOST_REQUIRE_NO_THROW(BOOST_REQUIRE_EQUAL(boost::asio::read(client2, boost::asio::buffer(buffer, sizeof(WORMHOLE_HELLO))), sizeof(WORMHOLE_HELLO)));
     BOOST_REQUIRE_EQUAL(std::memcmp(buffer, WORMHOLE_HELLO, sizeof(WORMHOLE_HELLO)), 0);
 
@@ -207,10 +227,15 @@ void test_tunnel(wormhole::protocol proto)
 
 BOOST_AUTO_TEST_CASE(udp_wormhole)
 {
-    test_tunnel(wormhole::protocol::udp);
+    test_wormhole(wormhole::protocol::udp);
 }
 
 BOOST_AUTO_TEST_CASE(tcp_wormhole)
 {
-    test_tunnel(wormhole::protocol::udp);
+    test_wormhole(wormhole::protocol::tcp);
+}
+
+BOOST_AUTO_TEST_CASE(ssl_wormhole)
+{
+    test_wormhole(wormhole::protocol::ssl);
 }

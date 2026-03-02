@@ -10,7 +10,10 @@
 
 #include <tubus/channel.h>
 #include <wormhole/tunnel.h>
+#include <wormhole/logger.h>
+#include <boost/asio/ssl.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
+#include <atomic>
 #include <mutex>
 #include <queue>
 #include <map>
@@ -48,10 +51,10 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
     {
         m_channel->write(*packet, [this, weak = this->weak_from_this(), packet, handle](const boost::system::error_code& ec, size_t size)
         {
-            if (auto ptr = weak.lock())
+            if (auto self = weak.lock())
             {
                 std::unique_lock<std::mutex> lock(m_mutex);
-                if (m_wq.size())
+                if (not m_wq.empty())
                 {
                     auto next = m_wq.front();
                     if (m_channel->writable() > next.first->size())
@@ -81,10 +84,10 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
     {
         auto callback = [this, weak = this->weak_from_this(), handler](const boost::system::error_code& ec)
         {
-            if (auto ptr = weak.lock())
+            if (auto self = weak.lock())
             {
                 std::unique_lock<std::mutex> lock(m_mutex);
-                if (m_rq.size())
+                if (not m_rq.empty())
                 {
                     auto next = m_rq.front();
                     m_rq.pop();
@@ -105,7 +108,7 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
             {
                 callback(boost::asio::error::message_size);
             }
-            else if (auto ptr = weak.lock())
+            else if (auto self = weak.lock())
             {
                 packet->shrink(packet->capacity());
 
@@ -115,7 +118,7 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
                     return;
                 }
 
-                m_channel->read(packet->payload(), [packet, callback](const boost::system::error_code& ec, size_t size) mutable
+                m_channel->read(packet->payload(), [packet, callback](const boost::system::error_code& ec, size_t size)
                 {
                     if (ec)
                         callback(ec);
@@ -148,7 +151,7 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
         {
             if (ec)
             {
-                if (auto ptr = weak.lock())
+                if (auto self = weak.lock())
                 {
                     if (ec.value() == boost::asio::error::connection_refused)
                     {
@@ -159,7 +162,7 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
                                 handler(ec);
                             else if (boost::posix_time::second_clock::universal_time() > deadline)
                                 handler(boost::asio::error::timed_out);
-                            else if (auto ptr = weak.lock())
+                            else if (auto self = weak.lock())
                                 connect(std::move(handler), deadline);
                             else
                                 handler(boost::asio::error::operation_aborted);
@@ -198,6 +201,20 @@ public:
     {
         if (m_channel)
         {
+            while (not m_rq.empty())
+            {
+                auto op = m_rq.front();
+                m_rq.pop();
+                boost::asio::post(m_io, std::bind(op.second, boost::asio::error::operation_aborted));
+            }
+
+            while (not m_wq.empty())
+            {
+                auto op = m_wq.front();
+                m_wq.pop();
+                boost::asio::post(m_io, std::bind(op.second, boost::asio::error::operation_aborted));
+            }
+
             m_channel->shutdown(handler);
             return;
         }
@@ -244,20 +261,453 @@ public:
     }
 };
 
-std::shared_ptr<tunnel> create_udp_tunnel(
-    boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, strategy qos, uint64_t secret) noexcept(true)
+template<bool accept> 
+class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel<accept>>
 {
-    if (qos == strategy::server)
+    typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> ssl_stream;
+    typedef boost::asio::ip::tcp::acceptor tcp_acceptor;
+    typedef boost::asio::ip::tcp::endpoint tcp_endpoint;
+    typedef std::queue<std::pair<packet_ptr, callback>> defer_queue;
+
+    enum status { s_none, s_half, s_open };
+
+    boost::asio::io_context& m_io;
+    boost::asio::io_context::strand m_strand;
+    boost::asio::ssl::context m_ssl;
+    boost::asio::deadline_timer m_timer;
+    tcp_acceptor m_acceptor;
+    ssl_stream m_stream;
+    tcp_endpoint m_gateway;
+    tcp_endpoint m_faraway;
+    defer_queue m_wq;
+    defer_queue m_rq;
+    status m_status = status::s_none;
+
+    static constexpr size_t SOCKET_BUFFER_SIZE = 1048576;
+
+    void write(packet_ptr packet, const callback& handler) noexcept(true)
+    {
+        auto callback = [this, weak = this->weak_from_this(), handler](const boost::system::error_code& ec)
+        {
+            if (auto self = weak.lock())
+            {
+                if (not m_wq.empty())
+                    m_wq.pop();
+
+                if (not m_wq.empty())
+                {
+                    auto& next = m_wq.front();
+                    write(next.first, next.second);
+                }
+
+                m_strand.post(std::bind(handler, ec));
+            }
+            else
+                handler(boost::asio::error::shut_down);
+        };
+
+        if (m_status != status::s_open)
+        {
+            m_strand.post(std::bind(handler, boost::asio::error::shut_down));
+            return;
+        }
+
+        boost::asio::async_write(m_stream, *packet, m_strand.wrap([this, weak = this->weak_from_this(), packet, callback](const boost::system::error_code& ec, size_t size)
+        {
+            if (auto self = weak.lock())
+            {
+                if (ec)
+                    m_strand.post(std::bind(callback, ec));
+                else if (size != packet->size())
+                    m_strand.post(std::bind(callback, boost::asio::error::message_size));
+                else
+                    m_strand.post(std::bind(callback, ec));
+            }
+            else
+                callback(ec);
+        }));
+    }
+
+    void read(packet_ptr packet, const callback& handler) noexcept(true)
+    {
+        auto callback = [this, weak = this->weak_from_this(), handler](const boost::system::error_code& ec)
+        {
+            if (auto self = weak.lock())
+            {
+                if (not m_rq.empty())
+                    m_rq.pop();
+
+                if (not m_rq.empty())
+                {
+                    auto& next = m_rq.front();
+                    read(next.first, next.second);
+                }
+
+                m_strand.post(std::bind(handler, ec));
+            }
+            else
+                handler(boost::asio::error::shut_down);
+        };
+
+        if (m_status != status::s_open)
+        {
+            m_strand.post(std::bind(handler, boost::asio::error::shut_down));
+            return;
+        }
+
+        boost::asio::async_read(m_stream, packet->header(), m_strand.wrap([this, weak = this->weak_from_this(), packet, callback](const boost::system::error_code& ec, size_t size)
+        {
+            if (auto self = weak.lock())
+            {
+                if (ec)
+                    m_strand.post(std::bind(callback, ec));
+                else if (size < packet::header_size || packet->capacity() > packet::max_payload_size)
+                    m_strand.post(std::bind(callback, boost::asio::error::message_size));
+                else
+                {
+                    packet->shrink(packet->capacity());
+                    if (packet->capacity() == 0)
+                    {
+                        m_strand.post(std::bind(callback, ec));
+                        return;
+                    }
+
+                    m_strand.post([this, weak, packet, callback]()
+                    {
+                        if (auto self = weak.lock())
+                        {
+                            if (m_status == status::s_open)
+                            {
+                                boost::asio::async_read(m_stream, packet->payload(), m_strand.wrap([this, weak, packet, callback](const boost::system::error_code& ec, size_t size)
+                                {
+                                    if (auto self = weak.lock())
+                                    {
+                                        if (ec)
+                                            m_strand.post(std::bind(callback, ec));
+                                        else if (size != packet->capacity())
+                                            m_strand.post(std::bind(callback, boost::asio::error::message_size));
+                                        else
+                                            m_strand.post(std::bind(callback, ec));
+                                    }
+                                    else
+                                        callback(ec);
+                                }));
+                            }
+                            else
+                                m_strand.post(std::bind(callback, boost::asio::error::shut_down));
+                        }
+                        else
+                            callback(boost::asio::error::shut_down);
+                    });
+                }
+            }
+            else
+                callback(boost::asio::error::shut_down);
+        }));
+    }
+
+    void do_accept(const callback& handler, const boost::posix_time::ptime& deadline) noexcept(true)
+    {
+        if (m_stream.next_layer().is_open())
+        {
+            boost::system::error_code ec;
+            m_stream.next_layer().close(ec);
+        }
+
+        if (not deadline.is_not_a_date_time())
+        {
+            m_acceptor.open(m_gateway.protocol());
+            m_acceptor.non_blocking(true);
+            m_acceptor.set_option(boost::asio::socket_base::send_buffer_size(SOCKET_BUFFER_SIZE));
+            m_acceptor.set_option(boost::asio::socket_base::receive_buffer_size(SOCKET_BUFFER_SIZE));
+            m_acceptor.set_option(boost::asio::socket_base::reuse_address(true));
+            m_acceptor.bind(m_gateway);
+            m_acceptor.listen();
+
+            m_timer.expires_at(deadline);
+            m_timer.async_wait(m_strand.wrap([this, weak = this->weak_from_this()](const boost::system::error_code& error)
+            {
+                if (not error)
+                {
+                    if (auto self = weak.lock())
+                    {
+                        boost::system::error_code ec;
+                        m_acceptor.close(ec);
+                    }
+                }
+            }));
+        }
+
+        m_acceptor.async_accept(m_stream.next_layer(), m_strand.wrap([this, weak = this->weak_from_this(), handler](const boost::system::error_code& err)
+        {
+            if (auto self = weak.lock())
+            {
+                auto expected = [&]()
+                {
+                    auto actual = m_stream.next_layer().remote_endpoint();
+
+                    if (m_faraway.port() != 0 && m_faraway.port() != actual.port())
+                        return false;
+                    if (not m_faraway.address().is_unspecified() && m_faraway.address() != actual.address())
+                        return false;
+
+                    return true;
+                };
+
+                if (err || expected())
+                {
+                    if (not err)
+                    {
+                        m_stream.async_handshake(boost::asio::ssl::stream_base::server, m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
+                        {
+                            if (auto self = weak.lock())
+                            {
+                                m_status = status::s_open;
+                                m_strand.post(std::bind(handler, err));
+                            }
+                            else
+                                handler(err);
+                        }));
+                    }
+                    else
+                        m_strand.post(std::bind(handler, err));
+
+                    boost::system::error_code ec;
+                    m_timer.cancel(ec);
+                    m_acceptor.close(ec);
+                }
+                else
+                {
+                    m_strand.post([this, weak, handler]()
+                    {
+                        if (auto self = weak.lock())
+                        {
+                            if (m_status == status::s_none)
+                                handler(boost::asio::error::operation_aborted);
+                            else
+                                do_accept(handler, boost::posix_time::ptime());
+                        }
+                        else
+                            handler(boost::asio::error::operation_aborted);
+                    });
+                }
+            }
+            else
+                handler(boost::asio::error::operation_aborted);
+        }));
+    }
+
+    void do_connect(const callback& handler, const boost::posix_time::ptime& deadline) noexcept(true)
+    {
+        if (m_stream.next_layer().is_open())
+        {
+            boost::system::error_code ec;
+            m_stream.next_layer().close(ec);
+        }
+
+        m_stream.next_layer().open(m_gateway.protocol());
+        m_stream.next_layer().non_blocking(true);
+        m_stream.next_layer().set_option(boost::asio::socket_base::send_buffer_size(SOCKET_BUFFER_SIZE));
+        m_stream.next_layer().set_option(boost::asio::socket_base::receive_buffer_size(SOCKET_BUFFER_SIZE));
+        m_stream.next_layer().set_option(boost::asio::socket_base::reuse_address(true));
+        m_stream.next_layer().bind(m_gateway);
+
+        m_stream.next_layer().async_connect(m_faraway, m_strand.wrap([this, weak = this->weak_from_this(), handler, deadline](const boost::system::error_code& err)
+        {
+            if (auto self = weak.lock())
+            {
+                if (err != boost::asio::error::connection_refused || boost::posix_time::microsec_clock::universal_time() > deadline)
+                {
+                    if (not err)
+                    {
+                        m_stream.async_handshake(boost::asio::ssl::stream_base::client, m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
+                        {
+                            if (auto self = weak.lock())
+                            {
+                                m_status = status::s_open;
+                                m_strand.post(std::bind(handler, err));
+                            }
+                            else
+                                handler(err);
+                        }));
+                    }
+                    else
+                        m_strand.post(std::bind(handler, err));
+                }
+                else if (m_status == status::s_none)
+                {
+                    m_strand.post(std::bind(handler, boost::asio::error::operation_aborted));
+                }
+                else
+                {
+                    m_timer.expires_from_now(boost::posix_time::seconds(1));
+                    m_timer.async_wait(m_strand.wrap([this, weak, handler, deadline](const boost::system::error_code& err)
+                    {
+                        if (auto self = weak.lock())
+                        {
+                            if (not err)
+                            {
+                                if (m_status == status::s_none)
+                                    m_strand.post(std::bind(handler, boost::asio::error::operation_aborted));
+                                else
+                                    do_connect(handler, boost::posix_time::ptime());
+                            }
+                            else
+                                m_strand.post(std::bind(handler, err));
+                        }
+                        else
+                            handler(boost::asio::error::operation_aborted);
+                    }));
+                }
+            }
+            else
+                handler(boost::asio::error::operation_aborted);
+        }));
+    }
+
+    static boost::asio::ssl::context make_ssl_context(const wormhole::security::crypto& identity) noexcept(true)
+    {
+        boost::asio::ssl::context ssl(boost::asio::ssl::context::sslv23);
+        if (accept)
+            ssl.set_options(boost::asio::ssl::context::default_workarounds | boost::asio::ssl::context::sslv23_server);
+        else
+            ssl.set_options(boost::asio::ssl::context::default_workarounds | boost::asio::ssl::context::sslv23_client);
+
+        if (not identity.cert.empty() && not identity.key.empty())
+        {
+            ssl.use_certificate_file(identity.cert, boost::asio::ssl::context::pem);
+            ssl.use_private_key_file(identity.key, boost::asio::ssl::context::pem);
+        }
+
+        if (not identity.ca.empty())
+        {
+            if (accept)
+                ssl.set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert | boost::asio::ssl::verify_client_once);
+            else
+                ssl.set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
+            ssl.load_verify_file(identity.ca);
+        }
+
+        return std::move(ssl);
+    }
+
+public:
+
+    ssl_tunnel(boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, const wormhole::security::crypto& identity)
+        : m_io(io)
+        , m_strand(io)
+        , m_ssl(make_ssl_context(identity))
+        , m_timer(io)
+        , m_acceptor(io)
+        , m_stream(io, m_ssl)
+        , m_gateway(gateway)
+        , m_faraway(faraway)
+    {
+    }
+
+    void open(callback&& handler) noexcept(true) override
+    {
+        m_strand.post([this, weak = this->weak_from_this(), handler]()
+        {
+            if (auto self = weak.lock())
+            {
+                if (m_status == status::s_none)
+                {
+                    m_status = status::s_half;
+                    auto deadline = boost::posix_time::microsec_clock::universal_time() + boost::posix_time::seconds(10);
+                    if (accept)
+                        do_accept(handler, deadline);
+                    else
+                        do_connect(handler, deadline);
+                }
+                else
+                    handler(boost::asio::error::already_started); 
+            }
+            else
+                handler(boost::asio::error::operation_aborted);
+        });
+    }
+
+    void close(callback&& handler) noexcept(true) override
+    {
+        m_strand.post([this, weak = this->weak_from_this(), handler]()
+        {
+            boost::system::error_code err;
+            if (auto self = weak.lock())
+            {
+                if (m_status != status::s_none)
+                {
+                    m_status = status::s_none;
+                    m_timer.cancel(err);
+                    m_acceptor.close(err);
+                    m_stream.shutdown(err);
+                    m_stream.next_layer().close(err);
+                }
+            }
+
+            handler(err);
+        });
+    }
+
+    void send(packet_ptr packet, callback&& handler) noexcept(true) override
+    {
+        m_strand.post([this, weak = this->weak_from_this(), packet, handler]()
+        {
+            if (auto self = weak.lock())
+            {
+                if (m_status == status::s_open)
+                {
+                    m_wq.emplace(packet, handler);
+                    if (m_wq.size() == 1)
+                        write(packet, handler);
+                    return;
+                }
+            }
+            handler(boost::asio::error::not_connected);
+        });
+    }
+
+    void receive(packet_ptr packet, callback&& handler) noexcept(true) override
+    {
+        m_strand.post([this, weak = this->weak_from_this(), packet, handler]()
+        {
+            if (auto self = weak.lock())
+            {
+                if (m_status == status::s_open)
+                {
+                    m_rq.emplace(packet, handler);
+                    if (m_rq.size() == 1)
+                        read(packet, handler);
+                    return;
+                }
+            }
+            handler(boost::asio::error::not_connected);
+        });
+    }
+};
+
+std::shared_ptr<tunnel> create_udp_tunnel(
+    boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, strategy role, uint64_t secret) noexcept(true)
+{
+    if (role == strategy::server)
         return std::make_shared<tubus_tunnel<boost::asio::ip::udp, true>>(io, gateway, faraway, secret);
     return std::make_shared<tubus_tunnel<boost::asio::ip::udp, false>>(io, gateway, faraway, secret);
 }
 
 std::shared_ptr<tunnel> create_tcp_tunnel(
-    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, strategy qos, uint64_t secret) noexcept(true)
+    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, strategy role, uint64_t secret) noexcept(true)
 {
-    if (qos == strategy::server)
+    if (role == strategy::server)
         return std::make_shared<tubus_tunnel<boost::asio::ip::tcp, true>>(io, gateway, faraway, secret);
     return std::make_shared<tubus_tunnel<boost::asio::ip::tcp, false>>(io, gateway, faraway, secret);
+}
+
+std::shared_ptr<tunnel> create_ssl_tunnel(
+    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, strategy role, const security::crypto& identity) noexcept(true)
+{
+    if (role == strategy::server)
+        return std::make_shared<ssl_tunnel<true>>(io, gateway, faraway, identity);
+    return std::make_shared<ssl_tunnel<false>>(io, gateway, faraway, identity);
 }
 
 }
