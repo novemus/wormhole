@@ -28,7 +28,7 @@ struct packet : public tubus::mutable_buffer
     }
 
     packet(uint32_t id, bool allocate) 
-        : tubus::mutable_buffer(create_buffer(header_size + (allocate ? max_payload_size : 0)))
+        : tubus::mutable_buffer(header_size + (allocate ? max_payload_size : 0))
     {
         set<uint32_t>(0, htonl(id));
         set<uint32_t>(sizeof(uint32_t), htonl(static_cast<uint32_t>(allocate ? max_payload_size : 0)));
@@ -59,10 +59,6 @@ struct packet : public tubus::mutable_buffer
     {
         return slice(header_size, capacity());
     }
-
-private:
-
-    LIBWORMHOLE_EXPORT static tubus::mutable_buffer create_buffer(size_t size) noexcept(true);
 };
 
 typedef std::shared_ptr<packet> packet_ptr;
@@ -72,10 +68,10 @@ struct tunnel
     typedef std::function<void(const boost::system::error_code&)> callback;
 
     virtual ~tunnel() {}
-    virtual void open(callback&& handler) noexcept(true) = 0;
-    virtual void close(callback&& handler) noexcept(true) = 0;
-    virtual void send(packet_ptr packet, callback&& handle) noexcept(true) = 0;
-    virtual void receive(packet_ptr packet, callback&& handle) noexcept(true) = 0;
+    virtual void open(const callback& handler) noexcept(true) = 0;
+    virtual void close(const callback& handler) noexcept(true) = 0;
+    virtual void send(packet_ptr packet, const callback& handle) noexcept(true) = 0;
+    virtual void receive(packet_ptr packet, const callback& handle) noexcept(true) = 0;
 };
 
 using udp_endpoint = boost::asio::ip::udp::endpoint;

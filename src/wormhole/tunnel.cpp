@@ -20,16 +20,6 @@
 
 namespace wormhole {
 
-tubus::mutable_buffer packet::create_buffer(size_t size) noexcept(true)
-{
-    static std::mutex s_mutex;
-    static std::map<size_t, std::shared_ptr<tubus::buffer_factory>> s_pool;
-
-    std::unique_lock<std::mutex> lock(s_mutex);
-    auto res = s_pool.emplace(size, std::make_shared<tubus::buffer_factory>(size));
-    return res.first->second->obtain();
-}
-
 template<class proto, bool accept> 
 class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tunnel<proto, accept>>
 {
@@ -47,9 +37,9 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
     defer_queue m_rq;
     std::mutex m_mutex;
 
-    void write(packet_ptr packet, callback&& handle) noexcept(true)
+    void write(packet_ptr packet, const callback& handler) noexcept(true)
     {
-        m_channel->write(*packet, [this, weak = this->weak_from_this(), packet, handle](const boost::system::error_code& ec, size_t size)
+        m_channel->write(*packet, [this, weak = this->weak_from_this(), packet, handler](const boost::system::error_code& ec, size_t size)
         {
             if (auto self = weak.lock())
             {
@@ -67,20 +57,20 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
 
             if (ec)
             {
-                handle(ec);
+                handler(ec);
             }
             else if (size < packet->size())
             {
-                handle(boost::asio::error::message_size);
+                handler(boost::asio::error::message_size);
             }
             else
             {
-                handle(ec);
+                handler(ec);
             }
         });
     }
 
-    void read(packet_ptr packet, callback&& handler) noexcept(true)
+    void read(packet_ptr packet, const callback& handler) noexcept(true)
     {
         auto callback = [this, weak = this->weak_from_this(), handler](const boost::system::error_code& ec)
         {
@@ -88,9 +78,11 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
             {
                 std::unique_lock<std::mutex> lock(m_mutex);
                 if (not m_rq.empty())
+                    m_rq.pop();
+
+                if (not m_rq.empty())
                 {
                     auto next = m_rq.front();
-                    m_rq.pop();
                     read(next.first, std::move(next.second));
                 }
             }
@@ -133,7 +125,7 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
         });
     }
 
-    void connect(callback&& handler, const boost::posix_time::ptime& deadline) noexcept(true)
+    void connect(const callback& handler, const boost::posix_time::ptime& deadline) noexcept(true)
     {
         std::unique_lock<std::mutex> lock(m_mutex);
         try
@@ -192,72 +184,46 @@ public:
     {
     }
 
-    void open(callback&& handler) noexcept(true) override
+    void open(const callback& handler) noexcept(true) override
     {
         connect(std::move(handler), boost::posix_time::microsec_clock::universal_time() + boost::posix_time::seconds(30));
     }
 
-    void close(callback&& handler) noexcept(true) override
+    void close(const callback& handler) noexcept(true) override
     {
         if (m_channel)
-        {
-            while (not m_rq.empty())
-            {
-                auto op = m_rq.front();
-                m_rq.pop();
-                boost::asio::post(m_io, std::bind(op.second, boost::asio::error::operation_aborted));
-            }
-
-            while (not m_wq.empty())
-            {
-                auto op = m_wq.front();
-                m_wq.pop();
-                boost::asio::post(m_io, std::bind(op.second, boost::asio::error::operation_aborted));
-            }
-
             m_channel->shutdown(handler);
-            return;
-        }
-
-        boost::asio::post(std::bind(handler, boost::asio::error::shut_down));
+        else
+            boost::asio::post(std::bind(handler, boost::asio::error::shut_down));
     }
 
-    void send(packet_ptr packet, callback&& handler) noexcept(true) override
+    void send(packet_ptr packet, const callback& handler) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
         if (m_channel)
         {
             if (m_channel->writable() < packet->size() || m_wq.size())
-            {
                 m_wq.emplace(packet, handler);
-                return;
-            }
-
-            write(packet, std::move(handler));
-            return;
+            else
+                write(packet, std::move(handler));
         }
-
-        boost::asio::post(std::bind(handler, boost::asio::error::shut_down));
+        else
+            boost::asio::post(std::bind(handler, boost::asio::error::shut_down));
     }
 
-    void receive(packet_ptr packet, callback&& handler) noexcept(true) override
+    void receive(packet_ptr packet, const callback& handler) noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
         if (m_channel)
         {
-            if (m_rq.size())
-            {
-                m_rq.emplace(packet, handler);
-                return;
-            }
-
-            read(packet, std::move(handler));
-            return;
+            m_rq.emplace(packet, handler);
+            if (m_rq.size() == 1)
+                read(packet, std::move(handler));
         }
-
-        boost::asio::post(std::bind(handler, boost::asio::error::shut_down));
+        else
+            boost::asio::post(std::bind(handler, boost::asio::error::shut_down));
     }
 };
 
@@ -605,7 +571,7 @@ public:
     {
     }
 
-    void open(callback&& handler) noexcept(true) override
+    void open(const callback& handler) noexcept(true) override
     {
         m_strand.post([this, weak = this->weak_from_this(), handler]()
         {
@@ -628,7 +594,7 @@ public:
         });
     }
 
-    void close(callback&& handler) noexcept(true) override
+    void close(const callback& handler) noexcept(true) override
     {
         m_strand.post([this, weak = this->weak_from_this(), handler]()
         {
@@ -649,7 +615,7 @@ public:
         });
     }
 
-    void send(packet_ptr packet, callback&& handler) noexcept(true) override
+    void send(packet_ptr packet, const callback& handler) noexcept(true) override
     {
         m_strand.post([this, weak = this->weak_from_this(), packet, handler]()
         {
@@ -667,7 +633,7 @@ public:
         });
     }
 
-    void receive(packet_ptr packet, callback&& handler) noexcept(true) override
+    void receive(packet_ptr packet, const callback& handler) noexcept(true) override
     {
         m_strand.post([this, weak = this->weak_from_this(), packet, handler]()
         {
