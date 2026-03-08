@@ -19,11 +19,11 @@ namespace wormhole {
 struct endpoint
 {
     std::string host;
-    uint16_t port;
+    uint16_t port = 0;
 };
 
 enum protocol { any, udp, tcp, ssl };
-enum strategy { relate, client, server };
+enum relation { either, client, server };
 
 LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, endpoint& ep);
 LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const endpoint& ep);
@@ -31,7 +31,7 @@ LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const endpoint& ep
 struct quality
 {
     protocol proto = protocol::any;
-    strategy role = strategy::relate;
+    relation role = relation::either;
 };
 
 LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, quality& qos);
@@ -39,7 +39,7 @@ LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const quality& qos
 
 struct security
 {
-    uint64_t secret;
+    uint64_t secret = 0;
     struct crypto
     {
         std::string cert;

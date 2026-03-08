@@ -1,5 +1,10 @@
 # Change Log
 
+## 1.3.0 (Mar 8, 2026)
+
+- Link with libtubus 1.3.0
+- Multiprotocol tunneling: UPD/TCP/SSL
+
 ## 1.2.6 (Feb 10, 2026)
 
 - Link with libtubus 1.2.5

@@ -1,6 +1,6 @@
 # README
 
-The [wormhole](https://github.com/novemus/wormhole) is a tool for forwarding a remote TCP service to a local interface. The original purpose of this utility is to extend the capabilities of the [plexus](https://github.com/novemus/plexus) tool and provide the ability to access a TCP service located on a computer behind the NAT. Since establishing a connection with a TCP service located behind NAT is quite problematic, unlike UDP, to solve this problem, `wormhole` creates a UDP tunnel between remote and local hosts and maps a remote service to a local interface. Of course, for this purpose, it must be used together with the `plexus` to pre-punch UDP hole(s) in NAT(s) of host(s). UDP tunnel implements the original protocol named [tubus](https://github.com/novemus/tubus), which guarantees the delivery and integrity of the transmitted data. An additional feature of the `tubus` is the ability to make yourself opaque using a pre-shared key in order to hide protocol details and the structure of transmitted data. This can be useful to protect the protocol from possible attacks. Apart from the case with NAT, the utility can be used as opaque tunnel for network applications with increased security requirements. Note that the obscuration of the tunnel is not a full-fledged encryption. Applications should take care of the encryption of transmitted data.
+The [wormhole](https://github.com/novemus/wormhole) is the tool for forwarding TCP services via multiprotocol (UDP/TCP/SSL) safe tunnel. The original purpose of this utility is to extend the capabilities of the [plexus](https://github.com/novemus/plexus) tool and provide NAT/DPI-tolerance transport tunnel for private services. The UDP/TCP tunnels implemented with the [tubus](https://github.com/novemus/tubus) library and the SSL tunnel uses the OpenSSL. The `tubus` library provides the ability to obfuscate the transport channel using a pre-shared key. This can be useful to protect the tunnel from possible attacks. Note that the obscuration is not a full-fledged encryption. Applications should take care of the encryption of transmitted data.
 
 ## Build
 
@@ -21,23 +21,37 @@ $ cmake --build ./build --target install
 
 Launch following command with your arguments on the host that exports some service:
 ```console
-$ wormhole --purpose=export --service=<ip:port> --gateway=<ip:port> --faraway=<ip:port> [--obscure=<64-bit-number>]
+$ export WORMHOLE_SECRET=<64-bit-number>
+$ wormhole --purpose=export --service=<ip:port> --gateway=<ip:port> --faraway=<ip:port>
 ```
 
 Launch following command with your arguments on the host that imports alien service:
 ```console
-$ wormhole --purpose=import --service=<ip:port> --gateway=<ip:port> --faraway=<ip:port> [--obscure=<64-bit-number>]
+$ export WORMHOLE_SECRET=<64-bit-number>
+$ wormhole --purpose=import --service=<ip:port> --gateway=<ip:port> --faraway=<ip:port>
 ```
 
-`--purpose` - how to use the application in relation to the specified service: "export|import"
+Main command line options:
 
-`--service` - endpoint to map the service being imported or endpoint of the service being exported: "ip:port"
+`--purpose` - how to use the application in relation to the specified service: **export|import**
 
-`--gateway` - endpoint of the transport tunnel on the local public interface: "ip:port"
+`--service` - endpoint to map the service being imported or endpoint of the service being exported: **ip:port**
 
-`--faraway` - endpoint of the transport tunnel on the remote public interface: "ip:port"
+`--gateway` - endpoint of the transport tunnel on the local public interface: **ip:port**
 
-`--obscure` - pre-shared key to obscure the transport tunnel: "64-bit-number"
+`--faraway` - endpoint of the transport tunnel on the remote public interface: **ip:port**
+
+`--quality` - tunnel protocol and connection startegy: **udp:client|udp:server|tcp:client|tcp:server|ssl:client|ssl:server**
+
+Environment:
+
+`WORMHOLE_SECRET` - pre-shared key to obscure the UDP/TCP tunnel, 64-bit number
+
+`WORMHOLE_CERT` - path to the host SSL certificate, PEM file
+
+`WORMHOLE_KEY` - path to the host SSL private key, PEM file
+
+`WORMHOLE_CA` - path to the CA certificate, PEM file
 
 ## Library
 

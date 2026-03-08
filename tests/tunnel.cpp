@@ -20,7 +20,7 @@
 
 namespace {
 
-std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wormhole::protocol proto, wormhole::strategy role)
+std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wormhole::protocol proto, wormhole::relation role)
 {
     static const uint64_t s_secret = 1234567890;
 
@@ -40,10 +40,10 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
     {
         return wormhole::create_ssl_tunnel(
             io,
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::strategy::server ? 15000 : 15001),
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::strategy::server ? 15001 : 15000),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15000 : 15001),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15001 : 15000),
             role,
-            role == wormhole::strategy::server ? s_server : s_client
+            role == wormhole::relation::server ? s_server : s_client
         );
 
     }
@@ -51,8 +51,8 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
     {
         return wormhole::create_tcp_tunnel(
             io,
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::strategy::server ? 15000 : 15001),
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::strategy::server ? 15001 : 15000),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15000 : 15001),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15001 : 15000),
             role,
             s_secret
         );
@@ -60,8 +60,8 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
 
     return wormhole::create_udp_tunnel(
         io,
-        boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::strategy::server ? 15000 : 15001),
-        boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::strategy::server ? 15001 : 15000),
+        boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15000 : 15001),
+        boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15001 : 15000),
         role,
         s_secret
     );
@@ -79,8 +79,8 @@ void test_tunnel(wormhole::protocol proto)
     boost::asio::post(pool, [&io] { io.run(); });
     boost::asio::post(pool, [&io] { io.run(); });
 
-    auto client = create_tunnel(io, proto, wormhole::strategy::client);
-    auto server = create_tunnel(io, proto, wormhole::strategy::server);
+    auto client = create_tunnel(io, proto, wormhole::relation::client);
+    auto server = create_tunnel(io, proto, wormhole::relation::server);
 
     auto scp = std::make_shared<std::promise<void>>();
     auto ssp = std::make_shared<std::promise<void>>();

@@ -653,25 +653,25 @@ public:
 };
 
 std::shared_ptr<tunnel> create_udp_tunnel(
-    boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, strategy role, uint64_t secret) noexcept(true)
+    boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, relation role, uint64_t secret) noexcept(true)
 {
-    if (role == strategy::server)
+    if (role == relation::server)
         return std::make_shared<tubus_tunnel<boost::asio::ip::udp, true>>(io, gateway, faraway, secret);
     return std::make_shared<tubus_tunnel<boost::asio::ip::udp, false>>(io, gateway, faraway, secret);
 }
 
 std::shared_ptr<tunnel> create_tcp_tunnel(
-    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, strategy role, uint64_t secret) noexcept(true)
+    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, relation role, uint64_t secret) noexcept(true)
 {
-    if (role == strategy::server)
+    if (role == relation::server)
         return std::make_shared<tubus_tunnel<boost::asio::ip::tcp, true>>(io, gateway, faraway, secret);
     return std::make_shared<tubus_tunnel<boost::asio::ip::tcp, false>>(io, gateway, faraway, secret);
 }
 
 std::shared_ptr<tunnel> create_ssl_tunnel(
-    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, strategy role, const security::crypto& identity) noexcept(true)
+    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, relation role, const security::crypto& identity) noexcept(true)
 {
-    if (role == strategy::server)
+    if (role == relation::server)
         return std::make_shared<ssl_tunnel<true>>(io, gateway, faraway, identity);
     return std::make_shared<ssl_tunnel<false>>(io, gateway, faraway, identity);
 }
