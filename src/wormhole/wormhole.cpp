@@ -19,34 +19,50 @@
 
 namespace wormhole {
 
-template<class proto> 
-boost::asio::ip::basic_endpoint<proto> resolve(boost::asio::io_context& io, const endpoint& ep)
-{
-    typename proto::resolver resolver(io);
-    return boost::asio::ip::basic_endpoint<proto>(*resolver.resolve(ep.host, std::to_string(ep.port)).begin());
-}
-
-std::istream& operator>>(std::istream& is, endpoint& ep)
+std::string quality::to_string(const quality& qos) noexcept(false)
 {
     std::string str;
-    is >> str;
-    
-    size_t delim = str.find_last_of(':');
-    ep.host = str.substr(0, delim);
-    ep.port = delim != std::string_view::npos ? boost::lexical_cast<uint16_t>(str.substr(delim + 1)) : 0;
+    switch(qos.proto)
+    {
+        case protocol::udp:
+            str = "udp";
+            break;
+        case protocol::tcp:
+            str = "tcp";
+            break;
+        case protocol::ssl:
+            str = "ssl";
+            break;
+        case protocol::any:
+            str = "auto";
+            break;
+        default:
+            throw std::runtime_error("unknown value of protocol");
+    }
 
-    return is;
+    str += ":";
+
+    switch(qos.role)
+    {
+        case relation::server:
+            str += "server";
+            break;
+        case relation::client:
+            str += "client";
+            break;
+        case relation::either:
+            str += "auto";
+            break;
+        default:
+            throw std::runtime_error("unknown value of relation");
+    }
+
+    return str;
 }
 
-std::ostream& operator<<(std::ostream& os, const endpoint& ep)
+quality quality::from_string(const std::string& str) noexcept(false)
 {
-    return os << ep.host << ":" << ep.port;
-}
-
-std::istream& operator>>(std::istream& is, quality& qos)
-{
-    std::string str;
-    is >> str;
+    quality qos;
 
     size_t delim = str.find_last_of(':');
     auto proto = str.substr(0, delim);
@@ -58,53 +74,71 @@ std::istream& operator>>(std::istream& is, quality& qos)
         qos.proto = protocol::tcp;
     else if (proto == "udp")
         qos.proto = protocol::udp;
-    else
+    else if (proto == "auto")
         qos.proto = protocol::any;
+    else
+        throw std::runtime_error("can't parse protocol");
 
     if (role == "server")
         qos.role = relation::server;
     else if (role == "client")
         qos.role = relation::client;
-    else
+    else if (role == "auto")
         qos.role = relation::either;
+    else
+        throw std::runtime_error("can't parse relation");
 
+    return qos;
+}
+
+std::string endpoint::to_string(const endpoint& ep) noexcept(false)
+{
+    return ep.address.to_string() + ":" + std::to_string(ep.port);
+}
+
+endpoint endpoint::from_string(const std::string& str) noexcept(false)
+{
+    boost::asio::io_context io;
+    boost::asio::ip::tcp::resolver resolver(io);
+    size_t delim = str.find_last_of(':');
+    boost::asio::ip::tcp::endpoint ep = *resolver.resolve(str.substr(0, delim), delim == std::string_view::npos ? "" : str.substr(delim + 1)).begin();
+    return endpoint { ep.address(), ep.port() };
+}
+
+std::istream& operator>>(std::istream& is, endpoint& ep) noexcept(false)
+{
+    std::string str;
+    is >> str;
+    ep = endpoint::from_string(str);
     return is;
 }
 
-std::ostream& operator<<(std::ostream& os, const quality& qos)
+std::ostream& operator<<(std::ostream& os, const endpoint& ep) noexcept(false)
 {
-    switch(qos.proto)
-    {
-        case protocol::udp:
-            os << "udp";
-            break;
-        case protocol::tcp:
-            os << "tcp";
-            break;
-        case protocol::ssl:
-            os << "ssl";
-            break;
-        default:
-            os << "auto";
-            break;
-    }
+    return os << endpoint::to_string(ep);
+}
 
-    os << ":";
+bool operator==(const endpoint& lhs, const endpoint& rhs) noexcept(true)
+{
+    return lhs.address == rhs.address && lhs.port == rhs.port;
+}
 
-    switch(qos.role)
-    {
-        case relation::server:
-            os << "server";
-            break;
-        case relation::client:
-            os << "client";
-            break;
-        default:
-            os << "auto";
-            break;
-    }
+std::istream& operator>>(std::istream& is, quality& qos) noexcept(false)
+{
+    std::string str;
+    is >> str;
+    qos = quality::from_string(str);
+    return is;
+}
 
-    return os;
+std::ostream& operator<<(std::ostream& os, const quality& qos) noexcept(false)
+{
+    return os << quality::to_string(qos);
+}
+
+bool operator==(const quality& lhs, const quality& rhs) noexcept(true)
+{
+    return lhs.proto == rhs.proto && lhs.role == rhs.role;
 }
 
 class tcp_client : public std::enable_shared_from_this<tcp_client>
@@ -613,17 +647,17 @@ private:
 std::shared_ptr<tunnel> create_tunnel(boost::asio::io_context& io, const endpoint& gateway, const endpoint& faraway, protocol proto, relation role, const security& guard) noexcept(false)
 {
     if (proto == protocol::ssl)
-        return create_ssl_tunnel(io, resolve<boost::asio::ip::tcp>(io, gateway), resolve<boost::asio::ip::tcp>(io, faraway), role, guard.identity);
+        return create_ssl_tunnel(io, gateway, faraway, role, guard.identity);
     if (proto == protocol::tcp)
-        return create_tcp_tunnel(io, resolve<boost::asio::ip::tcp>(io, gateway), resolve<boost::asio::ip::tcp>(io, faraway), role, guard.secret);
-    return create_udp_tunnel(io, resolve<boost::asio::ip::udp>(io, gateway), resolve<boost::asio::ip::udp>(io, faraway), role, guard.secret);
+        return create_tcp_tunnel(io, gateway, faraway, role, guard.secret);
+    return create_udp_tunnel(io, gateway, faraway, role, guard.secret);
 }
 
 std::shared_ptr<router> create_exporter(
     boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& guard) noexcept(false)
 {
     return std::make_shared<exporter>(
-        io, resolve<boost::asio::ip::tcp>(io, service), create_tunnel(io, gateway, faraway, qos.proto, qos.role == relation::either ? relation::server : qos.role, guard)
+        io, service, create_tunnel(io, gateway, faraway, qos.proto, qos.role == relation::either ? relation::server : qos.role, guard)
     );
 }
 
@@ -631,7 +665,7 @@ std::shared_ptr<router> create_importer(
     boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& guard) noexcept(false)
 {
     return std::make_shared<importer>(
-        io, resolve<boost::asio::ip::tcp>(io, service), create_tunnel(io, gateway, faraway, qos.proto, qos.role == relation::either ? relation::client : qos.role, guard)
+        io, service, create_tunnel(io, gateway, faraway, qos.proto, qos.role == relation::either ? relation::client : qos.role, guard)
     );
 }
 

@@ -160,10 +160,10 @@ void test_wormhole(wormhole::protocol proto)
         }
     };
 
-    const boost::asio::ip::tcp::endpoint SERVER(boost::asio::ip::make_address("127.0.0.1"), 18765);
-    const boost::asio::ip::tcp::endpoint PROXY(boost::asio::ip::make_address("127.0.0.1"), 15678);
-    const wormhole::endpoint SERVER_GATEWAY { "127.0.0.1", 7777 };
-    const wormhole::endpoint CLIENT_GATEWAY { "127.0.0.1", 8888 };
+    const wormhole::endpoint SERVER { boost::asio::ip::make_address("127.0.0.1"), 18765 };
+    const wormhole::endpoint PROXY { boost::asio::ip::make_address("127.0.0.1"), 15678 };
+    const wormhole::endpoint SERVER_GATEWAY { boost::asio::ip::make_address("127.0.0.1"), 7777 };
+    const wormhole::endpoint CLIENT_GATEWAY { boost::asio::ip::make_address("127.0.0.1"), 8888 };
 
     boost::asio::io_context io;
     boost::asio::thread_pool pool;
@@ -176,10 +176,10 @@ void test_wormhole(wormhole::protocol proto)
     auto server = create_tcp_server(io, SERVER);
     BOOST_REQUIRE_NO_THROW(server->start());
 
-    auto exporter = wormhole::create_exporter(io, wormhole::endpoint{SERVER.address().to_string(), SERVER.port()}, SERVER_GATEWAY, CLIENT_GATEWAY, qos, for_export);
+    auto exporter = wormhole::create_exporter(io, SERVER, SERVER_GATEWAY, CLIENT_GATEWAY, qos, for_export);
     BOOST_REQUIRE_NO_THROW(exporter->launch());
 
-    auto importer = wormhole::create_importer(io, wormhole::endpoint{PROXY.address().to_string(), PROXY.port()}, CLIENT_GATEWAY, SERVER_GATEWAY, qos, for_import);
+    auto importer = wormhole::create_importer(io, PROXY, CLIENT_GATEWAY, SERVER_GATEWAY, qos, for_import);
     BOOST_REQUIRE_NO_THROW(importer->launch());
 
     boost::asio::ip::tcp::socket client1(io, boost::asio::ip::tcp::v4());

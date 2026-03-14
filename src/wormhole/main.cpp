@@ -20,14 +20,14 @@ constexpr const char* envs = R"(environment options:
 
 int main(int argc, char *argv[])
 {
-    boost::program_options::options_description base("command line options", 120, 60);
+    boost::program_options::options_description base("command line options", 160, 60);
     base.add_options()
         ("help,h", "produce help message")
         ("purpose,p", boost::program_options::value<std::string>()->required(), "wormhole purpose: export|import")
         ("service,s", boost::program_options::value<wormhole::endpoint>()->required(), "endpoint of the exported/imported tcp service: <ip:port>")
         ("gateway,g", boost::program_options::value<wormhole::endpoint>()->required(), "gateway endpoint of the tunnel: <ip:port>")
         ("faraway,f", boost::program_options::value<wormhole::endpoint>()->required(), "faraway endpoint of the tunnel: <ip:port>")
-        ("quality,q", boost::program_options::value<wormhole::quality>()->default_value(wormhole::quality()), "quality of the tunnel: udp:client|udp:server|tcp:client|tcp:server|ssl:client|ssl:server")
+        ("quality,q", boost::program_options::value<wormhole::quality>()->default_value(wormhole::quality()), "quality of the tunnel side: udp:client|udp:server|tcp:client|tcp:server|ssl:client|ssl:server")
         ("journal,j", boost::program_options::value<std::string>()->default_value(""), "journal file: <path>")
         ("logging,l", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "logging level: fatal|error|warning|info|debug|trace");
 

@@ -16,26 +16,47 @@
 
 namespace wormhole {
 
+using udp_endpoint = boost::asio::ip::udp::endpoint;
+using tcp_endpoint = boost::asio::ip::tcp::endpoint;
+
 struct endpoint
 {
-    std::string host;
+    boost::asio::ip::address address;
     uint16_t port = 0;
+
+    operator udp_endpoint() const noexcept(true)
+    {
+        return udp_endpoint(address, port);
+    }
+
+    operator tcp_endpoint() const noexcept(true)
+    {
+        return tcp_endpoint(address, port);
+    }
+
+    LIBWORMHOLE_EXPORT static std::string to_string(const endpoint& ep) noexcept(false);
+    LIBWORMHOLE_EXPORT static endpoint from_string(const std::string& ep) noexcept(false);
 };
 
 enum protocol { any, udp, tcp, ssl };
 enum relation { either, client, server };
 
-LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, endpoint& ep);
-LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const endpoint& ep);
+LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, endpoint& ep) noexcept(false);
+LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const endpoint& ep) noexcept(false);
+LIBWORMHOLE_EXPORT bool operator==(const endpoint& lhs, const endpoint& rhs) noexcept(true);
 
 struct quality
 {
-    protocol proto = protocol::any;
+    protocol proto = protocol::udp;
     relation role = relation::either;
+
+    LIBWORMHOLE_EXPORT static std::string to_string(const quality& qos) noexcept(false);
+    LIBWORMHOLE_EXPORT static quality from_string(const std::string& str) noexcept(false);
 };
 
-LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, quality& qos);
-LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const quality& qos);
+LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, quality& qos) noexcept(false);
+LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const quality& qos) noexcept(false);
+LIBWORMHOLE_EXPORT bool operator==(const quality& lhs, const quality& rhs) noexcept(true);
 
 struct security
 {
@@ -50,7 +71,7 @@ struct security
 
 struct router
 {
-    virtual ~router() {}
+    virtual ~router() noexcept(true) {}
     virtual void launch() noexcept(true) = 0;
     virtual void cancel() noexcept(true) = 0;
 };
