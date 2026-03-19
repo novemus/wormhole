@@ -19,6 +19,8 @@
 #include <mutex>
 #include <set>
 
+unsigned short find_free_port();
+
 namespace {
 
 enum { max_length = 1024 };
@@ -160,10 +162,10 @@ void test_wormhole(wormhole::protocol proto)
         }
     };
 
-    const wormhole::endpoint SERVER { boost::asio::ip::make_address("127.0.0.1"), 18765 };
-    const wormhole::endpoint PROXY { boost::asio::ip::make_address("127.0.0.1"), 15678 };
-    const wormhole::endpoint SERVER_GATEWAY { boost::asio::ip::make_address("127.0.0.1"), 7777 };
-    const wormhole::endpoint CLIENT_GATEWAY { boost::asio::ip::make_address("127.0.0.1"), 8888 };
+    const wormhole::endpoint SERVER { boost::asio::ip::make_address("127.0.0.1"), find_free_port() };
+    const wormhole::endpoint PROXY { boost::asio::ip::make_address("127.0.0.1"), find_free_port() };
+    const wormhole::endpoint SERVER_GATEWAY { boost::asio::ip::make_address("127.0.0.1"), find_free_port() };
+    const wormhole::endpoint CLIENT_GATEWAY { boost::asio::ip::make_address("127.0.0.1"), find_free_port() };
 
     boost::asio::io_context io;
     boost::asio::thread_pool pool;

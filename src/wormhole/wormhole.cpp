@@ -34,7 +34,7 @@ std::string quality::to_string(const quality& qos) noexcept(false)
             str = "ssl";
             break;
         case protocol::any:
-            str = "auto";
+            str = "any";
             break;
         default:
             throw std::runtime_error("unknown value of protocol");
@@ -51,7 +51,7 @@ std::string quality::to_string(const quality& qos) noexcept(false)
             str += "client";
             break;
         case relation::either:
-            str += "auto";
+            str += "either";
             break;
         default:
             throw std::runtime_error("unknown value of relation");
@@ -74,7 +74,7 @@ quality quality::from_string(const std::string& str) noexcept(false)
         qos.proto = protocol::tcp;
     else if (proto == "udp")
         qos.proto = protocol::udp;
-    else if (proto == "auto")
+    else if (proto == "any")
         qos.proto = protocol::any;
     else
         throw std::runtime_error("can't parse protocol");
@@ -83,7 +83,7 @@ quality quality::from_string(const std::string& str) noexcept(false)
         qos.role = relation::server;
     else if (role == "client")
         qos.role = relation::client;
-    else if (role == "auto")
+    else if (role == "either")
         qos.role = relation::either;
     else
         throw std::runtime_error("can't parse relation");
@@ -123,6 +123,11 @@ bool operator==(const endpoint& lhs, const endpoint& rhs) noexcept(true)
     return lhs.address == rhs.address && lhs.port == rhs.port;
 }
 
+bool operator!=(const endpoint& lhs, const endpoint& rhs) noexcept(true)
+{
+    return !(lhs == rhs);
+}
+
 std::istream& operator>>(std::istream& is, quality& qos) noexcept(false)
 {
     std::string str;
@@ -139,6 +144,11 @@ std::ostream& operator<<(std::ostream& os, const quality& qos) noexcept(false)
 bool operator==(const quality& lhs, const quality& rhs) noexcept(true)
 {
     return lhs.proto == rhs.proto && lhs.role == rhs.role;
+}
+
+bool operator!=(const quality& lhs, const quality& rhs) noexcept(true)
+{
+    return !(lhs == rhs);
 }
 
 class tcp_client : public std::enable_shared_from_this<tcp_client>

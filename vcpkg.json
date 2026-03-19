@@ -5,6 +5,7 @@
     "boost-test",
     "boost-program-options",
     "boost-bind",
-    "boost-date-time"
+    "boost-date-time",
+    "openssl"
   ]
 }

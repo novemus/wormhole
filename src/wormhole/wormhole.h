@@ -44,6 +44,7 @@ enum relation { either, client, server };
 LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, endpoint& ep) noexcept(false);
 LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const endpoint& ep) noexcept(false);
 LIBWORMHOLE_EXPORT bool operator==(const endpoint& lhs, const endpoint& rhs) noexcept(true);
+LIBWORMHOLE_EXPORT bool operator!=(const endpoint& lhs, const endpoint& rhs) noexcept(true);
 
 struct quality
 {
@@ -57,6 +58,7 @@ struct quality
 LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, quality& qos) noexcept(false);
 LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const quality& qos) noexcept(false);
 LIBWORMHOLE_EXPORT bool operator==(const quality& lhs, const quality& rhs) noexcept(true);
+LIBWORMHOLE_EXPORT bool operator!=(const quality& lhs, const quality& rhs) noexcept(true);
 
 struct security
 {

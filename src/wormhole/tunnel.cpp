@@ -44,7 +44,7 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
             if (auto self = weak.lock())
             {
                 std::unique_lock<std::mutex> lock(m_mutex);
-                if (not m_wq.empty())
+                if (!m_wq.empty())
                 {
                     auto next = m_wq.front();
                     if (m_channel->writable() > next.first->size())
@@ -77,10 +77,10 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
             if (auto self = weak.lock())
             {
                 std::unique_lock<std::mutex> lock(m_mutex);
-                if (not m_rq.empty())
+                if (!m_rq.empty())
                     m_rq.pop();
 
-                if (not m_rq.empty())
+                if (!m_rq.empty())
                 {
                     auto next = m_rq.front();
                     read(next.first, std::move(next.second));
@@ -257,16 +257,16 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
         {
             if (auto self = weak.lock())
             {
-                if (not m_wq.empty())
+                if (!m_wq.empty())
                     m_wq.pop();
 
-                if (not m_wq.empty())
+                if (!m_wq.empty())
                 {
                     auto& next = m_wq.front();
                     write(next.first, next.second);
                 }
 
-                m_strand.post(std::bind(handler, ec));
+                boost::asio::post(m_strand, std::bind(handler, ec));
             }
             else
                 handler(boost::asio::error::shut_down);
@@ -274,7 +274,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
 
         if (m_status != status::s_open)
         {
-            m_strand.post(std::bind(handler, boost::asio::error::shut_down));
+            boost::asio::post(m_strand, std::bind(handler, boost::asio::error::shut_down));
             return;
         }
 
@@ -283,11 +283,11 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             if (auto self = weak.lock())
             {
                 if (ec)
-                    m_strand.post(std::bind(callback, ec));
+                    boost::asio::post(m_strand, std::bind(callback, ec));
                 else if (size != packet->size())
-                    m_strand.post(std::bind(callback, boost::asio::error::message_size));
+                    boost::asio::post(m_strand, std::bind(callback, boost::asio::error::message_size));
                 else
-                    m_strand.post(std::bind(callback, ec));
+                    boost::asio::post(m_strand, std::bind(callback, ec));
             }
             else
                 callback(ec);
@@ -300,16 +300,16 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
         {
             if (auto self = weak.lock())
             {
-                if (not m_rq.empty())
+                if (!m_rq.empty())
                     m_rq.pop();
 
-                if (not m_rq.empty())
+                if (!m_rq.empty())
                 {
                     auto& next = m_rq.front();
                     read(next.first, next.second);
                 }
 
-                m_strand.post(std::bind(handler, ec));
+                boost::asio::post(m_strand, std::bind(handler, ec));
             }
             else
                 handler(boost::asio::error::shut_down);
@@ -317,7 +317,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
 
         if (m_status != status::s_open)
         {
-            m_strand.post(std::bind(handler, boost::asio::error::shut_down));
+            boost::asio::post(m_strand, std::bind(handler, boost::asio::error::shut_down));
             return;
         }
 
@@ -326,19 +326,19 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             if (auto self = weak.lock())
             {
                 if (ec)
-                    m_strand.post(std::bind(callback, ec));
+                    boost::asio::post(m_strand, std::bind(callback, ec));
                 else if (size < packet::header_size || packet->capacity() > packet::max_payload_size)
-                    m_strand.post(std::bind(callback, boost::asio::error::message_size));
+                    boost::asio::post(m_strand, std::bind(callback, boost::asio::error::message_size));
                 else
                 {
                     packet->shrink(packet->capacity());
                     if (packet->capacity() == 0)
                     {
-                        m_strand.post(std::bind(callback, ec));
+                        boost::asio::post(m_strand, std::bind(callback, ec));
                         return;
                     }
 
-                    m_strand.post([this, weak, packet, callback]()
+                    boost::asio::post(m_strand, [this, weak, packet, callback]()
                     {
                         if (auto self = weak.lock())
                         {
@@ -349,18 +349,18 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                                     if (auto self = weak.lock())
                                     {
                                         if (ec)
-                                            m_strand.post(std::bind(callback, ec));
+                                            boost::asio::post(m_strand, std::bind(callback, ec));
                                         else if (size != packet->capacity())
-                                            m_strand.post(std::bind(callback, boost::asio::error::message_size));
+                                            boost::asio::post(m_strand, std::bind(callback, boost::asio::error::message_size));
                                         else
-                                            m_strand.post(std::bind(callback, ec));
+                                            boost::asio::post(m_strand, std::bind(callback, ec));
                                     }
                                     else
                                         callback(ec);
                                 }));
                             }
                             else
-                                m_strand.post(std::bind(callback, boost::asio::error::shut_down));
+                                boost::asio::post(m_strand, std::bind(callback, boost::asio::error::shut_down));
                         }
                         else
                             callback(boost::asio::error::shut_down);
@@ -380,7 +380,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             m_stream.next_layer().close(ec);
         }
 
-        if (not deadline.is_not_a_date_time())
+        if (!deadline.is_not_a_date_time())
         {
             m_acceptor.open(m_gateway.protocol());
             m_acceptor.non_blocking(true);
@@ -393,7 +393,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             m_timer.expires_at(deadline);
             m_timer.async_wait(m_strand.wrap([this, weak = this->weak_from_this()](const boost::system::error_code& error)
             {
-                if (not error)
+                if (!error)
                 {
                     if (auto self = weak.lock())
                     {
@@ -414,7 +414,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
 
                     if (m_faraway.port() != 0 && m_faraway.port() != actual.port())
                         return false;
-                    if (not m_faraway.address().is_unspecified() && m_faraway.address() != actual.address())
+                    if (!m_faraway.address().is_unspecified() && m_faraway.address() != actual.address())
                         return false;
 
                     return true;
@@ -422,21 +422,21 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
 
                 if (err || expected())
                 {
-                    if (not err)
+                    if (!err)
                     {
                         m_stream.async_handshake(boost::asio::ssl::stream_base::server, m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
                         {
                             if (auto self = weak.lock())
                             {
                                 m_status = status::s_open;
-                                m_strand.post(std::bind(handler, err));
+                                boost::asio::post(m_strand, std::bind(handler, err));
                             }
                             else
                                 handler(err);
                         }));
                     }
                     else
-                        m_strand.post(std::bind(handler, err));
+                        boost::asio::post(m_strand, std::bind(handler, err));
 
                     boost::system::error_code ec;
                     m_timer.cancel(ec);
@@ -444,7 +444,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                 }
                 else
                 {
-                    m_strand.post([this, weak, handler]()
+                    boost::asio::post(m_strand, [this, weak, handler]()
                     {
                         if (auto self = weak.lock())
                         {
@@ -484,25 +484,25 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             {
                 if (err != boost::asio::error::connection_refused || boost::posix_time::microsec_clock::universal_time() > deadline)
                 {
-                    if (not err)
+                    if (!err)
                     {
                         m_stream.async_handshake(boost::asio::ssl::stream_base::client, m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
                         {
                             if (auto self = weak.lock())
                             {
                                 m_status = status::s_open;
-                                m_strand.post(std::bind(handler, err));
+                                boost::asio::post(m_strand, std::bind(handler, err));
                             }
                             else
                                 handler(err);
                         }));
                     }
                     else
-                        m_strand.post(std::bind(handler, err));
+                        boost::asio::post(m_strand, std::bind(handler, err));
                 }
                 else if (m_status == status::s_none)
                 {
-                    m_strand.post(std::bind(handler, boost::asio::error::operation_aborted));
+                    boost::asio::post(m_strand, std::bind(handler, boost::asio::error::operation_aborted));
                 }
                 else
                 {
@@ -511,15 +511,15 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                     {
                         if (auto self = weak.lock())
                         {
-                            if (not err)
+                            if (!err)
                             {
                                 if (m_status == status::s_none)
-                                    m_strand.post(std::bind(handler, boost::asio::error::operation_aborted));
+                                    boost::asio::post(m_strand, std::bind(handler, boost::asio::error::operation_aborted));
                                 else
                                     do_connect(handler, boost::posix_time::ptime());
                             }
                             else
-                                m_strand.post(std::bind(handler, err));
+                                boost::asio::post(m_strand, std::bind(handler, err));
                         }
                         else
                             handler(boost::asio::error::operation_aborted);
@@ -539,13 +539,13 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
         else
             ssl.set_options(boost::asio::ssl::context::default_workarounds | boost::asio::ssl::context::sslv23_client);
 
-        if (not identity.cert.empty() && not identity.key.empty())
+        if (!identity.cert.empty() && !identity.key.empty())
         {
             ssl.use_certificate_file(identity.cert, boost::asio::ssl::context::pem);
             ssl.use_private_key_file(identity.key, boost::asio::ssl::context::pem);
         }
 
-        if (not identity.ca.empty())
+        if (!identity.ca.empty())
         {
             if (accept)
                 ssl.set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert | boost::asio::ssl::verify_client_once);
@@ -573,7 +573,7 @@ public:
 
     void open(const callback& handler) noexcept(true) override
     {
-        m_strand.post([this, weak = this->weak_from_this(), handler]()
+        boost::asio::post(m_strand, [this, weak = this->weak_from_this(), handler]()
         {
             if (auto self = weak.lock())
             {
@@ -596,7 +596,7 @@ public:
 
     void close(const callback& handler) noexcept(true) override
     {
-        m_strand.post([this, weak = this->weak_from_this(), handler]()
+        boost::asio::post(m_strand, [this, weak = this->weak_from_this(), handler]()
         {
             boost::system::error_code err;
             if (auto self = weak.lock())
@@ -617,7 +617,7 @@ public:
 
     void send(packet_ptr packet, const callback& handler) noexcept(true) override
     {
-        m_strand.post([this, weak = this->weak_from_this(), packet, handler]()
+        boost::asio::post(m_strand, [this, weak = this->weak_from_this(), packet, handler]()
         {
             if (auto self = weak.lock())
             {
@@ -635,7 +635,7 @@ public:
 
     void receive(packet_ptr packet, const callback& handler) noexcept(true) override
     {
-        m_strand.post([this, weak = this->weak_from_this(), packet, handler]()
+        boost::asio::post(m_strand, [this, weak = this->weak_from_this(), packet, handler]()
         {
             if (auto self = weak.lock())
             {

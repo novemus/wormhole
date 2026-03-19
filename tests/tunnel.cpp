@@ -14,13 +14,24 @@
 #include <boost/asio/thread_pool.hpp>
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
-#include <boost/asio/ip/tcp.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/test/unit_test.hpp>
 
+unsigned short find_free_port()
+{
+    boost::asio::io_context io;
+    boost::asio::ip::tcp::acceptor acceptor(io);
+    boost::asio::ip::tcp::endpoint ep(boost::asio::ip::address_v4::any(), 0);
+    acceptor.open(ep.protocol());
+    acceptor.bind(ep);
+    acceptor.listen();
+
+    return acceptor.local_endpoint().port();
+}
+
 namespace {
 
-std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wormhole::protocol proto, wormhole::relation role)
+std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wormhole::protocol proto, wormhole::relation role, unsigned short gateway, unsigned short faraway)
 {
     static const uint64_t s_secret = 1234567890;
 
@@ -40,8 +51,8 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
     {
         return wormhole::create_ssl_tunnel(
             io,
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15000 : 15001),
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15001 : 15000),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
             role,
             role == wormhole::relation::server ? s_server : s_client
         );
@@ -51,8 +62,8 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
     {
         return wormhole::create_tcp_tunnel(
             io,
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15000 : 15001),
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15001 : 15000),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
             role,
             s_secret
         );
@@ -60,8 +71,8 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
 
     return wormhole::create_udp_tunnel(
         io,
-        boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15000 : 15001),
-        boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), role == wormhole::relation::server ? 15001 : 15000),
+        boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
+        boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
         role,
         s_secret
     );
@@ -79,8 +90,10 @@ void test_tunnel(wormhole::protocol proto)
     boost::asio::post(pool, [&io] { io.run(); });
     boost::asio::post(pool, [&io] { io.run(); });
 
-    auto client = create_tunnel(io, proto, wormhole::relation::client);
-    auto server = create_tunnel(io, proto, wormhole::relation::server);
+    auto cp = find_free_port();
+    auto sp = find_free_port();
+    auto client = create_tunnel(io, proto, wormhole::relation::client, cp, sp);
+    auto server = create_tunnel(io, proto, wormhole::relation::server, sp, cp);
 
     auto scp = std::make_shared<std::promise<void>>();
     auto ssp = std::make_shared<std::promise<void>>();
