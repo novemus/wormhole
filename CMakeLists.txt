@@ -68,7 +68,8 @@ set(SOURCES "${CMAKE_CURRENT_BINARY_DIR}/export_header/wormhole/export.h"
     src/wormhole/tunnel.h
     src/wormhole/wormhole.h
     src/wormhole/logger.cpp
-    src/wormhole/tunnel.cpp
+    src/wormhole/tubus.cpp
+    src/wormhole/ssl.cpp
     src/wormhole/wormhole.cpp
     )
 
