@@ -39,7 +39,7 @@ struct endpoint
 };
 
 enum protocol { any, udp, tcp, ssl };
-enum relation { either, client, server };
+enum relation { either, client, server, mutual };
 
 LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, endpoint& ep) noexcept(false);
 LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const endpoint& ep) noexcept(false);
@@ -63,12 +63,12 @@ LIBWORMHOLE_EXPORT bool operator!=(const quality& lhs, const quality& rhs) noexc
 struct security
 {
     uint64_t secret = 0;
-    struct crypto
+    struct privacy
     {
         std::string cert;
         std::string key;
         std::string ca;
-    } identity;
+    } crypto;
 };
 
 struct router

@@ -146,7 +146,7 @@ void test_wormhole(wormhole::protocol proto)
 
     wormhole::security for_import {
         1234567890,
-        wormhole::security::crypto {
+        wormhole::security::privacy {
             "./certs/client.crt",
             "./certs/client.key",
             "./certs/ca.crt"
@@ -155,7 +155,7 @@ void test_wormhole(wormhole::protocol proto)
 
     wormhole::security for_export = {
         1234567890,
-        wormhole::security::crypto {
+        wormhole::security::privacy {
             "./certs/server.crt",
             "./certs/server.key",
             "./certs/ca.crt"

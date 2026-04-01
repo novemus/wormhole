@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
         ("service,s", boost::program_options::value<wormhole::endpoint>()->required(), "endpoint of the exported/imported tcp service: <ip:port>")
         ("gateway,g", boost::program_options::value<wormhole::endpoint>()->required(), "gateway endpoint of the tunnel: <ip:port>")
         ("faraway,f", boost::program_options::value<wormhole::endpoint>()->required(), "faraway endpoint of the tunnel: <ip:port>")
-        ("quality,q", boost::program_options::value<wormhole::quality>()->default_value(wormhole::quality()), "quality of the tunnel side: udp:client|udp:server|tcp:client|tcp:server|ssl:client|ssl:server")
+        ("quality,q", boost::program_options::value<wormhole::quality>()->default_value(wormhole::quality()), "quality of the tunnel side: udp:client|udp:server|udp:mutual|tcp:client|tcp:server|tcp:mutual|ssl:client|ssl:server|ssl:mutual")
         ("journal,j", boost::program_options::value<std::string>()->default_value(""), "journal file: <path>")
         ("logging,l", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "logging level: fatal|error|warning|info|debug|trace");
 
@@ -77,7 +77,7 @@ int main(int argc, char *argv[])
 
         wormhole::security guard = { 
             vm["secret"].as<uint64_t>(),
-            wormhole::security::crypto {
+            wormhole::security::privacy {
                 vm["cert"].as<std::string>(),
                 vm["key"].as<std::string>(),
                 vm["ca"].as<std::string>()

@@ -50,6 +50,9 @@ std::string quality::to_string(const quality& qos) noexcept(false)
         case relation::client:
             str += "client";
             break;
+        case relation::mutual:
+            str += "mutual";
+            break;
         case relation::either:
             str += "either";
             break;
@@ -85,6 +88,8 @@ quality quality::from_string(const std::string& str) noexcept(false)
         qos.role = relation::client;
     else if (role == "either")
         qos.role = relation::either;
+    else if (role == "mutual")
+        qos.role = relation::mutual;
     else
         throw std::runtime_error("can't parse relation");
 
@@ -654,29 +659,28 @@ private:
     }
 };
 
-std::shared_ptr<tunnel> create_tunnel(boost::asio::io_context& io, const endpoint& gateway, const endpoint& faraway, protocol proto, relation role, const security& guard) noexcept(false)
+std::shared_ptr<tunnel> create_tunnel(bool exporter, boost::asio::io_context& io, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& defense) noexcept(false)
 {
-    if (proto == protocol::ssl)
-        return create_ssl_tunnel(io, gateway, faraway, role, guard.identity);
-    if (proto == protocol::tcp)
-        return create_tcp_tunnel(io, gateway, faraway, role, guard.secret);
-    return create_udp_tunnel(io, gateway, faraway, role, guard.secret);
+    bool accept = qos.role == relation::server || exporter && qos.role == relation::either;
+    bool server = qos.role == relation::server || exporter && qos.role != relation::client;
+
+    if (qos.proto == protocol::ssl)
+        return create_ssl_tunnel(io, gateway, faraway, accept, server, defense.crypto);
+    if (qos.proto == protocol::tcp)
+        return create_tcp_tunnel(io, gateway, faraway, accept, defense.secret);
+    return create_udp_tunnel(io, gateway, faraway, accept, defense.secret);
 }
 
 std::shared_ptr<router> create_exporter(
-    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& guard) noexcept(false)
-{
-    return std::make_shared<exporter>(
-        io, service, create_tunnel(io, gateway, faraway, qos.proto, qos.role == relation::either ? relation::server : qos.role, guard)
-    );
+    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& defense) noexcept(false)
+{   
+    return std::make_shared<exporter>(io, service, create_tunnel(true, io, gateway, faraway,qos, defense));
 }
 
 std::shared_ptr<router> create_importer(
-    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& guard) noexcept(false)
+    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& defense) noexcept(false)
 {
-    return std::make_shared<importer>(
-        io, service, create_tunnel(io, gateway, faraway, qos.proto, qos.role == relation::either ? relation::client : qos.role, guard)
-    );
+    return std::make_shared<importer>(io, service, create_tunnel(false, io, gateway, faraway, qos, defense));
 }
 
 }

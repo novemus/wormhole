@@ -75,11 +75,11 @@ struct tunnel
 };
 
 LIBWORMHOLE_EXPORT std::shared_ptr<tunnel> create_udp_tunnel(
-    boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, relation role, uint64_t secret) noexcept(true);
+    boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, bool accept, uint64_t secret) noexcept(true);
 
 LIBWORMHOLE_EXPORT std::shared_ptr<tunnel> create_tcp_tunnel(
-    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, relation role, uint64_t secret) noexcept(true);
+    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, bool accept, uint64_t secret) noexcept(true);
 
 LIBWORMHOLE_EXPORT std::shared_ptr<tunnel> create_ssl_tunnel(
-    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, relation role, const security::crypto& identity) noexcept(true);
+    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, bool accept, bool server, const security::privacy& crypto) noexcept(true);
 }

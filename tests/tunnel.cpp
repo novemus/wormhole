@@ -35,13 +35,13 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
 {
     static const uint64_t s_secret = 1234567890;
 
-    static const wormhole::security::crypto s_client {
+    static const wormhole::security::privacy s_client {
         "./certs/client.crt",
         "./certs/client.key",
         "./certs/ca.crt"
     };
 
-    static const wormhole::security::crypto s_server {
+    static const wormhole::security::privacy s_server {
         "./certs/server.crt",
         "./certs/server.key",
         "./certs/ca.crt"
@@ -53,10 +53,10 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
             io,
             boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
             boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
-            role,
+            role != wormhole::relation::client,
+            role != wormhole::relation::client,
             role == wormhole::relation::server ? s_server : s_client
         );
-
     }
     else if (proto == wormhole::protocol::tcp)
     {
@@ -64,7 +64,7 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
             io,
             boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
             boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
-            role,
+            role != wormhole::relation::client,
             s_secret
         );
     }
@@ -73,7 +73,7 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
         io,
         boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
         boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
-        role,
+        role != wormhole::relation::client,
         s_secret
     );
 };

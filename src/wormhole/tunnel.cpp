@@ -227,8 +227,8 @@ public:
     }
 };
 
-template<bool accept> 
-class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel<accept>>
+template<bool accept, bool server> 
+class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel<accept, server>>
 {
     typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> ssl_stream;
     typedef boost::asio::ip::tcp::acceptor tcp_acceptor;
@@ -248,8 +248,6 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
     defer_queue m_wq;
     defer_queue m_rq;
     status m_status = status::s_none;
-
-    static constexpr size_t SOCKET_BUFFER_SIZE = 1048576;
 
     void write(packet_ptr packet, const callback& handler) noexcept(true)
     {
@@ -384,9 +382,8 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
         {
             m_acceptor.open(m_gateway.protocol());
             m_acceptor.non_blocking(true);
-            m_acceptor.set_option(boost::asio::socket_base::send_buffer_size(SOCKET_BUFFER_SIZE));
-            m_acceptor.set_option(boost::asio::socket_base::receive_buffer_size(SOCKET_BUFFER_SIZE));
             m_acceptor.set_option(boost::asio::socket_base::reuse_address(true));
+            m_acceptor.set_option(boost::asio::socket_base::keep_alive(true));
             m_acceptor.bind(m_gateway);
             m_acceptor.listen();
 
@@ -424,7 +421,8 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                 {
                     if (!err)
                     {
-                        m_stream.async_handshake(boost::asio::ssl::stream_base::server, m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
+                        auto role = server ? boost::asio::ssl::stream_base::server : boost::asio::ssl::stream_base::client;
+                        m_stream.async_handshake(role, m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
                         {
                             if (auto self = weak.lock())
                             {
@@ -473,9 +471,8 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
 
         m_stream.next_layer().open(m_gateway.protocol());
         m_stream.next_layer().non_blocking(true);
-        m_stream.next_layer().set_option(boost::asio::socket_base::send_buffer_size(SOCKET_BUFFER_SIZE));
-        m_stream.next_layer().set_option(boost::asio::socket_base::receive_buffer_size(SOCKET_BUFFER_SIZE));
         m_stream.next_layer().set_option(boost::asio::socket_base::reuse_address(true));
+        m_stream.next_layer().set_option(boost::asio::socket_base::keep_alive(true));
         m_stream.next_layer().bind(m_gateway);
 
         m_stream.next_layer().async_connect(m_faraway, m_strand.wrap([this, weak = this->weak_from_this(), handler, deadline](const boost::system::error_code& err)
@@ -486,7 +483,8 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                 {
                     if (!err)
                     {
-                        m_stream.async_handshake(boost::asio::ssl::stream_base::client, m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
+                        auto role = server ? boost::asio::ssl::stream_base::server : boost::asio::ssl::stream_base::client;
+                        m_stream.async_handshake(role, m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
                         {
                             if (auto self = weak.lock())
                             {
@@ -531,27 +529,27 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
         }));
     }
 
-    static boost::asio::ssl::context make_ssl_context(const wormhole::security::crypto& identity) noexcept(true)
+    static boost::asio::ssl::context make_ssl_context(const security::privacy& crypto) noexcept(true)
     {
         boost::asio::ssl::context ssl(boost::asio::ssl::context::sslv23);
-        if (accept)
+        if (server)
             ssl.set_options(boost::asio::ssl::context::default_workarounds | boost::asio::ssl::context::sslv23_server);
         else
             ssl.set_options(boost::asio::ssl::context::default_workarounds | boost::asio::ssl::context::sslv23_client);
 
-        if (!identity.cert.empty() && !identity.key.empty())
+        if (!crypto.cert.empty() && !crypto.key.empty())
         {
-            ssl.use_certificate_file(identity.cert, boost::asio::ssl::context::pem);
-            ssl.use_private_key_file(identity.key, boost::asio::ssl::context::pem);
+            ssl.use_certificate_file(crypto.cert, boost::asio::ssl::context::pem);
+            ssl.use_private_key_file(crypto.key, boost::asio::ssl::context::pem);
         }
 
-        if (!identity.ca.empty())
+        if (!crypto.ca.empty())
         {
-            if (accept)
+            if (server)
                 ssl.set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert | boost::asio::ssl::verify_client_once);
             else
                 ssl.set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
-            ssl.load_verify_file(identity.ca);
+            ssl.load_verify_file(crypto.ca);
         }
 
         return std::move(ssl);
@@ -559,10 +557,10 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
 
 public:
 
-    ssl_tunnel(boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, const wormhole::security::crypto& identity)
+    ssl_tunnel(boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, const security::privacy& crypto)
         : m_io(io)
         , m_strand(io)
-        , m_ssl(make_ssl_context(identity))
+        , m_ssl(make_ssl_context(crypto))
         , m_timer(io)
         , m_acceptor(io)
         , m_stream(io, m_ssl)
@@ -653,27 +651,39 @@ public:
 };
 
 std::shared_ptr<tunnel> create_udp_tunnel(
-    boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, relation role, uint64_t secret) noexcept(true)
+    boost::asio::io_context& io, const udp_endpoint& gateway, const udp_endpoint& faraway, bool accept, uint64_t secret) noexcept(true)
 {
-    if (role == relation::server)
-        return std::make_shared<tubus_tunnel<boost::asio::ip::udp, true>>(io, gateway, faraway, secret);
-    return std::make_shared<tubus_tunnel<boost::asio::ip::udp, false>>(io, gateway, faraway, secret);
+    _dbg_ << "create udp tunnel: gateway=" << gateway << " faraway=" << faraway << " accept=" << accept << " obsure=" << static_cast<bool>(secret);
+
+    return accept
+        ? std::shared_ptr<tunnel>(new tubus_tunnel<boost::asio::ip::udp, true>(io, gateway, faraway, secret))
+        : std::shared_ptr<tunnel>(new tubus_tunnel<boost::asio::ip::udp, false>(io, gateway, faraway, secret));
 }
 
 std::shared_ptr<tunnel> create_tcp_tunnel(
-    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, relation role, uint64_t secret) noexcept(true)
+    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, bool accept, uint64_t secret) noexcept(true)
 {
-    if (role == relation::server)
-        return std::make_shared<tubus_tunnel<boost::asio::ip::tcp, true>>(io, gateway, faraway, secret);
-    return std::make_shared<tubus_tunnel<boost::asio::ip::tcp, false>>(io, gateway, faraway, secret);
+    _dbg_ << "create tcp tunnel: gateway=" << gateway << " faraway=" << faraway << " accept=" << accept << " obsure=" << static_cast<bool>(secret);
+
+    return accept
+        ? std::shared_ptr<tunnel>(new tubus_tunnel<boost::asio::ip::tcp, true>(io, gateway, faraway, secret))
+        : std::shared_ptr<tunnel>(new tubus_tunnel<boost::asio::ip::tcp, false>(io, gateway, faraway, secret));
 }
 
 std::shared_ptr<tunnel> create_ssl_tunnel(
-    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, relation role, const security::crypto& identity) noexcept(true)
+    boost::asio::io_context& io, const tcp_endpoint& gateway, const tcp_endpoint& faraway, bool accept, bool server, const security::privacy& crypto) noexcept(true)
 {
-    if (role == relation::server)
-        return std::make_shared<ssl_tunnel<true>>(io, gateway, faraway, identity);
-    return std::make_shared<ssl_tunnel<false>>(io, gateway, faraway, identity);
+    _dbg_ << "create ssl tunnel: gateway=" << gateway << " faraway=" << faraway << " accept=" << accept << " server=" << server << " crypto=" << static_cast<bool>(crypto.cert.c_str());
+
+    if (accept)
+    {
+        return server 
+            ? std::shared_ptr<tunnel>(new ssl_tunnel<true, true>(io, gateway, faraway, crypto))
+            : std::shared_ptr<tunnel>(new ssl_tunnel<true, false>(io, gateway, faraway, crypto));
+    }
+    return server 
+            ? std::shared_ptr<tunnel>(new ssl_tunnel<false, true>(io, gateway, faraway, crypto))
+            : std::shared_ptr<tunnel>(new ssl_tunnel<false, false>(io, gateway, faraway, crypto));
 }
 
 }
