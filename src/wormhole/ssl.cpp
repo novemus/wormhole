@@ -336,7 +336,8 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
         try
         {
             const char *env = std::getenv("TUBUS_TCP_KEEPALIVE_TIMEOUT");
-            timeout = std::stoi(env);
+            if (env)
+                timeout = std::stoi(env);
         }
         catch (const std::exception& ex)
         {
@@ -425,20 +426,34 @@ public:
     {
         boost::asio::post(m_strand, [this, weak = this->weak_from_this(), handler]()
         {
-            boost::system::error_code err;
+            boost::system::error_code ec;
             if (auto self = weak.lock())
             {
-                if (m_status != status::s_none)
+                m_timer.cancel(ec);
+                m_acceptor.close(ec);
+
+                if (m_status == status::s_open)
                 {
-                    m_status = status::s_none;
-                    m_timer.cancel(err);
-                    m_acceptor.close(err);
-                    m_stream.shutdown(err);
-                    m_stream.next_layer().close(err);
+                    m_stream.async_shutdown(m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
+                    {
+                        if (auto self = weak.lock())
+                        {
+                            m_status = status::s_none;
+                            boost::system::error_code ec;
+                            m_stream.next_layer().close(ec);
+                        }
+                        handler(err);
+                    }));
+                    return;
                 }
+
+                if (m_status == status::s_half)
+                    m_stream.next_layer().close(ec);
+
+                m_status = status::s_none;
             }
 
-            handler(err);
+            handler(ec);
         });
     }
 
