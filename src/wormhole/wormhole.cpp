@@ -481,7 +481,7 @@ public:
 
         boost::system::error_code ec;
         for (auto& item : m_bunch)
-            item.second->socket().cancel(ec);
+            item.second->socket().close(ec);
     }
 };
 

@@ -44,7 +44,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
     defer_queue m_rq;
     status m_status = status::s_none;
 
-    void write(packet_ptr packet, const callback& handler) noexcept(true)
+    void do_write(packet_ptr packet, const callback& handler) noexcept(true)
     {
         auto callback = [this, weak = this->weak_from_this(), handler](const boost::system::error_code& ec)
         {
@@ -56,10 +56,10 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                 if (!m_wq.empty())
                 {
                     auto& next = m_wq.front();
-                    write(next.first, next.second);
+                    do_write(next.first, next.second);
                 }
 
-                boost::asio::post(m_strand, std::bind(handler, ec));
+                boost::asio::post(m_io, std::bind(handler, ec));
             }
             else
                 handler(boost::asio::error::shut_down);
@@ -67,7 +67,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
 
         if (m_status != status::s_open)
         {
-            boost::asio::post(m_strand, std::bind(handler, boost::asio::error::shut_down));
+            boost::asio::post(m_io, std::bind(handler, boost::asio::error::shut_down));
             return;
         }
 
@@ -87,7 +87,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
         }));
     }
 
-    void read(packet_ptr packet, const callback& handler) noexcept(true)
+    void do_read(packet_ptr packet, const callback& handler) noexcept(true)
     {
         auto callback = [this, weak = this->weak_from_this(), handler](const boost::system::error_code& ec)
         {
@@ -99,10 +99,10 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                 if (!m_rq.empty())
                 {
                     auto& next = m_rq.front();
-                    read(next.first, next.second);
+                    do_read(next.first, next.second);
                 }
 
-                boost::asio::post(m_strand, std::bind(handler, ec));
+                boost::asio::post(m_io, std::bind(handler, ec));
             }
             else
                 handler(boost::asio::error::shut_down);
@@ -110,7 +110,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
 
         if (m_status != status::s_open)
         {
-            boost::asio::post(m_strand, std::bind(handler, boost::asio::error::shut_down));
+            boost::asio::post(m_io, std::bind(handler, boost::asio::error::shut_down));
             return;
         }
 
@@ -223,14 +223,14 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                             if (auto self = weak.lock())
                             {
                                 m_status = status::s_open;
-                                boost::asio::post(m_strand, std::bind(handler, err));
+                                boost::asio::post(m_io, std::bind(handler, err));
                             }
                             else
                                 handler(err);
                         }));
                     }
                     else
-                        boost::asio::post(m_strand, std::bind(handler, err));
+                        boost::asio::post(m_io, std::bind(handler, err));
 
                     boost::system::error_code ec;
                     m_timer.cancel(ec);
@@ -238,7 +238,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                 }
                 else
                 {
-                    boost::asio::post(m_strand, [this, weak, handler]()
+                    boost::asio::post(m_io, [this, weak, handler]()
                     {
                         if (auto self = weak.lock())
                         {
@@ -286,18 +286,18 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                             if (auto self = weak.lock())
                             {
                                 m_status = status::s_open;
-                                boost::asio::post(m_strand, std::bind(handler, err));
+                                boost::asio::post(m_io, std::bind(handler, err));
                             }
                             else
                                 handler(err);
                         }));
                     }
                     else
-                        boost::asio::post(m_strand, std::bind(handler, err));
+                        boost::asio::post(m_io, std::bind(handler, err));
                 }
                 else if (m_status == status::s_none)
                 {
-                    boost::asio::post(m_strand, std::bind(handler, boost::asio::error::operation_aborted));
+                    boost::asio::post(m_io, std::bind(handler, boost::asio::error::operation_aborted));
                 }
                 else
                 {
@@ -309,12 +309,12 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                             if (!err)
                             {
                                 if (m_status == status::s_none)
-                                    boost::asio::post(m_strand, std::bind(handler, boost::asio::error::operation_aborted));
+                                    boost::asio::post(m_io, std::bind(handler, boost::asio::error::operation_aborted));
                                 else
                                     do_connect(handler, boost::posix_time::ptime());
                             }
                             else
-                                boost::asio::post(m_strand, std::bind(handler, err));
+                                boost::asio::post(m_io, std::bind(handler, err));
                         }
                         else
                             handler(boost::asio::error::operation_aborted);
@@ -429,17 +429,27 @@ public:
             boost::system::error_code ec;
             if (auto self = weak.lock())
             {
-                m_timer.cancel(ec);
-                m_acceptor.close(ec);
-
                 if (m_status == status::s_open)
                 {
+                    m_status = status::s_none;
+                    m_stream.next_layer().cancel(ec);
+
+                    m_timer.expires_from_now(boost::posix_time::seconds(1));
+                    m_timer.async_wait(m_strand.wrap([this, weak](const boost::system::error_code& err)
+                    {
+                        if (auto self = weak.lock())
+                        {
+                            boost::system::error_code ec;
+                            m_stream.next_layer().close(ec);
+                        }
+                    }));
+
                     m_stream.async_shutdown(m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
                     {
                         if (auto self = weak.lock())
                         {
-                            m_status = status::s_none;
                             boost::system::error_code ec;
+                            m_timer.cancel(ec);
                             m_stream.next_layer().close(ec);
                         }
                         handler(err);
@@ -448,9 +458,12 @@ public:
                 }
 
                 if (m_status == status::s_half)
+                {
+                    m_timer.cancel(ec);
+                    m_acceptor.close(ec);
                     m_stream.next_layer().close(ec);
-
-                m_status = status::s_none;
+                    m_status = status::s_none;
+                }
             }
 
             handler(ec);
@@ -467,7 +480,7 @@ public:
                 {
                     m_wq.emplace(packet, handler);
                     if (m_wq.size() == 1)
-                        write(packet, handler);
+                        do_write(packet, handler);
                     return;
                 }
             }
@@ -485,7 +498,7 @@ public:
                 {
                     m_rq.emplace(packet, handler);
                     if (m_rq.size() == 1)
-                        read(packet, handler);
+                        do_read(packet, handler);
                     return;
                 }
             }

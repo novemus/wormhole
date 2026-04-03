@@ -191,7 +191,7 @@ public:
         if (m_channel)
             m_channel->shutdown(handler);
         else
-            boost::asio::post(std::bind(handler, boost::asio::error::shut_down));
+            boost::asio::post(m_io, std::bind(handler, boost::asio::error::shut_down));
     }
 
     void send(packet_ptr packet, const callback& handler) noexcept(true) override
@@ -206,7 +206,7 @@ public:
                 write(packet, std::move(handler));
         }
         else
-            boost::asio::post(std::bind(handler, boost::asio::error::shut_down));
+            boost::asio::post(m_io, std::bind(handler, boost::asio::error::shut_down));
     }
 
     void receive(packet_ptr packet, const callback& handler) noexcept(true) override
@@ -220,7 +220,7 @@ public:
                 read(packet, std::move(handler));
         }
         else
-            boost::asio::post(std::bind(handler, boost::asio::error::shut_down));
+            boost::asio::post(m_io, std::bind(handler, boost::asio::error::shut_down));
     }
 };
 

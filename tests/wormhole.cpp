@@ -124,9 +124,10 @@ protected:
             m_acceptor.async_accept(session->socket(), [self = shared_from_this(), session](const boost::system::error_code &error)
             {
                 if (!error)
+                {
                     session->start();
-
-                self->accept();
+                    self->accept();
+                }
             });
         }
     }
