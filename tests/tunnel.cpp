@@ -78,27 +78,35 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
     );
 };
 
-const char HELLO_WORMHOLE[] = "Hello, Wormhole!";
 
 void test_tunnel(wormhole::protocol proto)
 {
-    boost::asio::io_context io;
-    boost::asio::thread_pool pool;
+    static const char HELLO_WORMHOLE[] = "Hello, Wormhole!";
 
-    auto work = boost::asio::make_work_guard(io);
-    boost::asio::post(pool, [&io] { io.run(); });
-    boost::asio::post(pool, [&io] { io.run(); });
-    boost::asio::post(pool, [&io] { io.run(); });
+    boost::asio::io_context io;
 
     auto cp = find_free_port();
     auto sp = find_free_port();
     auto client = create_tunnel(io, proto, wormhole::relation::client, cp, sp);
     auto server = create_tunnel(io, proto, wormhole::relation::server, sp, cp);
 
-    auto scp = std::make_shared<std::promise<void>>();
-    auto ssp = std::make_shared<std::promise<void>>();
+    auto close = [client, server, counter = 0]() mutable
+    {
+        if (++counter == 2)
+        {
+            client->close([](const boost::system::error_code& ec)
+            {
+                BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
+            });
 
-    auto send = [](std::shared_ptr<wormhole::tunnel> tunnel, std::shared_ptr<std::promise<void>> promise)
+            server->close([](const boost::system::error_code& ec)
+            {
+                BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
+            });
+        }
+    };
+
+    auto send = [&](std::shared_ptr<wormhole::tunnel> tunnel)
     {
         auto packet1 = std::make_shared<wormhole::packet>(1, true);
         BOOST_REQUIRE_EQUAL(packet1->id(), 1);
@@ -144,7 +152,7 @@ void test_tunnel(wormhole::protocol proto)
         BOOST_REQUIRE_EQUAL(packet3->header().size(), wormhole::packet::header_size);
         BOOST_REQUIRE_EQUAL(packet3->payload().size(), std::strlen(HELLO_WORMHOLE));
 
-        tunnel->send(packet3, [packet3, promise](const boost::system::error_code& ec)
+        tunnel->send(packet3, [packet3](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
             BOOST_CHECK_EQUAL(packet3->id(), 3);
@@ -153,15 +161,10 @@ void test_tunnel(wormhole::protocol proto)
             BOOST_CHECK_EQUAL(packet3->header().size(), wormhole::packet::header_size);
             BOOST_REQUIRE_EQUAL(packet3->payload().size(), std::strlen(HELLO_WORMHOLE));
             BOOST_CHECK_EQUAL(std::memcmp(packet3->payload().data(), HELLO_WORMHOLE, std::strlen(HELLO_WORMHOLE)), 0);
-
-            promise->set_value();
         });
     };
 
-    auto rcp = std::make_shared<std::promise<void>>();
-    auto rsp = std::make_shared<std::promise<void>>();
-
-    auto receive = [](std::shared_ptr<wormhole::tunnel> tunnel, std::shared_ptr<std::promise<void>> promise)
+    auto receive = [&](std::shared_ptr<wormhole::tunnel> tunnel)
     {
         auto packet1 = std::make_shared<wormhole::packet>();
         tunnel->receive(packet1, [packet1](const boost::system::error_code& ec)
@@ -186,7 +189,7 @@ void test_tunnel(wormhole::protocol proto)
         });
 
         auto packet3 = std::make_shared<wormhole::packet>();
-        tunnel->receive(packet3, [tunnel, packet3, promise](const boost::system::error_code& ec)
+        tunnel->receive(packet3, [&, tunnel, packet3](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
             BOOST_CHECK_EQUAL(packet3->id(), 3);
@@ -196,50 +199,27 @@ void test_tunnel(wormhole::protocol proto)
             BOOST_REQUIRE_EQUAL(packet3->payload().size(), std::strlen(HELLO_WORMHOLE));
             BOOST_CHECK_EQUAL(std::memcmp(packet3->payload().data(), HELLO_WORMHOLE, std::strlen(HELLO_WORMHOLE)), 0);
 
-            promise->set_value();
+            close();
         });
     };
 
-    server->open([&](const boost::system::error_code& ec)
+    BOOST_REQUIRE_NO_THROW(server->open([&](const boost::system::error_code& ec)
     {
         BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
 
-        send(server, ssp);
-        receive(server, rsp);
-    });
+        BOOST_REQUIRE_NO_THROW(send(server));
+        BOOST_REQUIRE_NO_THROW(receive(server));
+    }));
 
-    client->open([&](const boost::system::error_code& ec)
+    BOOST_REQUIRE_NO_THROW(client->open([&](const boost::system::error_code& ec)
     {
         BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
 
-        send(client, scp);
-        receive(client, rcp);
-    });
+        BOOST_REQUIRE_NO_THROW(send(client));
+        BOOST_REQUIRE_NO_THROW(receive(client));
+    }));
 
-    BOOST_CHECK_NO_THROW(scp->get_future().get());
-    BOOST_CHECK_NO_THROW(rcp->get_future().get());
-    BOOST_CHECK_NO_THROW(ssp->get_future().get());
-    BOOST_CHECK_NO_THROW(rsp->get_future().get());
-
-    auto ccp = std::make_shared<std::promise<void>>();
-    client->close([&](const boost::system::error_code& ec)
-    {
-        BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
-        ccp->set_value();
-    });
-
-    auto csp = std::make_shared<std::promise<void>>();
-    server->close([&](const boost::system::error_code& ec)
-    {
-        BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
-        csp->set_value();
-    });
-
-    BOOST_CHECK_NO_THROW(ccp->get_future().get());
-    BOOST_CHECK_NO_THROW(csp->get_future().get());
-
-    work.reset();
-    pool.join();
+    BOOST_CHECK_NO_THROW(io.run());
 }
 
 }

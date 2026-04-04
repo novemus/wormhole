@@ -169,7 +169,7 @@ void test_wormhole(wormhole::protocol proto)
     const wormhole::endpoint CLIENT_GATEWAY { boost::asio::ip::make_address("127.0.0.1"), find_free_port() };
 
     boost::asio::io_context io;
-    boost::asio::thread_pool pool;
+    boost::asio::thread_pool pool(3);
 
     auto work = boost::asio::make_work_guard(io);
     boost::asio::post(pool, [&io] { io.run(); });
