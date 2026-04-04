@@ -175,11 +175,19 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
 
         if (!deadline.is_not_a_date_time())
         {
-            m_acceptor.open(m_gateway.protocol());
-            m_acceptor.set_option(boost::asio::socket_base::reuse_address(true));
-            m_acceptor.set_option(boost::asio::socket_base::keep_alive(true));
-            m_acceptor.bind(m_gateway);
-            m_acceptor.listen();
+            try
+            {
+                m_acceptor.open(m_gateway.protocol());
+                m_acceptor.set_option(boost::asio::socket_base::reuse_address(true));
+                m_acceptor.set_option(boost::asio::socket_base::keep_alive(true));
+                m_acceptor.bind(m_gateway);
+                m_acceptor.listen();
+            }
+            catch(const boost::system::system_error& ex)
+            {
+                boost::asio::post(m_io, std::bind(handler, ex.code()));
+                return;
+            }
 
             m_timer.expires_at(deadline);
             m_timer.async_wait(m_strand.wrap([this, weak = this->weak_from_this()](const boost::system::error_code& error)
@@ -218,7 +226,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                         set_keepalive_time();
 
                         auto role = server ? boost::asio::ssl::stream_base::server : boost::asio::ssl::stream_base::client;
-                        m_stream.async_handshake(role, m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
+                        m_stream.async_handshake(role, [this, weak, handler](const boost::system::error_code& err)
                         {
                             if (auto self = weak.lock())
                             {
@@ -227,7 +235,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                             }
                             else
                                 handler(err);
-                        }));
+                        });
                     }
                     else
                         boost::asio::post(m_io, std::bind(handler, err));
@@ -238,7 +246,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                 }
                 else
                 {
-                    boost::asio::post(m_io, [this, weak, handler]()
+                    boost::asio::post(m_strand, [this, weak, handler]()
                     {
                         if (auto self = weak.lock())
                         {
@@ -265,10 +273,18 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             m_stream.next_layer().close(ec);
         }
 
-        m_stream.next_layer().open(m_gateway.protocol());
-        m_stream.next_layer().set_option(boost::asio::socket_base::reuse_address(true));
-        m_stream.next_layer().set_option(boost::asio::socket_base::keep_alive(true));
-        m_stream.next_layer().bind(m_gateway);
+        try
+        {
+            m_stream.next_layer().open(m_gateway.protocol());
+            m_stream.next_layer().set_option(boost::asio::socket_base::reuse_address(true));
+            m_stream.next_layer().set_option(boost::asio::socket_base::keep_alive(true));
+            m_stream.next_layer().bind(m_gateway);
+        }
+        catch(const boost::system::system_error& ex)
+        {
+            boost::asio::post(m_io, std::bind(handler, ex.code()));
+            return;
+        }
 
         m_stream.next_layer().async_connect(m_faraway, m_strand.wrap([this, weak = this->weak_from_this(), handler, deadline](const boost::system::error_code& err)
         {
@@ -281,7 +297,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                         set_keepalive_time();
  
                         auto role = server ? boost::asio::ssl::stream_base::server : boost::asio::ssl::stream_base::client;
-                        m_stream.async_handshake(role, m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
+                        m_stream.async_handshake(role, [this, weak, handler](const boost::system::error_code& err)
                         {
                             if (auto self = weak.lock())
                             {
@@ -290,7 +306,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                             }
                             else
                                 handler(err);
-                        }));
+                        });
                     }
                     else
                         boost::asio::post(m_io, std::bind(handler, err));
