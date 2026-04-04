@@ -78,11 +78,10 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
     );
 };
 
+static constexpr char HELLO_WORMHOLE[] = "Hello, Wormhole!";
 
 void test_tunnel(wormhole::protocol proto)
 {
-    static const char HELLO_WORMHOLE[] = "Hello, Wormhole!";
-
     boost::asio::io_context io;
 
     auto cp = find_free_port();
@@ -90,23 +89,20 @@ void test_tunnel(wormhole::protocol proto)
     auto client = create_tunnel(io, proto, wormhole::relation::client, cp, sp);
     auto server = create_tunnel(io, proto, wormhole::relation::server, sp, cp);
 
-    auto close = [client, server, counter = 0]() mutable
+    std::shared_ptr<void> closer(nullptr, [client, server](void*)
     {
-        if (++counter == 2)
+        client->close([](const boost::system::error_code& ec)
         {
-            client->close([](const boost::system::error_code& ec)
-            {
-                BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
-            });
+            BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
+        });
 
-            server->close([](const boost::system::error_code& ec)
-            {
-                BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
-            });
-        }
-    };
+        server->close([](const boost::system::error_code& ec)
+        {
+            BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
+        });
+    });
 
-    auto send = [&](std::shared_ptr<wormhole::tunnel> tunnel)
+    auto send = [](std::shared_ptr<wormhole::tunnel> tunnel, std::shared_ptr<void> closer)
     {
         auto packet1 = std::make_shared<wormhole::packet>(1, true);
         BOOST_REQUIRE_EQUAL(packet1->id(), 1);
@@ -115,7 +111,7 @@ void test_tunnel(wormhole::protocol proto)
         BOOST_REQUIRE_EQUAL(packet1->header().size(), wormhole::packet::header_size);
         BOOST_REQUIRE_EQUAL(packet1->payload().size(), wormhole::packet::max_payload_size);
 
-        tunnel->send(packet1, [packet1](const boost::system::error_code& ec)
+        tunnel->send(packet1, [packet1, closer](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
             BOOST_CHECK_EQUAL(packet1->id(), 1);
@@ -132,7 +128,7 @@ void test_tunnel(wormhole::protocol proto)
         BOOST_REQUIRE_EQUAL(packet2->header().size(), wormhole::packet::header_size);
         BOOST_REQUIRE_EQUAL(packet2->payload().size(), 0);
 
-        tunnel->send(packet2, [packet2](const boost::system::error_code& ec)
+        tunnel->send(packet2, [packet2, closer](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
             BOOST_CHECK_EQUAL(packet2->id(), 2);
@@ -152,7 +148,7 @@ void test_tunnel(wormhole::protocol proto)
         BOOST_REQUIRE_EQUAL(packet3->header().size(), wormhole::packet::header_size);
         BOOST_REQUIRE_EQUAL(packet3->payload().size(), std::strlen(HELLO_WORMHOLE));
 
-        tunnel->send(packet3, [packet3](const boost::system::error_code& ec)
+        tunnel->send(packet3, [packet3, closer](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
             BOOST_CHECK_EQUAL(packet3->id(), 3);
@@ -164,10 +160,10 @@ void test_tunnel(wormhole::protocol proto)
         });
     };
 
-    auto receive = [&](std::shared_ptr<wormhole::tunnel> tunnel)
+    auto receive = [](std::shared_ptr<wormhole::tunnel> tunnel, std::shared_ptr<void> closer)
     {
         auto packet1 = std::make_shared<wormhole::packet>();
-        tunnel->receive(packet1, [packet1](const boost::system::error_code& ec)
+        tunnel->receive(packet1, [packet1, closer](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
             BOOST_CHECK_EQUAL(packet1->id(), 1);
@@ -178,7 +174,7 @@ void test_tunnel(wormhole::protocol proto)
         });
 
         auto packet2 = std::make_shared<wormhole::packet>();
-        tunnel->receive(packet2, [packet2](const boost::system::error_code& ec)
+        tunnel->receive(packet2, [packet2, closer](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
             BOOST_CHECK_EQUAL(packet2->id(), 2);
@@ -189,7 +185,7 @@ void test_tunnel(wormhole::protocol proto)
         });
 
         auto packet3 = std::make_shared<wormhole::packet>();
-        tunnel->receive(packet3, [&, tunnel, packet3](const boost::system::error_code& ec)
+        tunnel->receive(packet3, [packet3, closer](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
             BOOST_CHECK_EQUAL(packet3->id(), 3);
@@ -198,26 +194,26 @@ void test_tunnel(wormhole::protocol proto)
             BOOST_CHECK_EQUAL(packet3->header().size(), wormhole::packet::header_size);
             BOOST_REQUIRE_EQUAL(packet3->payload().size(), std::strlen(HELLO_WORMHOLE));
             BOOST_CHECK_EQUAL(std::memcmp(packet3->payload().data(), HELLO_WORMHOLE, std::strlen(HELLO_WORMHOLE)), 0);
-
-            close();
         });
     };
 
-    BOOST_REQUIRE_NO_THROW(server->open([&](const boost::system::error_code& ec)
+    BOOST_REQUIRE_NO_THROW(server->open([&, closer](const boost::system::error_code& ec)
     {
         BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
 
-        BOOST_REQUIRE_NO_THROW(send(server));
-        BOOST_REQUIRE_NO_THROW(receive(server));
+        BOOST_REQUIRE_NO_THROW(send(server, closer));
+        BOOST_REQUIRE_NO_THROW(receive(server, closer));
     }));
 
-    BOOST_REQUIRE_NO_THROW(client->open([&](const boost::system::error_code& ec)
+    BOOST_REQUIRE_NO_THROW(client->open([&, closer](const boost::system::error_code& ec)
     {
         BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
 
-        BOOST_REQUIRE_NO_THROW(send(client));
-        BOOST_REQUIRE_NO_THROW(receive(client));
+        BOOST_REQUIRE_NO_THROW(send(client, closer));
+        BOOST_REQUIRE_NO_THROW(receive(client, closer));
     }));
+
+    closer.reset();
 
     BOOST_CHECK_NO_THROW(io.run());
 }

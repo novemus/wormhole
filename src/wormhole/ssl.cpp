@@ -365,12 +365,15 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
 #ifdef _WIN32
             tcp_keepalive keepalive;
             keepalive.onoff = 1;
-            keepalive.keepalivetime = static_cast<unsigned long>(timeout);
-            keepalive.keepaliveinterval = std::max(1000UL, keepalive.keepalivetime);
+            keepalive.keepalivetime = std::max(5000UL, static_cast<unsigned long>(timeout));
+            keepalive.keepaliveinterval = 1000UL;
             DWORD returned = 0;
             WSAIoctl(m_stream.next_layer().native_handle(), SIO_KEEPALIVE_VALS, &keepalive, sizeof(keepalive), NULL, 0, &returned, NULL, NULL);
 #else
+            timeout = std::max(5, timeout / 1000);
             setsockopt(m_stream.next_layer().native_handle(), IPPROTO_TCP, TCP_KEEPIDLE, &timeout, sizeof(timeout));
+            timeout = 1;
+            setsockopt(m_stream.next_layer().native_handle(), IPPROTO_TCP, TCP_KEEPINTVL, &timeout, sizeof(timeout));
 #endif
         }
     }
