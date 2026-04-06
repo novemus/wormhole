@@ -19,7 +19,7 @@
 
 namespace wormhole {
 
-std::string quality::to_string(const quality& qos) noexcept(false)
+std::string criteria::to_string(const criteria& qos) noexcept(false)
 {
     std::string str;
     switch(qos.proto)
@@ -44,28 +44,28 @@ std::string quality::to_string(const quality& qos) noexcept(false)
 
     switch(qos.role)
     {
-        case relation::server:
+        case schema::server:
             str += "server";
             break;
-        case relation::client:
+        case schema::client:
             str += "client";
             break;
-        case relation::mutual:
+        case schema::mutual:
             str += "mutual";
             break;
-        case relation::either:
+        case schema::either:
             str += "either";
             break;
         default:
-            throw std::runtime_error("unknown value of relation");
+            throw std::runtime_error("unknown value of schema");
     }
 
     return str;
 }
 
-quality quality::from_string(const std::string& str) noexcept(false)
+criteria criteria::from_string(const std::string& str) noexcept(false)
 {
-    quality qos;
+    criteria qos;
 
     size_t delim = str.find_last_of(':');
     auto proto = str.substr(0, delim);
@@ -83,15 +83,15 @@ quality quality::from_string(const std::string& str) noexcept(false)
         throw std::runtime_error("can't parse protocol");
 
     if (role == "server")
-        qos.role = relation::server;
+        qos.role = schema::server;
     else if (role == "client")
-        qos.role = relation::client;
+        qos.role = schema::client;
     else if (role == "either")
-        qos.role = relation::either;
+        qos.role = schema::either;
     else if (role == "mutual")
-        qos.role = relation::mutual;
+        qos.role = schema::mutual;
     else
-        throw std::runtime_error("can't parse relation");
+        throw std::runtime_error("can't parse schema");
 
     return qos;
 }
@@ -133,25 +133,25 @@ bool operator!=(const endpoint& lhs, const endpoint& rhs) noexcept(true)
     return !(lhs == rhs);
 }
 
-std::istream& operator>>(std::istream& is, quality& qos) noexcept(false)
+std::istream& operator>>(std::istream& is, criteria& qos) noexcept(false)
 {
     std::string str;
     is >> str;
-    qos = quality::from_string(str);
+    qos = criteria::from_string(str);
     return is;
 }
 
-std::ostream& operator<<(std::ostream& os, const quality& qos) noexcept(false)
+std::ostream& operator<<(std::ostream& os, const criteria& qos) noexcept(false)
 {
-    return os << quality::to_string(qos);
+    return os << criteria::to_string(qos);
 }
 
-bool operator==(const quality& lhs, const quality& rhs) noexcept(true)
+bool operator==(const criteria& lhs, const criteria& rhs) noexcept(true)
 {
     return lhs.proto == rhs.proto && lhs.role == rhs.role;
 }
 
-bool operator!=(const quality& lhs, const quality& rhs) noexcept(true)
+bool operator!=(const criteria& lhs, const criteria& rhs) noexcept(true)
 {
     return !(lhs == rhs);
 }
@@ -659,10 +659,10 @@ private:
     }
 };
 
-std::shared_ptr<tunnel> create_tunnel(bool exporter, boost::asio::io_context& io, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& defense) noexcept(false)
+std::shared_ptr<tunnel> create_tunnel(bool exporter, boost::asio::io_context& io, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& defense) noexcept(false)
 {
-    bool accept = qos.role == relation::server || exporter && qos.role == relation::either;
-    bool server = qos.role == relation::server || exporter && qos.role != relation::client;
+    bool accept = qos.role == schema::server || exporter && qos.role == schema::either;
+    bool server = qos.role == schema::server || exporter && qos.role != schema::client;
 
     if (qos.proto == protocol::ssl)
         return create_ssl_tunnel(io, gateway, faraway, accept, server, defense.crypto);
@@ -672,13 +672,13 @@ std::shared_ptr<tunnel> create_tunnel(bool exporter, boost::asio::io_context& io
 }
 
 std::shared_ptr<router> create_exporter(
-    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& defense) noexcept(false)
+    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& defense) noexcept(false)
 {   
     return std::make_shared<exporter>(io, service, create_tunnel(true, io, gateway, faraway,qos, defense));
 }
 
 std::shared_ptr<router> create_importer(
-    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& defense) noexcept(false)
+    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& defense) noexcept(false)
 {
     return std::make_shared<importer>(io, service, create_tunnel(false, io, gateway, faraway, qos, defense));
 }

@@ -39,26 +39,26 @@ struct endpoint
 };
 
 enum protocol { any, udp, tcp, ssl };
-enum relation { either, client, server, mutual };
+enum schema { either, client, server, mutual };
 
 LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, endpoint& ep) noexcept(false);
 LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const endpoint& ep) noexcept(false);
 LIBWORMHOLE_EXPORT bool operator==(const endpoint& lhs, const endpoint& rhs) noexcept(true);
 LIBWORMHOLE_EXPORT bool operator!=(const endpoint& lhs, const endpoint& rhs) noexcept(true);
 
-struct quality
+struct criteria
 {
     protocol proto = protocol::udp;
-    relation role = relation::either;
+    schema role = schema::either;
 
-    LIBWORMHOLE_EXPORT static std::string to_string(const quality& qos) noexcept(false);
-    LIBWORMHOLE_EXPORT static quality from_string(const std::string& str) noexcept(false);
+    LIBWORMHOLE_EXPORT static std::string to_string(const criteria& qos) noexcept(false);
+    LIBWORMHOLE_EXPORT static criteria from_string(const std::string& str) noexcept(false);
 };
 
-LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, quality& qos) noexcept(false);
-LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const quality& qos) noexcept(false);
-LIBWORMHOLE_EXPORT bool operator==(const quality& lhs, const quality& rhs) noexcept(true);
-LIBWORMHOLE_EXPORT bool operator!=(const quality& lhs, const quality& rhs) noexcept(true);
+LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& is, criteria& qos) noexcept(false);
+LIBWORMHOLE_EXPORT std::ostream& operator<<(std::ostream& os, const criteria& qos) noexcept(false);
+LIBWORMHOLE_EXPORT bool operator==(const criteria& lhs, const criteria& rhs) noexcept(true);
+LIBWORMHOLE_EXPORT bool operator!=(const criteria& lhs, const criteria& rhs) noexcept(true);
 
 struct security
 {
@@ -79,8 +79,8 @@ struct router
 };
 
 LIBWORMHOLE_EXPORT std::shared_ptr<router> create_exporter(
-        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& guard) noexcept(false);
+        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& guard) noexcept(false);
 
 LIBWORMHOLE_EXPORT std::shared_ptr<router> create_importer(
-        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const quality& qos, const security& guard) noexcept(false);
+        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& guard) noexcept(false);
 }

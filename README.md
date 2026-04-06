@@ -41,7 +41,7 @@ Main command line options:
 
 `--faraway` - endpoint of the transport tunnel on the remote public interface: **ip:port**
 
-`--quality` - tunnel protocol and connection startegy: **udp:client|udp:server|udp:mutual|tcp:client|tcp:server|tcp:mutual|ssl:client|ssl:server|ssl:mutual**
+`--quality` - tunnel protocol and connection schema: **udp:client|udp:server|udp:mutual|tcp:client|tcp:server|tcp:mutual|ssl:client|ssl:server|ssl:mutual|any:either**
 
 Environment:
 

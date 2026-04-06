@@ -31,7 +31,7 @@ unsigned short find_free_port()
 
 namespace {
 
-std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wormhole::protocol proto, wormhole::relation role, unsigned short gateway, unsigned short faraway)
+std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wormhole::protocol proto, wormhole::schema role, unsigned short gateway, unsigned short faraway)
 {
     static const uint64_t s_secret = 1234567890;
 
@@ -53,9 +53,9 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
             io,
             boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
             boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
-            role != wormhole::relation::client,
-            role != wormhole::relation::client,
-            role == wormhole::relation::server ? s_server : s_client
+            role != wormhole::schema::client,
+            role != wormhole::schema::client,
+            role == wormhole::schema::server ? s_server : s_client
         );
     }
     else if (proto == wormhole::protocol::tcp)
@@ -64,7 +64,7 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
             io,
             boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
             boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
-            role != wormhole::relation::client,
+            role != wormhole::schema::client,
             s_secret
         );
     }
@@ -73,7 +73,7 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
         io,
         boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
         boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
-        role != wormhole::relation::client,
+        role != wormhole::schema::client,
         s_secret
     );
 };
@@ -86,8 +86,8 @@ void test_tunnel(wormhole::protocol proto)
 
     auto cp = find_free_port();
     auto sp = find_free_port();
-    auto client = create_tunnel(io, proto, wormhole::relation::client, cp, sp);
-    auto server = create_tunnel(io, proto, wormhole::relation::server, sp, cp);
+    auto client = create_tunnel(io, proto, wormhole::schema::client, cp, sp);
+    auto server = create_tunnel(io, proto, wormhole::schema::server, sp, cp);
 
     std::shared_ptr<void> closer(nullptr, [client, server](void*)
     {

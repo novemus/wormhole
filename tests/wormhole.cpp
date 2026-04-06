@@ -143,7 +143,7 @@ void test_wormhole(wormhole::protocol proto)
     const char HELLO_WORMHOLE[] = "Hello, Wormhole!";
     const char WORMHOLE_HELLO[] = "Wormhole, Hello!";
 
-    wormhole::quality qos { proto, wormhole::either };
+    wormhole::criteria qos { proto, wormhole::either };
 
     wormhole::security for_import {
         1234567890,
