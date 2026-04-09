@@ -21,7 +21,7 @@ namespace wormhole {
 struct packet : public tubus::mutable_buffer
 {
     static constexpr size_t header_size = sizeof(uint32_t) + sizeof(uint32_t);
-    static constexpr size_t max_payload_size = 65536U - header_size;
+    static constexpr size_t max_payload_size = 1048576UL;
 
     packet() : packet(0, true)
     {

@@ -23,13 +23,13 @@ int main(int argc, char *argv[])
     boost::program_options::options_description base("command line options", 160, 60);
     base.add_options()
         ("help,h", "produce help message")
-        ("purpose,p", boost::program_options::value<std::string>()->required(), "wormhole purpose: export|import")
+        ("purpose,p", boost::program_options::value<std::string>()->required(), "wormhole purpose: <export|import>")
         ("service,s", boost::program_options::value<wormhole::endpoint>()->required(), "endpoint of the exported/imported tcp service: <ip:port>")
         ("gateway,g", boost::program_options::value<wormhole::endpoint>()->required(), "gateway endpoint of the tunnel: <ip:port>")
         ("faraway,f", boost::program_options::value<wormhole::endpoint>()->required(), "faraway endpoint of the tunnel: <ip:port>")
-        ("quality,q", boost::program_options::value<wormhole::criteria>()->default_value(wormhole::criteria()), "protocol and connection schema of the tunnel: udp:client|udp:server|udp:mutual|tcp:client|tcp:server|tcp:mutual|ssl:client|ssl:server|ssl:mutual|any:either")
+        ("quality,q", boost::program_options::value<wormhole::criteria>()->default_value(wormhole::criteria()), "tunnel protocol and connection schema: <udp|tcp|ssl|any>:<client|server|mutual|either>")
         ("journal,j", boost::program_options::value<std::string>()->default_value(""), "journal file: <path>")
-        ("logging,l", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "logging level: fatal|error|warning|info|debug|trace");
+        ("logging,l", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "logging level: <fatal|error|warning|info|debug|trace>");
 
     boost::program_options::options_description more("security options");
     more.add_options()
