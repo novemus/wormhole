@@ -98,16 +98,28 @@ criteria criteria::from_string(const std::string& str) noexcept(false)
 
 std::string endpoint::to_string(const endpoint& ep) noexcept(false)
 {
+    if (ep.address.is_v6())
+        return "[" + ep.address.to_string() + "]:" + std::to_string(ep.port);
     return ep.address.to_string() + ":" + std::to_string(ep.port);
 }
 
 endpoint endpoint::from_string(const std::string& str) noexcept(false)
 {
-    boost::asio::io_context io;
-    boost::asio::ip::tcp::resolver resolver(io);
     size_t delim = str.find_last_of(':');
-    boost::asio::ip::tcp::endpoint ep = *resolver.resolve(str.substr(0, delim), delim == std::string_view::npos ? "" : str.substr(delim + 1)).begin();
-    return endpoint { ep.address(), ep.port() };
+
+    if (delim == std::string_view::npos)
+        throw std::runtime_error("can't parse endpoint");
+
+    auto addr = str.substr(0, delim);
+    if (addr.size() > 0 && addr.front() == '[')
+        addr = addr.substr(1);
+    if (addr.size() > 0 && addr.back() == ']')
+        addr.pop_back();
+
+    return endpoint {
+        boost::asio::ip::make_address(addr),
+        boost::lexical_cast<uint16_t>(str.substr(delim + 1))
+    };
 }
 
 std::istream& operator>>(std::istream& is, endpoint& ep) noexcept(false)
