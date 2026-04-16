@@ -17,11 +17,11 @@
 
 namespace wormhole {
 
-template<class proto, bool accept> 
-class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tunnel<proto, accept>>
+template<class channel, bool accept> 
+class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tunnel<channel, accept>>
 {
-    typedef std::shared_ptr<tubus::channel<proto>> channel_ptr;
-    typedef boost::asio::ip::basic_endpoint<proto> endpoint_type;
+    typedef std::shared_ptr<channel> channel_ptr;
+    typedef typename channel::endpoint endpoint_type;
     typedef std::queue<std::pair<packet_ptr, callback>> defer_queue;
 
     boost::asio::io_context& m_io;
@@ -127,7 +127,7 @@ class tubus_tunnel : public tunnel, public std::enable_shared_from_this<tubus_tu
         std::unique_lock<std::mutex> lock(m_mutex);
         try
         {
-            m_channel = tubus::channel<proto>::create(m_io, m_secret);
+            m_channel = channel::create(m_io, m_secret);
             m_channel->open(m_gateway);
         }
         catch(const boost::system::system_error& ex)
@@ -230,8 +230,8 @@ std::shared_ptr<tunnel> create_udp_tunnel(
     _dbg_ << "create udp tunnel: gateway=" << gateway << " faraway=" << faraway << " accept=" << accept << " obsure=" << static_cast<bool>(secret);
 
     return accept
-        ? std::shared_ptr<tunnel>(new tubus_tunnel<boost::asio::ip::udp, true>(io, gateway, faraway, secret))
-        : std::shared_ptr<tunnel>(new tubus_tunnel<boost::asio::ip::udp, false>(io, gateway, faraway, secret));
+        ? std::shared_ptr<tunnel>(new tubus_tunnel<tubus::udp_channel, true>(io, gateway, faraway, secret))
+        : std::shared_ptr<tunnel>(new tubus_tunnel<tubus::udp_channel, false>(io, gateway, faraway, secret));
 }
 
 std::shared_ptr<tunnel> create_tcp_tunnel(
@@ -240,8 +240,8 @@ std::shared_ptr<tunnel> create_tcp_tunnel(
     _dbg_ << "create tcp tunnel: gateway=" << gateway << " faraway=" << faraway << " accept=" << accept << " obsure=" << static_cast<bool>(secret);
 
     return accept
-        ? std::shared_ptr<tunnel>(new tubus_tunnel<boost::asio::ip::tcp, true>(io, gateway, faraway, secret))
-        : std::shared_ptr<tunnel>(new tubus_tunnel<boost::asio::ip::tcp, false>(io, gateway, faraway, secret));
+        ? std::shared_ptr<tunnel>(new tubus_tunnel<tubus::tcp_channel, true>(io, gateway, faraway, secret))
+        : std::shared_ptr<tunnel>(new tubus_tunnel<tubus::tcp_channel, false>(io, gateway, faraway, secret));
 }
 
 }

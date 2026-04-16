@@ -20,6 +20,10 @@
 #include <netinet/tcp.h>
 #endif
 
+#ifdef __APPLE__
+#define TCP_KEEPIDLE TCP_KEEPALIVE
+#endif
+
 namespace wormhole {
 
 template<bool accept, bool server> 
