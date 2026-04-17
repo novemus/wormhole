@@ -21,7 +21,7 @@ unsigned short find_free_port()
 {
     boost::asio::io_context io;
     boost::asio::ip::tcp::acceptor acceptor(io);
-    boost::asio::ip::tcp::endpoint ep(boost::asio::ip::address_v4::any(), 0);
+    boost::asio::ip::tcp::endpoint ep(boost::asio::ip::address_v4::loopback(), 0);
     acceptor.open(ep.protocol());
     acceptor.bind(ep);
     acceptor.listen();
@@ -51,8 +51,8 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
     {
         return wormhole::create_ssl_tunnel(
             io,
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::address_v4::loopback(), gateway),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::address_v4::loopback(), faraway),
             role != wormhole::schema::client,
             role != wormhole::schema::client,
             role == wormhole::schema::server ? s_server : s_client
@@ -62,8 +62,8 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
     {
         return wormhole::create_tcp_tunnel(
             io,
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
-            boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::address_v4::loopback(), gateway),
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::address_v4::loopback(), faraway),
             role != wormhole::schema::client,
             s_secret
         );
@@ -71,8 +71,8 @@ std::shared_ptr<wormhole::tunnel> create_tunnel(boost::asio::io_context& io, wor
 
     return wormhole::create_udp_tunnel(
         io,
-        boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), gateway),
-        boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("127.0.0.1"), faraway),
+        boost::asio::ip::udp::endpoint(boost::asio::ip::address_v4::loopback(), gateway),
+        boost::asio::ip::udp::endpoint(boost::asio::ip::address_v4::loopback(), faraway),
         role != wormhole::schema::client,
         s_secret
     );
