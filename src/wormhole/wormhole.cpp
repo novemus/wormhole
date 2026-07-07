@@ -383,7 +383,7 @@ class router_base : public router, public std::enable_shared_from_this<router_ba
             return;
         }
 
-        packet_ptr pack(std::make_shared<packet>(id, true));
+        packet_ptr pack(std::make_shared<packet>(id));
         client->async_read(pack->payload(), [this, weak = weak_from_this(), pack](const boost::system::error_code& ec, size_t size)
         {
             auto ptr = weak.lock();
@@ -394,7 +394,7 @@ class router_base : public router, public std::enable_shared_from_this<router_ba
 
                 if (ptr)
                 {
-                    write_tunnel(std::make_shared<packet>(pack->id(), false));
+                    write_tunnel(std::make_shared<packet>(pack->id(), 0));
                     remove_client(pack->id());
                 }
             }
@@ -404,7 +404,7 @@ class router_base : public router, public std::enable_shared_from_this<router_ba
                 {
                     _err_ << "wrong data size, client=" << pack->id();
 
-                    write_tunnel(std::make_shared<packet>(pack->id(), false));
+                    write_tunnel(std::make_shared<packet>(pack->id(), 0));
                     remove_client(pack->id());
                 }
                 else if (size > 0)

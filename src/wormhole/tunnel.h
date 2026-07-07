@@ -21,17 +21,18 @@ namespace wormhole {
 struct packet : public tubus::mutable_buffer
 {
     static constexpr size_t header_size = sizeof(uint32_t) + sizeof(uint32_t);
+    static constexpr size_t payload_size = 65536UL - header_size;
     static constexpr size_t max_payload_size = 1048576UL;
 
-    packet() : packet(0, true)
+    packet() : packet(0, max_payload_size)
     {
     }
 
-    packet(uint32_t id, bool allocate) 
-        : tubus::mutable_buffer(header_size + (allocate ? max_payload_size : 0))
+    packet(uint32_t id, size_t payload = payload_size) 
+        : tubus::mutable_buffer(header_size + payload)
     {
         set<uint32_t>(0, htonl(id));
-        set<uint32_t>(sizeof(uint32_t), htonl(static_cast<uint32_t>(allocate ? max_payload_size : 0)));
+        set<uint32_t>(sizeof(uint32_t), htonl(static_cast<uint32_t>(payload)));
     }
 
     uint32_t id() const
