@@ -75,7 +75,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             return;
         }
 
-        boost::asio::async_write(m_stream, *packet, m_strand.wrap([this, weak = this->weak_from_this(), packet, callback](const boost::system::error_code& ec, size_t size)
+        boost::asio::async_write(m_stream, *packet, boost::asio::bind_executor(m_strand, [this, weak = this->weak_from_this(), packet, callback](const boost::system::error_code& ec, size_t size)
         {
             if (auto self = weak.lock())
             {
@@ -118,7 +118,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             return;
         }
 
-        boost::asio::async_read(m_stream, packet->header(), m_strand.wrap([this, weak = this->weak_from_this(), packet, callback](const boost::system::error_code& ec, size_t size)
+        boost::asio::async_read(m_stream, packet->header(), boost::asio::bind_executor(m_strand, [this, weak = this->weak_from_this(), packet, callback](const boost::system::error_code& ec, size_t size)
         {
             if (auto self = weak.lock())
             {
@@ -141,7 +141,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                         {
                             if (m_status == status::s_open)
                             {
-                                boost::asio::async_read(m_stream, packet->payload(), m_strand.wrap([this, weak, packet, callback](const boost::system::error_code& ec, size_t size)
+                                boost::asio::async_read(m_stream, packet->payload(), boost::asio::bind_executor(m_strand, [this, weak, packet, callback](const boost::system::error_code& ec, size_t size)
                                 {
                                     if (auto self = weak.lock())
                                     {
@@ -194,7 +194,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             }
 
             m_timer.expires_at(deadline);
-            m_timer.async_wait(m_strand.wrap([this, weak = this->weak_from_this()](const boost::system::error_code& error)
+            m_timer.async_wait(boost::asio::bind_executor(m_strand, [this, weak = this->weak_from_this()](const boost::system::error_code& error)
             {
                 if (!error)
                 {
@@ -207,7 +207,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             }));
         }
 
-        m_acceptor.async_accept(m_stream.next_layer(), m_strand.wrap([this, weak = this->weak_from_this(), handler](const boost::system::error_code& err)
+        m_acceptor.async_accept(m_stream.next_layer(), boost::asio::bind_executor(m_strand, [this, weak = this->weak_from_this(), handler](const boost::system::error_code& err)
         {
             if (auto self = weak.lock())
             {
@@ -230,7 +230,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                         set_keepalive_time();
 
                         auto role = server ? boost::asio::ssl::stream_base::server : boost::asio::ssl::stream_base::client;
-                        m_stream.async_handshake(role, [this, weak, handler](const boost::system::error_code& err)
+                        m_stream.async_handshake(role, boost::asio::bind_executor(m_strand, [this, weak, handler](const boost::system::error_code& err)
                         {
                             if (auto self = weak.lock())
                             {
@@ -239,7 +239,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                             }
                             else
                                 handler(err);
-                        });
+                        }));
                     }
                     else
                         boost::asio::post(m_io, std::bind(handler, err));
@@ -290,7 +290,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
             return;
         }
 
-        m_stream.next_layer().async_connect(m_faraway, m_strand.wrap([this, weak = this->weak_from_this(), handler, deadline](const boost::system::error_code& err)
+        m_stream.next_layer().async_connect(m_faraway, boost::asio::bind_executor(m_strand, [this, weak = this->weak_from_this(), handler, deadline](const boost::system::error_code& err)
         {
             if (auto self = weak.lock())
             {
@@ -301,7 +301,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                         set_keepalive_time();
  
                         auto role = server ? boost::asio::ssl::stream_base::server : boost::asio::ssl::stream_base::client;
-                        m_stream.async_handshake(role, [this, weak, handler](const boost::system::error_code& err)
+                        m_stream.async_handshake(role, boost::asio::bind_executor(m_strand, [this, weak, handler](const boost::system::error_code& err)
                         {
                             if (auto self = weak.lock())
                             {
@@ -310,7 +310,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                             }
                             else
                                 handler(err);
-                        });
+                        }));
                     }
                     else
                         boost::asio::post(m_io, std::bind(handler, err));
@@ -322,7 +322,7 @@ class ssl_tunnel : public tunnel, public std::enable_shared_from_this<ssl_tunnel
                 else
                 {
                     m_timer.expires_from_now(boost::posix_time::seconds(1));
-                    m_timer.async_wait(m_strand.wrap([this, weak, handler, deadline](const boost::system::error_code& err)
+                    m_timer.async_wait(boost::asio::bind_executor(m_strand, [this, weak, handler, deadline](const boost::system::error_code& err)
                     {
                         if (auto self = weak.lock())
                         {
@@ -458,7 +458,7 @@ public:
                     m_stream.next_layer().cancel(ec);
 
                     m_timer.expires_from_now(boost::posix_time::seconds(1));
-                    m_timer.async_wait(m_strand.wrap([this, weak](const boost::system::error_code& err)
+                    m_timer.async_wait(boost::asio::bind_executor(m_strand, [this, weak](const boost::system::error_code& err)
                     {
                         if (auto self = weak.lock())
                         {
@@ -467,7 +467,7 @@ public:
                         }
                     }));
 
-                    m_stream.async_shutdown(m_strand.wrap([this, weak, handler](const boost::system::error_code& err)
+                    m_stream.async_shutdown(boost::asio::bind_executor(m_strand, [this, weak, handler](const boost::system::error_code& err)
                     {
                         if (auto self = weak.lock())
                         {
