@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.3.1 (Jul 11, 2026)
+
+- Minor code advancement
+
 ## 1.3.0 (Mar 8, 2026)
 
 - Link with libtubus 1.3.0
