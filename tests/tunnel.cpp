@@ -104,24 +104,24 @@ void test_tunnel(wormhole::protocol proto)
 
     auto send = [](std::shared_ptr<wormhole::tunnel> tunnel, std::shared_ptr<void> closer)
     {
-        auto packet1 = std::make_shared<wormhole::packet>(1, true);
+        auto packet1 = std::make_shared<wormhole::packet>(1);
         BOOST_REQUIRE_EQUAL(packet1->id(), 1);
-        BOOST_REQUIRE_EQUAL(packet1->size(), wormhole::packet::header_size + wormhole::packet::max_payload_size);
-        BOOST_REQUIRE_EQUAL(packet1->capacity(), wormhole::packet::max_payload_size);
+        BOOST_REQUIRE_EQUAL(packet1->size(), wormhole::packet::header_size + wormhole::packet::payload_size);
+        BOOST_REQUIRE_EQUAL(packet1->capacity(), wormhole::packet::payload_size);
         BOOST_REQUIRE_EQUAL(packet1->header().size(), wormhole::packet::header_size);
-        BOOST_REQUIRE_EQUAL(packet1->payload().size(), wormhole::packet::max_payload_size);
+        BOOST_REQUIRE_EQUAL(packet1->payload().size(), wormhole::packet::payload_size);
 
         tunnel->send(packet1, [packet1, closer](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
             BOOST_CHECK_EQUAL(packet1->id(), 1);
-            BOOST_CHECK_EQUAL(packet1->size(), wormhole::packet::header_size + wormhole::packet::max_payload_size);
-            BOOST_CHECK_EQUAL(packet1->capacity(), wormhole::packet::max_payload_size);
+            BOOST_CHECK_EQUAL(packet1->size(), wormhole::packet::header_size + wormhole::packet::payload_size);
+            BOOST_CHECK_EQUAL(packet1->capacity(), wormhole::packet::payload_size);
             BOOST_CHECK_EQUAL(packet1->header().size(), wormhole::packet::header_size);
-            BOOST_CHECK_EQUAL(packet1->payload().size(), wormhole::packet::max_payload_size);
+            BOOST_CHECK_EQUAL(packet1->payload().size(), wormhole::packet::payload_size);
         });
 
-        auto packet2 = std::make_shared<wormhole::packet>(2, false);
+        auto packet2 = std::make_shared<wormhole::packet>(2, 0);
         BOOST_REQUIRE_EQUAL(packet2->id(), 2);
         BOOST_REQUIRE_EQUAL(packet2->size(), wormhole::packet::header_size);
         BOOST_REQUIRE_EQUAL(packet2->capacity(), 0);
@@ -138,7 +138,7 @@ void test_tunnel(wormhole::protocol proto)
             BOOST_CHECK_EQUAL(packet2->payload().size(), 0);
         });
 
-        auto packet3 = std::make_shared<wormhole::packet>(3, true);
+        auto packet3 = std::make_shared<wormhole::packet>(3);
         packet3->shrink(std::strlen(HELLO_WORMHOLE));
         packet3->payload().fill(0, std::strlen(HELLO_WORMHOLE), HELLO_WORMHOLE);
 
@@ -163,17 +163,19 @@ void test_tunnel(wormhole::protocol proto)
     auto receive = [](std::shared_ptr<wormhole::tunnel> tunnel, std::shared_ptr<void> closer)
     {
         auto packet1 = std::make_shared<wormhole::packet>();
+        BOOST_CHECK_EQUAL(packet1->size(), wormhole::packet::header_size + wormhole::packet::max_payload_size);
         tunnel->receive(packet1, [packet1, closer](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
             BOOST_CHECK_EQUAL(packet1->id(), 1);
-            BOOST_CHECK_EQUAL(packet1->size(), wormhole::packet::header_size + wormhole::packet::max_payload_size);
-            BOOST_CHECK_EQUAL(packet1->capacity(), wormhole::packet::max_payload_size);
+            BOOST_CHECK_EQUAL(packet1->size(), wormhole::packet::header_size + wormhole::packet::payload_size);
+            BOOST_CHECK_EQUAL(packet1->capacity(), wormhole::packet::payload_size);
             BOOST_CHECK_EQUAL(packet1->header().size(), wormhole::packet::header_size);
-            BOOST_CHECK_EQUAL(packet1->payload().size(), wormhole::packet::max_payload_size);
+            BOOST_CHECK_EQUAL(packet1->payload().size(), wormhole::packet::payload_size);
         });
 
         auto packet2 = std::make_shared<wormhole::packet>();
+        BOOST_CHECK_EQUAL(packet2->size(), wormhole::packet::header_size + wormhole::packet::max_payload_size);
         tunnel->receive(packet2, [packet2, closer](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
@@ -185,6 +187,7 @@ void test_tunnel(wormhole::protocol proto)
         });
 
         auto packet3 = std::make_shared<wormhole::packet>();
+        BOOST_CHECK_EQUAL(packet3->size(), wormhole::packet::header_size + wormhole::packet::max_payload_size);
         tunnel->receive(packet3, [packet3, closer](const boost::system::error_code& ec)
         {
             BOOST_REQUIRE_EQUAL(ec, boost::system::error_code());
