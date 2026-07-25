@@ -28,6 +28,7 @@ int main(int argc, char *argv[])
         ("gateway,g", boost::program_options::value<wormhole::endpoint>()->required(), "gateway endpoint of the tunnel: <ip:port>")
         ("faraway,f", boost::program_options::value<wormhole::endpoint>()->required(), "faraway endpoint of the tunnel: <ip:port>")
         ("quality,q", boost::program_options::value<wormhole::criteria>()->default_value(wormhole::criteria()), "tunnel protocol and connection schema: <udp|tcp|ssl|any>:<client|server|mutual|either>")
+        ("autorun,a", boost::program_options::value<std::string>()->default_value(""), "command to pre-launch on export or post-launch on import")
         ("journal,j", boost::program_options::value<std::string>()->default_value(""), "journal file: <path>")
         ("logging,l", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "logging level: <fatal|error|warning|info|debug|trace>");
 
@@ -74,6 +75,7 @@ int main(int argc, char *argv[])
         auto gateway = vm["gateway"].as<wormhole::endpoint>();
         auto faraway = vm["faraway"].as<wormhole::endpoint>();
         auto quality = vm["quality"].as<wormhole::criteria>();
+        auto autorun = vm["autorun"].as<std::string>();
 
         wormhole::security guard = { 
             vm["secret"].as<uint64_t>(),
@@ -89,8 +91,8 @@ int main(int argc, char *argv[])
         boost::asio::io_context io;
 
         auto router = purpose == "import"
-            ? wormhole::create_importer(io, service, gateway, faraway, quality, guard)
-            : wormhole::create_exporter(io, service, gateway, faraway, quality, guard);
+            ? wormhole::create_importer(io, service, gateway, faraway, quality, guard, autorun)
+            : wormhole::create_exporter(io, service, gateway, faraway, quality, guard, autorun);
         router->launch();
 
         io.run();

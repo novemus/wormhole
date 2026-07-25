@@ -4,7 +4,7 @@ message("***** wormhole ***** ")
 
 cmake_minimum_required(VERSION 3.21)
 
-project(wormhole VERSION 1.3.1 DESCRIPTION "The tool for tunneling TCP streams via UDP" LANGUAGES CXX)
+project(wormhole VERSION 1.3.2 DESCRIPTION "The tool for tunneling TCP streams via UDP" LANGUAGES CXX)
 
 option(WORMHOLE_USE_SHARED_LIB "Build shared library" ${BUILD_SHARED_LIBS})
 option(WORMHOLE_SKIP_TEST_RULES "Don't generate test rules" ON)
@@ -25,6 +25,14 @@ if(NOT WORMHOLE_SKIP_TEST_RULES)
     find_package(Boost 1.74 CONFIG REQUIRED COMPONENTS system program_options unit_test_framework)
 else()
     find_package(Boost 1.74 CONFIG REQUIRED COMPONENTS system program_options)
+endif()
+
+if (MSVC)
+    find_package(Boost 1.74 CONFIG REQUIRED COMPONENTS filesystem process)
+endif()
+
+if (NOT MSVC AND Boost_VERSION VERSION_GREATER_EQUAL 1.86)
+    find_package(Boost 1.86 CONFIG REQUIRED COMPONENTS process)
 endif()
 
 message("* Boost Version: ${Boost_VERSION}")
@@ -102,8 +110,8 @@ endif()
 target_sources(${LIBWORMHOLE} PRIVATE ${SOURCES})
 target_sources(${BINWORMHOLE} PRIVATE src/wormhole/main.cpp)
 
-target_link_libraries(${LIBWORMHOLE} PRIVATE tubus::libtubus OpenSSL::Crypto OpenSSL::SSL)
-target_link_libraries(${BINWORMHOLE} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus Boost::program_options OpenSSL::Crypto OpenSSL::SSL)
+target_link_libraries(${LIBWORMHOLE} PRIVATE tubus::libtubus "$<$<BOOL:${MSVC}>:Boost::filesystem>" OpenSSL::Crypto OpenSSL::SSL)
+target_link_libraries(${BINWORMHOLE} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus "$<$<BOOL:${MSVC}>:Boost::filesystem>" Boost::program_options OpenSSL::Crypto OpenSSL::SSL)
 
 target_compile_features(${LIBWORMHOLE} PRIVATE cxx_std_17)
 target_compile_features(${BINWORMHOLE} PRIVATE cxx_std_17)
@@ -189,7 +197,7 @@ if(NOT WORMHOLE_SKIP_TEST_RULES)
     set(WORMHOLE_TEST wormhole_ut)
 
     add_executable(${WORMHOLE_TEST} tests/logger.cpp tests/tunnel.cpp tests/wormhole.cpp)
-    target_link_libraries(${WORMHOLE_TEST} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus Boost::unit_test_framework OpenSSL::Crypto OpenSSL::SSL)
+    target_link_libraries(${WORMHOLE_TEST} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus "$<$<BOOL:${MSVC}>:Boost::filesystem>" Boost::unit_test_framework OpenSSL::Crypto OpenSSL::SSL)
 
     target_include_directories(${WORMHOLE_TEST} PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>" "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export_header>")
     target_compile_features(${WORMHOLE_TEST} PRIVATE cxx_std_17)

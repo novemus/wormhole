@@ -79,8 +79,8 @@ struct router
 };
 
 LIBWORMHOLE_EXPORT std::shared_ptr<router> create_exporter(
-        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& guard) noexcept(false);
+        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& guard, const std::string& autorun) noexcept(false);
 
 LIBWORMHOLE_EXPORT std::shared_ptr<router> create_importer(
-        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& guard) noexcept(false);
+        boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& guard, const std::string& autorun) noexcept(false);
 }
