@@ -28,16 +28,16 @@ int main(int argc, char *argv[])
         ("gateway,g", boost::program_options::value<wormhole::endpoint>()->required(), "gateway endpoint of the tunnel: <ip:port>")
         ("faraway,f", boost::program_options::value<wormhole::endpoint>()->required(), "faraway endpoint of the tunnel: <ip:port>")
         ("quality,q", boost::program_options::value<wormhole::criteria>()->default_value(wormhole::criteria()), "tunnel protocol and connection schema: <udp|tcp|ssl|any>:<client|server|mutual|either>")
-        ("autorun,a", boost::program_options::value<std::string>()->default_value(""), "command to pre-launch on export or post-launch on import")
-        ("journal,j", boost::program_options::value<std::string>()->default_value(""), "journal file: <path>")
+        ("autorun,a", boost::program_options::value<std::string>()->implicit_value("")->default_value(""), "command to pre-launch on export or post-launch on import")
+        ("journal,j", boost::program_options::value<std::string>()->implicit_value("")->default_value(""), "journal file: <path>")
         ("logging,l", boost::program_options::value<wormhole::log::severity>()->default_value(wormhole::log::info), "logging level: <fatal|error|warning|info|debug|trace>");
 
     boost::program_options::options_description more("security options");
     more.add_options()
         ("secret", boost::program_options::value<uint64_t>()->default_value(0))
-        ("cert", boost::program_options::value<std::string>()->default_value(""))
-        ("key", boost::program_options::value<std::string>()->default_value(""))
-        ("ca", boost::program_options::value<std::string>()->default_value(""));
+        ("cert", boost::program_options::value<std::string>()->implicit_value("")->default_value(""))
+        ("key", boost::program_options::value<std::string>()->implicit_value("")->default_value(""))
+        ("ca", boost::program_options::value<std::string>()->implicit_value("")->default_value(""));
 
     boost::program_options::variables_map vm;
     try
