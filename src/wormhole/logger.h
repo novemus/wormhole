@@ -32,20 +32,22 @@ LIBWORMHOLE_EXPORT std::istream& operator>>(std::istream& in, severity& level);
 
 struct line : public std::stringstream
 {
-    line(severity level, const char* func, const char* file, int line)
+    line(severity level, const char* func, const char* file, int line) : m_level(level)
     {
         line::start(*this, level, func, file, line);
     }
 
     ~line() override
     { 
-        line::flush(*this);
+        line::flush(*this, m_level);
     }
 
 private:
 
+    severity m_level;
+
     LIBWORMHOLE_EXPORT static void start(std::stringstream& out, severity level, const char* func, const char* file, int line);
-    LIBWORMHOLE_EXPORT static void flush(std::stringstream& out);
+    LIBWORMHOLE_EXPORT static void flush(std::stringstream& out, severity level);
 };
 
 LIBWORMHOLE_EXPORT void set(severity scope, const std::string& file = "") noexcept(false);

@@ -4,7 +4,7 @@ message("***** wormhole ***** ")
 
 cmake_minimum_required(VERSION 3.21)
 
-project(wormhole VERSION 1.3.2 DESCRIPTION "The tool for tunneling TCP streams via UDP" LANGUAGES CXX)
+project(wormhole VERSION 1.3.3 DESCRIPTION "The tool for tunneling TCP streams via UDP" LANGUAGES CXX)
 
 option(WORMHOLE_USE_SHARED_LIB "Build shared library" ${BUILD_SHARED_LIBS})
 option(WORMHOLE_SKIP_TEST_RULES "Don't generate test rules" ON)
@@ -111,6 +111,9 @@ endif()
 
 target_sources(${LIBWORMHOLE} PRIVATE ${SOURCES})
 target_link_libraries(${LIBWORMHOLE} PRIVATE tubus::libtubus "$<$<BOOL:${MSVC}>:Boost::filesystem>" OpenSSL::Crypto OpenSSL::SSL)
+if (ANDROID)
+    target_link_libraries(${LIBWORMHOLE} PRIVATE log)
+endif()
 
 if (NOT ANDROID)
     target_sources(${BINWORMHOLE} PRIVATE src/wormhole/main.cpp)
@@ -206,6 +209,9 @@ if(NOT WORMHOLE_SKIP_TEST_RULES)
 
     add_executable(${WORMHOLE_TEST} tests/logger.cpp tests/tunnel.cpp tests/wormhole.cpp)
     target_link_libraries(${WORMHOLE_TEST} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus "$<$<BOOL:${MSVC}>:Boost::filesystem>" Boost::unit_test_framework OpenSSL::Crypto OpenSSL::SSL)
+    if (ANDROID)
+        target_link_libraries(${WORMHOLE_TEST} PRIVATE log)
+    endif()
 
     target_include_directories(${WORMHOLE_TEST} PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>" "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export_header>")
     target_compile_features(${WORMHOLE_TEST} PRIVATE cxx_std_17)

@@ -17,6 +17,8 @@
 #include <string>
 #include <regex>
 
+#ifndef __ANDROID__
+
 BOOST_AUTO_TEST_CASE(stdlog)
 {
     std::stringstream out;
@@ -47,6 +49,8 @@ BOOST_AUTO_TEST_CASE(stdlog)
     std::smatch match;
     BOOST_CHECK(std::regex_match(text, match, pattern));
 }
+
+#endif
 
 BOOST_AUTO_TEST_CASE(filelog)
 {

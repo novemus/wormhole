@@ -18,7 +18,13 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <wormhole/logger.h>
 
-#if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
+#if defined(__ANDROID__)
+#include <unistd.h>
+#include <stdlib.h>
+#include <android/log.h>
+#define gettid() gettid()
+#define getpid() getpid()
+#elif __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
 #define getpid() syscall(SYS_getpid)
@@ -42,6 +48,22 @@ namespace wormhole { namespace log {
 
 namespace
 {
+#ifdef __ANDROID__
+    android_LogPriority to_android_priority(severity level)
+    {
+        switch(level)
+        {
+            case severity::fatal:   return ANDROID_LOG_FATAL;
+            case severity::error:   return ANDROID_LOG_ERROR;
+            case severity::warning: return ANDROID_LOG_WARN;
+            case severity::info:    return ANDROID_LOG_INFO;
+            case severity::debug:   return ANDROID_LOG_DEBUG;
+            case severity::trace:   return ANDROID_LOG_VERBOSE;
+            default:                return ANDROID_LOG_UNKNOWN;
+        }
+    }
+#endif
+
     class sink
     {
         using executor_work_guard = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
@@ -90,14 +112,18 @@ namespace
                 std::cout.flush();
         }
 
-        void append(const std::string& line)
+        void append(severity level, const std::string& line)
         {
-            boost::asio::post(m_io, [this, line]()
+            boost::asio::post(m_io, [this, level, line]()
             {
                 if (m_file.is_open())
                     m_file << line << std::endl;
                 else
+#ifdef __ANDROID__
+                    __android_log_print(to_android_priority(level), getprogname(), "%s", line.c_str());
+#else
                     std::cout << line << std::endl;
+#endif
             });
         }
     };
@@ -124,19 +150,19 @@ namespace
             {
                 std::stringstream line;
                 line << "LOGGER: " <<  boost::posix_time::to_iso_string(boost::posix_time::microsec_clock::local_time()) << " " << scope << " " << getpid();
-                m_sink->append(line.str());
+                m_sink->append(severity::info, line.str());
             }
 
             m_scope = scope;
             m_path = path;
         }
 
-        void put(const std::string& line)
+        void put(severity level, const std::string& line)
         {
             std::lock_guard<std::mutex> lock(m_mutex);
 
             if (m_sink)
-                m_sink->append(line);
+                m_sink->append(level, line);
         }
 
         severity scope() noexcept(true) 
@@ -211,11 +237,11 @@ void line::start(std::stringstream& out, severity level, const char* func, const
     }
 }
 
-void line::flush(std::stringstream& out)
+void line::flush(std::stringstream& out, severity level)
 {
     if (out.std::ostream::rdbuf())
     {
-        g_log.put(out.str());
+        g_log.put(level, out.str());
     }
 }
 

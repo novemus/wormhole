@@ -483,10 +483,6 @@ public:
     {
     }
 
-    ~router_base()
-    {
-    }
-
     void cancel() noexcept(true) override
     {
         std::unique_lock<std::mutex> lock(m_mutex);
