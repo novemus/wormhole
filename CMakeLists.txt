@@ -31,7 +31,7 @@ if (MSVC)
     find_package(Boost 1.74 CONFIG REQUIRED COMPONENTS filesystem process)
 endif()
 
-if (NOT MSVC AND Boost_VERSION VERSION_GREATER_EQUAL 1.86)
+if (NOT MSVC AND Boost_VERSION VERSION_GREATER_EQUAL 1.86 AND NOT ANDROID)
     find_package(Boost 1.86 CONFIG REQUIRED COMPONENTS process)
 endif()
 
@@ -59,8 +59,10 @@ include(GenerateExportHeader)
 set(BINWORMHOLE ${PROJECT_NAME})
 set(LIBWORMHOLE lib${PROJECT_NAME})
 
-add_executable(${BINWORMHOLE})
-add_executable(${PROJECT_NAME}::${BINWORMHOLE} ALIAS ${BINWORMHOLE})
+if (NOT ANDROID)
+    add_executable(${BINWORMHOLE})
+    add_executable(${PROJECT_NAME}::${BINWORMHOLE} ALIAS ${BINWORMHOLE})
+endif()
 
 add_library(${LIBWORMHOLE})
 add_library(${PROJECT_NAME}::${LIBWORMHOLE} ALIAS ${LIBWORMHOLE})
@@ -108,26 +110,30 @@ if(NOT DEFINED CMAKE_VISIBILITY_INLINES_HIDDEN)
 endif()
 
 target_sources(${LIBWORMHOLE} PRIVATE ${SOURCES})
-target_sources(${BINWORMHOLE} PRIVATE src/wormhole/main.cpp)
-
 target_link_libraries(${LIBWORMHOLE} PRIVATE tubus::libtubus "$<$<BOOL:${MSVC}>:Boost::filesystem>" OpenSSL::Crypto OpenSSL::SSL)
-target_link_libraries(${BINWORMHOLE} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus "$<$<BOOL:${MSVC}>:Boost::filesystem>" Boost::program_options OpenSSL::Crypto OpenSSL::SSL)
+
+if (NOT ANDROID)
+    target_sources(${BINWORMHOLE} PRIVATE src/wormhole/main.cpp)
+
+    target_link_libraries(${BINWORMHOLE} PRIVATE $<TARGET_OBJECTS:${LIBWORMHOLE}> tubus::libtubus "$<$<BOOL:${MSVC}>:Boost::filesystem>" Boost::program_options OpenSSL::Crypto OpenSSL::SSL)
+
+    target_compile_features(${BINWORMHOLE} PRIVATE cxx_std_17)
+
+    target_include_directories(${BINWORMHOLE} PRIVATE
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export_header>"
+            "${Boost_INCLUDE_DIRS}")
+
+    set_target_properties(${BINWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" COMPILE_FLAGS -DLIBWORMHOLE_STATIC_DEFINE)
+    set_target_properties(${BINWORMHOLE} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+endif()
 
 target_compile_features(${LIBWORMHOLE} PRIVATE cxx_std_17)
-target_compile_features(${BINWORMHOLE} PRIVATE cxx_std_17)
-
-target_include_directories(${BINWORMHOLE} PRIVATE
-        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
-        "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export_header>"
-        "${Boost_INCLUDE_DIRS}")
-
 target_include_directories(${LIBWORMHOLE} PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export_header>"
         PRIVATE "${Boost_INCLUDE_DIRS}")
 
-set_target_properties(${BINWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" COMPILE_FLAGS -DLIBWORMHOLE_STATIC_DEFINE)
-set_target_properties(${BINWORMHOLE} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 set_target_properties(${LIBWORMHOLE} PROPERTIES DEBUG_POSTFIX "d" OUTPUT_NAME ${PROJECT_NAME} IMPORT_PREFIX "lib")
 set_target_properties(${LIBWORMHOLE} PROPERTIES SOVERSION ${PROJECT_VERSION_MAJOR} VERSION ${PROJECT_VERSION})
 set_target_properties(${LIBWORMHOLE} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
@@ -145,7 +151,9 @@ if(NOT WORMHOLE_SKIP_INSTALL_RULES AND NOT CMAKE_SKIP_INSTALL_RULES)
 
     write_basic_package_version_file(wormhole-config-version.cmake COMPATIBILITY SameMajorVersion)
 
-    install(TARGETS ${BINWORMHOLE} RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT binary_files)
+    if (NOT ANDROID)
+        install(TARGETS ${BINWORMHOLE} RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT binary_files)
+    endif()
 
     install(TARGETS ${LIBWORMHOLE} EXPORT wormhole_export
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime_files

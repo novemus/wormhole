@@ -6,7 +6,10 @@
     "boost-program-options",
     "boost-bind",
     "boost-date-time",
-    "boost-process",
+    {
+      "name": "boost-process",
+      "platform": "!android"
+    },
     "openssl"
   ]
 }

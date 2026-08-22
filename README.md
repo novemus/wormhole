@@ -43,7 +43,7 @@ Main command line options:
 
 `--quality` - tunnel protocol and connection schema: **udp:client|udp:server|udp:mutual|tcp:client|tcp:server|tcp:mutual|ssl:client|ssl:server|ssl:mutual|any:either**
 
-`--autorun` - command to pre-launch on export or post-launch on import
+`--autorun` - command to launch when tunnel is connected
 
 Environment:
 

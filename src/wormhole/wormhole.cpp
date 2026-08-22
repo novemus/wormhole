@@ -17,34 +17,6 @@
 #include <boost/asio.hpp>
 #include <boost/lexical_cast.hpp>
 
-#include <boost/version.hpp>
-
-#if BOOST_VERSION >= 108800
-    #include <boost/process/v1/child.hpp>
-    #ifdef WIN32
-        #include <boost/process/v1/windows.hpp>
-    #endif
-    #if defined WIN32 || __APPLE__
-        #include <boost/process/v1/env.hpp>
-        #include <boost/process/v1/args.hpp>
-        #include <boost/process/v1/async.hpp>
-    #else
-        #include <spawn.h>
-        #include <boost/process/v1/extend.hpp>
-    #endif
-    namespace bp = boost::process::v1;
-#else
-    #include <boost/process.hpp>
-    #ifdef WIN32
-        #include <boost/process/windows.hpp>
-        #include <boost/process/windows/creation_flags.hpp>
-    #else
-        #include <spawn.h>
-        #include <boost/process/extend.hpp>
-    #endif
-    namespace bp = boost::process;
-#endif
-
 namespace wormhole {
 
 std::string criteria::to_string(const criteria& qos) noexcept(false)
@@ -347,10 +319,9 @@ class router_base : public router, public std::enable_shared_from_this<router_ba
 
     boost::asio::io_context& m_io;
     std::shared_ptr<tunnel> m_tunnel;
+    std::function<void()> m_autorun;
     std::map<uint32_t, client_ptr> m_bunch;
     uint32_t m_top;
-    std::string m_command;
-    bp::child m_child;
     std::mutex m_mutex;
 
     void listen_tunnel() noexcept(true)
@@ -502,50 +473,18 @@ class router_base : public router, public std::enable_shared_from_this<router_ba
 
     virtual void about_client(uint32_t id) noexcept(true) = 0;
 
-    void launch_command()
-    {
-        std::unique_lock<std::mutex> lock(m_mutex);
-
-        if (m_command.empty())
-            return;
-
-        try
-        {
-            auto pid = std::make_shared<bp::pid_t>(0);
-            m_child = std::move(bp::child(m_io, m_command,
-                bp::on_exit = [this, weak = weak_from_this(), pid](int code, const std::error_code& ec)
-                {
-                    if (ec && ec != std::errc::no_child_process)
-                        _err_ << ec.message();
-
-                    _inf_ << "joined child process " << *pid << " with exit code " << code;
-                }
-            ));
-
-            *pid = m_child.id();
-
-            _inf_ << "launch child (" << m_command << ") process " << *pid;
-        }
-        catch (const std::exception& ex)
-        {
-            _err_ << "can't launch child (" << m_command << ") process: " << ex.what();
-        }
-    }
-
 public:
 
-    router_base(boost::asio::io_context& io, std::shared_ptr<tunnel> tunnel, const std::string& command)
+    router_base(boost::asio::io_context& io, std::shared_ptr<tunnel> tunnel, const std::function<void()>& autorun)
         : m_io(io)
         , m_tunnel(tunnel)
+        , m_autorun(autorun)
         , m_top(std::numeric_limits<uint32_t>::max())
-        , m_command(command)
     {
     }
 
     ~router_base()
     {
-        if (m_child.running())
-            m_child.terminate();
     }
 
     void cancel() noexcept(true) override
@@ -561,9 +500,6 @@ public:
         boost::system::error_code ec;
         for (auto& item : m_bunch)
             item.second->socket().close(ec);
-
-        if (m_child.running())
-            m_child.terminate();
     }
 };
 
@@ -573,8 +509,8 @@ class importer : public router_base
 
 public:
 
-    importer(boost::asio::io_context& io, const boost::asio::ip::tcp::endpoint& service, std::shared_ptr<tunnel> tunnel, const std::string& command)
-        : router_base(io, tunnel, command)
+    importer(boost::asio::io_context& io, const boost::asio::ip::tcp::endpoint& service, std::shared_ptr<tunnel> tunnel, const std::function<void()>& autorun)
+        : router_base(io, tunnel, autorun)
         , m_server(io, service, true)
     {
     }
@@ -600,7 +536,9 @@ public:
 
                 accept_client();
                 listen_tunnel();
-                launch_command();
+
+                if (m_autorun)
+                    m_autorun();
             }
         });
     }
@@ -669,16 +607,14 @@ class exporter : public router_base
 
 public:
 
-    exporter(boost::asio::io_context& io, const boost::asio::ip::tcp::endpoint& service, std::shared_ptr<tunnel> tunnel, const std::string& command)
-        : router_base(io, tunnel, command)
+    exporter(boost::asio::io_context& io, const boost::asio::ip::tcp::endpoint& service, std::shared_ptr<tunnel> tunnel, const std::function<void()>& autorun)
+        : router_base(io, tunnel, autorun)
         , m_service(service)
     {
     }
 
     void launch() noexcept(true) override
     {
-        launch_command();
-
         std::unique_lock<std::mutex> lock(m_mutex);
         m_tunnel->open([this, weak = weak_from_this()](const boost::system::error_code& ec)
         {
@@ -693,6 +629,9 @@ public:
             else if (ptr)
             {
                 _inf_ << "tunnel is connected";
+
+                if (m_autorun)
+                    m_autorun();
 
                 listen_tunnel();
             }
@@ -757,13 +696,13 @@ std::shared_ptr<tunnel> create_tunnel(bool exporter, boost::asio::io_context& io
 }
 
 std::shared_ptr<router> create_exporter(
-    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& defense, const std::string& autorun) noexcept(false)
+    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& defense, const std::function<void()>& autorun) noexcept(false)
 {   
     return std::make_shared<exporter>(io, service, create_tunnel(true, io, gateway, faraway,qos, defense), autorun);
 }
 
 std::shared_ptr<router> create_importer(
-    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& defense, const std::string& autorun) noexcept(false)
+    boost::asio::io_context& io, const endpoint& service, const endpoint& gateway, const endpoint& faraway, const criteria& qos, const security& defense, const std::function<void()>& autorun) noexcept(false)
 {
     return std::make_shared<importer>(io, service, create_tunnel(false, io, gateway, faraway, qos, defense), autorun);
 }
