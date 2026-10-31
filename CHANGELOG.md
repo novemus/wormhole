@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.3.3 (Oct 31, 2026)
+
+- Logcat logging on the android platform
+
 ## 1.3.2 (Jul 25, 2026)
 
 - Run a custom command before starting the export or after starting the import
